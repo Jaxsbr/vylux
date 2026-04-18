@@ -114,3 +114,10 @@ entries:
     result: "queued"
     notes: "Split US-03 across two tasks: (a) pure state machine + Vitest (this one), (b) src/input.ts attachInputHandlers + cursor toggle + debug state mirror + Playwright. State ownership contract: placement.ts owns state and exposes pure transitions; input.ts will be the thin dispatcher next task."
     tokens: "~3k"
+  - task: 8
+    time: "2026-04-18T09:12:55Z"
+    story: "[US-03]"
+    description: "Branch A: implemented src/placement.ts (PlacementState, INITIAL_STATE, handleKey — pure; 1/2 enter+switch placement, Escape exits to idle, no-op for unhandled keys and same-faction repeats, preserves hoveredTile and placedUnits). Added src/placement.test.ts with 10 Vitest cases covering the 6 named transitions, Escape-from-idle no-op, 5 unhandled keys, reference identity on no-ops, and immutability."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 26/26 (+10), playwright 8/8 (unchanged). Regression: net additive. Closes US-03 L36-L41. US-03 remaining: L42 (Playwright cursor none/default), L43 (debug state mirror reflects transitions), L86 manual Controls section, L92 event-handler error-path coverage, L94 attachInputHandlers+detach. All of those ship in the next task (input.ts wiring)."
+    tokens: "~8k"
