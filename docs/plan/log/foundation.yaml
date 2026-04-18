@@ -51,3 +51,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean, vitest 3/3, playwright 6/6 (dev project: foundation x3 + smoke-dev x2; preview project: preview x1). Regression check: net additive (3 -> 6 playwright, no tests removed or regressed). Closes dev HTTP smoke + production build guard US-01 criteria. US-01 is NOT yet story-complete: L87 README quick-start + link to docs/manual/foundation.md and L86 manual doc stub remain unmet — those are the next task."
     tokens: "~8k"
+  - task: 4
+    time: "2026-04-18T08:25:00Z"
+    story: "[US-01]"
+    description: "Branch B: queued docs task to close remaining US-01 criteria (README quick-start + link; docs/manual/foundation.md stub with US-01 Quick start complete and US-02..US-05 placeholder sections)."
+    result: "queued"
+    notes: "Phase type: CSS/JS-only. Investigate-first not mandatory. Pure docs task — zero code-path impact, regression risk nil. Story Completion Gate will fire after pass (US-01 fully complete)."
+    tokens: "~3k"

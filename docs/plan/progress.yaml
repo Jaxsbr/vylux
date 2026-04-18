@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 4
-  next_task: null
+  next_task: "[US-01] Finish US-01 docs. Add a Quick start section to README.md (npm install; npm run dev; npm run build + npm run preview; verify = npx tsc --noEmit && npm run test && npm run test:e2e) and link to docs/manual/foundation.md. Create docs/manual/foundation.md as the user manual for the foundation phase: full Quick start (US-01 is shipping), plus placeholder sections Grid layout (US-02), Controls 1/2/Esc (US-03), Hover preview (US-04), Click to place + occupancy (US-05), each marked TODO so later tasks fill them in. Closes US-01 criterion L87 (README quick-start + link) and partially advances the cross-story L86 manual criterion (the US-01 parts are complete, US-02..US-05 slots exist for later)."
   last_result: pass
   consecutive_fails: 0
 
