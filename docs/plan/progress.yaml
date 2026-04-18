@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 1
-  next_task: null
+  next_task: "[US-01] Scaffold Vite + TypeScript project: initialize package.json (name vylux, private, type=module) with deps three, @types/three, vite, typescript, vitest, @playwright/test; add scripts dev/build/preview/test/test:e2e; write tsconfig.json (strict, noUnusedParameters, noUnusedLocals, moduleResolution=bundler, target=ES2022, lib=DOM+ES2022, jsx=none); write vite.config.ts (default); write index.html at project root linking /src/main.ts; write src/main.ts stub that logs 'vylux' to console; set config.verify in progress.yaml to 'npx tsc --noEmit && npm run test && npm run test:e2e'; add Three.js/node_modules entries to .gitignore if missing."
   last_result: null
   consecutive_fails: 0
 

@@ -1,4 +1,11 @@
 phase: "foundation"
 started: "2026-04-18T07:51:47Z"
-entries: []
 # Each entry: {task, time, story, description, result, notes, tokens}
+entries:
+  - task: 1
+    time: "2026-04-18T07:52:00Z"
+    story: "[US-01]"
+    description: "Investigation: greenfield project; no package.json, src/, manual, or production code. All done-when criteria unmet. Queue scaffolding task for US-01."
+    result: "queued"
+    notes: "Phase classified CSS/JS-only (TS/three-js frontend, no server). First task is Vite+TS scaffold with Vitest+Playwright deps and wiring the verify command into config. Verify not yet runnable pre-scaffold."
+    tokens: "~4k"
