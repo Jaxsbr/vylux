@@ -1,3 +1,3 @@
 tsc: PASS (no output)
-vitest: 1 passed (src/scaffold.test.ts)
-playwright: 1 passed (tests/e2e/scaffold.spec.ts)
+vitest: 3 passed (src/scene.test.ts)
+playwright: 3 passed (tests/e2e/foundation.spec.ts — page loads / canvas resizes / webglcontextlost handled)

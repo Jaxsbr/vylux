@@ -30,3 +30,10 @@ entries:
     result: "queued"
     notes: "Single concern = render a bootable isometric scene with debug hooks validated by Playwright. Grid (US-02) and state machine (US-03+) remain for later tasks."
     tokens: "~2k"
+  - task: 2
+    time: "2026-04-18T08:14:00Z"
+    story: "[US-01]"
+    description: "Branch A: implemented src/scene.ts, src/debug.ts; rewrote src/main.ts with render loop + resize + webglcontextlost handler. Switched dev port to 5180 (5181 preview) to avoid conflict with another local Vite server. vite.config.ts strictPort enabled; playwright.config.ts webServer auto-starts dev. Removed scaffold test stubs; added src/scene.test.ts (3 pure tests for computeCameraPosition) + tests/e2e/foundation.spec.ts (3 tests: debug snapshot assertion, canvas resize with waitForFunction, webglcontextlost branch). tsc clean, 3 vitest pass, 3 playwright pass, vite build 464 KB ok."
+    result: "pass"
+    notes: "US-01 criteria met: scene mounted, background #0a0a0a, OrthographicCamera with 45°/-30°, ambient+directional, canvas resize, webglcontextlost. Remaining US-01: dev-server HTTP smoke script (polls 200 within 10s), prod preview window.__vylux undefined guard. No regressions — tests are net additive (scaffold stubs replaced with story-aligned tests)."
+    tokens: "~14k"
