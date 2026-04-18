@@ -27,7 +27,7 @@ state:
   pr_number: null
 
   # --- Retrospective (owner: retro) ---
-  retro_complete: true
+  retro_complete: false
 
   # --- Tracking (owner: iterator) ---
   completed_stories: []

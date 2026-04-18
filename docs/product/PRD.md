@@ -10,7 +10,7 @@ This document is the **index**. Full story detail lives in per-phase spec files 
 
 | Phase | Status | Stories | Spec |
 |---|---|---|---|
-| foundation | Shipped | US-01, US-02, US-03, US-04, US-05 | [phases/foundation.md](phases/foundation.md) |
+| foundation | Draft | US-01, US-02, US-03, US-04, US-05 | [phases/foundation.md](phases/foundation.md) |
 
 ## Story ID convention
 
