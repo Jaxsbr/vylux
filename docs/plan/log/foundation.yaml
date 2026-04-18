@@ -205,3 +205,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean, vitest 67/67 (+7), playwright 11/11 (unchanged). Regression: net additive. Closes pure slice of US-05 L58, L59, L60. Remaining: scene integration (per-faction placed mesh rendering, debug.placedMeshes surface, reconcile teaches about placedUnits) and click wiring + Playwright (L61-L67, L77-L80)."
     tokens: "~6k"
+  - task: 15
+    time: "2026-04-18T10:20:54Z"
+    story: "[US-05]"
+    description: "Branch B: queued US-05 scene integration for placed meshes. src/scene.ts gains placedGroup (THREE.Group named 'placed-units') and placedMeshes array of { mesh, material, unit }; reconcile(state) iterates state.placedUnits and spawns any unit not yet represented (identity by tileX/tileY/type) as BoxGeometry 0.8^3 at tileToWorld(x,y) y=0.5, MeshStandardMaterial with color+emissive=factionEmissiveHex, transparent=false opacity=1 emissiveIntensity=1, named 'placed-unit'. Debug surface gains placedMeshes: Array<{ tileX, tileY, type, position, material:{emissive,opacity,transparent} }> and placedCount sourced from placedMeshes.length."
+    result: "queued"
+    notes: "No new Vitest (scene is impure — pure coverage is already in tryPlace tests). Playwright coverage lands with click wiring in task 16. Closes US-05 L77-L80 (placed mesh material assertions observable via debug.placedMeshes). Since placedUnits only grows in this phase, no removal logic yet — kept additive by design. No mouse/click handling yet."
+    tokens: "~2k"
