@@ -16,3 +16,10 @@ entries:
     result: "paused"
     notes: "Blocker is environmental (tool permission), not code-related. Not counted as a consecutive failure. Resume path: operator runs `npm install` + `npx playwright install chromium` (or approves the permission), then invokes /sabs:build-loop action=resume."
     tokens: "~6k"
+  - task: 1
+    time: "2026-04-18T08:06:00Z"
+    story: "[US-01]"
+    description: "Scaffold complete. Operator installed deps + Playwright Chromium during pause. Branch A re-entered: tsc --noEmit clean, vitest 1/1 pass (src/scaffold.test.ts), playwright 1/1 pass (tests/e2e/scaffold.spec.ts). Committed package-lock.json."
+    result: "pass"
+    notes: "US-01 criterion partially met: package.json + index.html + src/main.ts exist with all required deps declared. Remaining US-01 criteria (scene, camera, lights, background color, context-loss handling, canvas resize, dev-server smoke, prod build) are execution work for subsequent tasks. Test baseline promoted."
+    tokens: "~8k"

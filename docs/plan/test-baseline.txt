@@ -1,0 +1,3 @@
+tsc: PASS (no output)
+vitest: 1 passed (src/scaffold.test.ts)
+playwright: 1 passed (tests/e2e/scaffold.spec.ts)
