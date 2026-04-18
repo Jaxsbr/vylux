@@ -8,6 +8,7 @@ import {
   isTileOccupied,
   computeGhostView,
   computeHoverView,
+  tryPlace,
   type PlacementState,
 } from './placement';
 
@@ -259,5 +260,91 @@ describe('computeHoverView', () => {
       tileY: 5,
       colorHex: '#5a2311',
     });
+  });
+});
+
+describe('tryPlace — click placement + occupancy (phase-goal L58-L60)', () => {
+  const placementBlue: PlacementState = {
+    mode: 'placement',
+    selectedUnitType: 'blue',
+    hoveredTile: { tileX: 5, tileY: 5 },
+    placedUnits: [],
+  };
+
+  it('unoccupied tile in placement -> ok:true, placedUnits += 1, mode idle, selectedUnitType null', () => {
+    const result = tryPlace(placementBlue, 5, 5);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.placedUnits).toHaveLength(1);
+    expect(result.state.placedUnits[0]).toEqual({ tileX: 5, tileY: 5, type: 'blue' });
+    expect(result.state.mode).toBe('idle');
+    expect(result.state.selectedUnitType).toBeNull();
+    expect(result.state.hoveredTile).toEqual({ tileX: 5, tileY: 5 });
+  });
+
+  it('red faction placement preserved on placed unit', () => {
+    const red: PlacementState = { ...placementBlue, selectedUnitType: 'red' };
+    const result = tryPlace(red, 7, 3);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.placedUnits[0]).toEqual({ tileX: 7, tileY: 3, type: 'red' });
+  });
+
+  it('occupied tile -> ok:false reason occupied, state same reference', () => {
+    const withUnit: PlacementState = {
+      ...placementBlue,
+      placedUnits: [{ tileX: 5, tileY: 5, type: 'red' }],
+    };
+    const result = tryPlace(withUnit, 5, 5);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('occupied');
+    expect(result.state).toBe(withUnit);
+  });
+
+  it('out-of-bounds coords -> ok:false reason out-of-bounds, state same reference', () => {
+    const cases: Array<[number, number]> = [
+      [-1, 0],
+      [0, 20],
+      [20, 20],
+      [0, -1],
+      [100, 5],
+    ];
+    for (const [tx, ty] of cases) {
+      const result = tryPlace(placementBlue, tx, ty);
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.reason).toBe('out-of-bounds');
+      expect(result.state).toBe(placementBlue);
+    }
+  });
+
+  it('non-integer / NaN coords -> ok:false reason out-of-bounds', () => {
+    for (const [tx, ty] of [
+      [NaN, 0],
+      [0, NaN],
+      [0.5, 1],
+      [1, 2.3],
+    ] as Array<[number, number]>) {
+      const result = tryPlace(placementBlue, tx, ty);
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.reason).toBe('out-of-bounds');
+      expect(result.state).toBe(placementBlue);
+    }
+  });
+
+  it('not-in-placement mode -> ok:false reason not-in-placement, state same reference', () => {
+    const result = tryPlace(INITIAL_STATE, 3, 3);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('not-in-placement');
+    expect(result.state).toBe(INITIAL_STATE);
+  });
+
+  it('does not mutate the input state on success', () => {
+    const snap = JSON.stringify(placementBlue);
+    tryPlace(placementBlue, 9, 9);
+    expect(JSON.stringify(placementBlue)).toBe(snap);
   });
 });

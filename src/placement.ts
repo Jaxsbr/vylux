@@ -112,6 +112,40 @@ export function computeGhostView(state: PlacementState): GhostView {
   };
 }
 
+export const GRID_SIZE = 20;
+
+export type TryPlaceReason = 'occupied' | 'out-of-bounds' | 'not-in-placement';
+
+export type TryPlaceResult =
+  | { ok: true; state: PlacementState }
+  | { ok: false; reason: TryPlaceReason; state: PlacementState };
+
+export function tryPlace(
+  state: PlacementState,
+  tileX: number,
+  tileY: number,
+): TryPlaceResult {
+  if (state.mode !== 'placement' || state.selectedUnitType === null) {
+    return { ok: false, reason: 'not-in-placement', state };
+  }
+  if (!Number.isInteger(tileX) || !Number.isInteger(tileY)) {
+    return { ok: false, reason: 'out-of-bounds', state };
+  }
+  if (tileX < 0 || tileX >= GRID_SIZE || tileY < 0 || tileY >= GRID_SIZE) {
+    return { ok: false, reason: 'out-of-bounds', state };
+  }
+  if (isTileOccupied(state, tileX, tileY)) {
+    return { ok: false, reason: 'occupied', state };
+  }
+  const next: PlacementState = {
+    mode: 'idle',
+    selectedUnitType: null,
+    hoveredTile: state.hoveredTile,
+    placedUnits: [...state.placedUnits, { tileX, tileY, type: state.selectedUnitType }],
+  };
+  return { ok: true, state: next };
+}
+
 export function computeHoverView(state: PlacementState): HoverView {
   if (
     state.mode !== 'placement' ||
