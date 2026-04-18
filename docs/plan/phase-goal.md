@@ -18,8 +18,8 @@ Full spec: `docs/product/phases/foundation.md` (design direction, tech stack, st
 - [x] `npm install && npm run build` completes without errors in a clean clone [US-01]
 - [x] `npm run dev` smoke test: a short shell/Playwright script spawns the dev server, polls `http://localhost:<printed-port>/` for HTTP 200 within 10s, then kills the process; port is >= 1024 (non-privileged) [US-01]
 - [x] `npm run dev` serves the app; page loads with no console errors and no uncaught promise rejections (verified by Playwright smoke test) [US-01]
-- [ ] `tsconfig.json` declares `"strict": true`, `"noUnusedParameters": true`, `"noUnusedLocals": true`; `npx tsc --noEmit` passes [phase]
-- [ ] Verify command documented in `AGENTS.md` is `npx tsc --noEmit && npm run test && npm run test:e2e` and is the same command the test-gate runs locally [phase]
+- [x] `tsconfig.json` declares `"strict": true`, `"noUnusedParameters": true`, `"noUnusedLocals": true`; `npx tsc --noEmit` passes [phase]
+- [x] Verify command documented in `AGENTS.md` is `npx tsc --noEmit && npm run test && npm run test:e2e` and is the same command the test-gate runs locally [phase]
 - [x] WebGL context-loss handling: simulated `webglcontextlost` event on the canvas logs via `console.error` with context (never silent), does not throw uncaught, and sets `window.__vylux.debug.contextLost === true` (Playwright) [US-01]
 - [x] Scene background color is exactly `#0a0a0a` (asserted via `window.__vylux.debug.backgroundColor`) [US-01]
 - [x] Scene contains an `OrthographicCamera` (not `PerspectiveCamera`) — asserted by `window.__vylux.debug.cameraType === 'OrthographicCamera'` [US-01]
@@ -66,7 +66,7 @@ Full spec: `docs/product/phases/foundation.md` (design direction, tech stack, st
 - [x] Playwright: right-click and middle-click in placement mode do not place a unit and do not change state [US-05]
 
 #### Visual "reads as" criteria (paired: measurable proxy + operator sign-off)
-- [ ] Manual verification doc `docs/manual-verification/foundation.md` exists with one checkbox per "reads as" item below; every item is signed off before phase close [phase]
+- [x] Manual verification doc `docs/manual-verification/foundation.md` exists with one checkbox per "reads as" item below; every item is signed off before phase close [phase]
 - [x] Grid divider material: `material.emissive.getHexString() === 'ffffff'` and `material.emissiveIntensity` is in `[0.1, 0.4]` (low-intensity band — asserted via `window.__vylux.debug.gridLineMaterial`) [US-02]
 - [x] Operator sign-off: grid "reads as" a Tron-style neon grid — white dividers visible against charcoal, tiles nearly invisible between the lines [US-02]
 - [x] Ghost mesh material: `material.transparent === true` and `material.opacity` is in `[0.35, 0.45]` (asserted via `window.__vylux.debug.ghost.material`) [US-04]
@@ -83,15 +83,15 @@ Full spec: `docs/product/phases/foundation.md` (design direction, tech stack, st
 - [x] Operator sign-off: hover tile highlights read as selectable targets in each faction — dim enough not to compete with the ghost, clearly the faction hue [US-04]
 
 #### Documentation and reconciliation
-- [ ] `docs/manual/foundation.md` exists and covers: how to run the app, the grid layout, the keyboard controls (`1`, `2`, `Esc`), hover preview, click to place, occupancy rule, exit via outside-grid click [US-01, US-02, US-03, US-04, US-05]
+- [x] `docs/manual/foundation.md` exists and covers: how to run the app, the grid layout, the keyboard controls (`1`, `2`, `Esc`), hover preview, click to place, occupancy rule, exit via outside-grid click [US-01, US-02, US-03, US-04, US-05]
 - [x] `README.md` top-level section includes the quick-start (`npm install`, `npm run dev`) and links to `docs/manual/foundation.md` [US-01]
-- [ ] `AGENTS.md` reflects the introduced stack (TypeScript + Three.js + Vite), the `src/` module layout, the state machine shape, the verify command, and the state-ownership contract introduced in this phase (handled at Phase Reconciliation Gate) [phase]
-- [ ] Production build guard: `npm run build` followed by `npm run preview` serves an index where `window.__vylux === undefined` (Playwright against the preview server); dev build at `npm run dev` exposes it [phase]
+- [x] `AGENTS.md` reflects the introduced stack (TypeScript + Three.js + Vite), the `src/` module layout, the state machine shape, the verify command, and the state-ownership contract introduced in this phase (handled at Phase Reconciliation Gate) [phase]
+- [x] Production build guard: `npm run build` followed by `npm run preview` serves an index where `window.__vylux === undefined` (Playwright against the preview server); dev build at `npm run dev` exposes it [phase]
 
 #### Auto-added safety criteria
-- [ ] Error-path coverage: every event handler (`keydown`, `mousemove`, `click`, `resize`) has at least one unit or Playwright test covering its no-op branch (e.g., `keydown` for an unbound key, `click` with no hovered tile, `mousemove` off the grid) [phase]
-- [ ] No bare catches / silent swallowing: any `try`/`catch` in the codebase either re-throws or logs via `console.error` with context — enforced by a Vitest source-scan test that greps `src/**/*.ts` for `catch (` patterns and asserts each matching block contains either `throw` or `console.error` [phase]
-- [ ] Event listener cleanup: `keydown`, `mousemove`, `click`, and `resize` listeners are attached via a single `attachInputHandlers` function that also returns a `detach()` callback; Vitest verifies `detach()` removes the listeners [phase]
+- [x] Error-path coverage: every event handler (`keydown`, `mousemove`, `click`, `resize`) has at least one unit or Playwright test covering its no-op branch (e.g., `keydown` for an unbound key, `click` with no hovered tile, `mousemove` off the grid) [phase]
+- [x] No bare catches / silent swallowing: any `try`/`catch` in the codebase either re-throws or logs via `console.error` with context — enforced by a Vitest source-scan test that greps `src/**/*.ts` for `catch (` patterns and asserts each matching block contains either `throw` or `console.error` [phase]
+- [x] Event listener cleanup: `keydown`, `mousemove`, `click`, and `resize` listeners are attached via a single `attachInputHandlers` function that also returns a `detach()` callback; Vitest verifies `detach()` removes the listeners [phase]
 
 ### Golden principles (phase-relevant)
 

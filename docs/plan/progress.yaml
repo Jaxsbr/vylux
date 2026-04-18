@@ -12,11 +12,11 @@ config:
 state:
   # --- Lifecycle (owner: iterator) ---
   phase: foundation
-  phase_complete: false
+  phase_complete: true
   status: running
 
   # --- Task orchestration (owner: iterator) ---
-  task_number: 18
+  task_number: 19
   next_task: null
   last_result: pass
   consecutive_fails: 0

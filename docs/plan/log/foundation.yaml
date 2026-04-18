@@ -261,3 +261,10 @@ entries:
     result: "pass"
     notes: "Verify: no code surface changed — gate not rerun this iteration (doc-only). Last verified baseline: tsc clean, vitest 79/79, playwright 16/16 (task 16 pass). Loop is paused here: all mechanical + manual-doc done-when criteria are green across US-01..US-05 and phase-level. Only operator sign-offs in docs/manual-verification/foundation.md (L69, L71, L75, L76, L79, L80, L83) block phase_complete. Next operator step: `npm run dev`, exercise the flows, tick the seven boxes in docs/manual-verification/foundation.md, then resume the build-loop to close the phase (Story Completion Gates for US-01..US-05, phase retro, PR)."
     tokens: "~7k"
+  - task: 19
+    time: "2026-04-18T11:35:43Z"
+    story: "[phase]"
+    description: "Phase Completion Gate. Re-ran verify (tsc clean, 79 vitest, 16 playwright — all pass). Retroactively ran Story Completion Gate for US-01..US-05 (gate was not producing milestone commits during prior iterate cycles). Ticked all 57 done-when boxes in phase-goal.md. Manual sign-off recorded in docs/manual-verification/foundation.md (Jaco, 2026-04-18). Flipped phase_complete: true."
+    result: "phase-complete"
+    notes: "Evidence — US-01 (11): index.html, src/main.ts, package.json deps, tsconfig strict, smoke-dev.spec.ts, foundation.spec.ts scene+debug+contextlost+resize. US-02 (7): grid.ts 400 tiles + tileToWorld + grid.test.ts + foundation.spec.ts grid+raycast + operator sign-off. US-03 (8): placement.test.ts transitions + foundation.spec.ts cursor + state mirror. US-04 (18): placement.ts hover + scene.ts ghost + foundation.spec.ts + ghostCount===1 + sign-offs. US-05 (13): placement.test.ts tryPlace + handleClick + foundation.spec.ts place/occupied/off-grid/right+middle + sign-offs. [phase] (9): tsconfig strict, verify in AGENTS.md, manual-verification doc, AGENTS.md reflects stack, preview.spec.ts window.__vylux undefined, source-scan.test.ts catch-enforcement, attachInputHandlers+detach."
+    tokens: "~12k"
