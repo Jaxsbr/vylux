@@ -93,3 +93,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean, vitest 16/16 (+3), playwright 8/8 (+2). Regression: net additive, all prior tests still green. Closes US-02 L29 (tileCount=400), L31 (tileColors all #0a0a0a), L32 + L70 (gridLineMaterial emissive/intensity), L33 (raycast hits integer tile coords in range). US-02 remaining: L71 operator sign-off (needs docs/manual-verification/foundation.md + Jaco's manual tick) and L86 US-02 manual section."
     tokens: "~15k"
+  - task: 7
+    time: "2026-04-18T09:09:00Z"
+    story: "[US-02]"
+    description: "Branch B: queued US-02 documentation task — create docs/manual-verification/foundation.md (all reads-as checkboxes across US-02/US-04/US-05), fill in Grid layout section of docs/manual/foundation.md."
+    result: "queued"
+    notes: "Pure docs work. Closes US-02 L69 surface (doc exists) and L86 US-02 slot. L71 operator tick still pending Jaco's manual verification before phase close."
+    tokens: "~2k"

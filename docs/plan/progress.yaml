@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 7
-  next_task: null
+  next_task: "[US-02] Finish US-02 documentation. Create docs/manual-verification/foundation.md with one unchecked checkbox per 'reads as' criterion in phase-goal.md (the operator sign-off items: grid reads as Tron-style neon [US-02], ghost unit blue [US-04], ghost unit red [US-04], placed unit blue [US-05], placed unit red [US-05], hover tile highlights read as selectable [US-04]) — Jaco ticks each before phase close. Fill in the Grid layout section of docs/manual/foundation.md with US-02 content: 20x20 grid, unit tiles on the XZ ground plane centered on the world origin, emissive-white divider strips (21 horizontal + 21 vertical) at low intensity, tile (0,0) at world (-9.5, 0, -9.5), tile (19,19) at (9.5, 0, 9.5), raycast debug helper. Closes US-02 L69 surface (manual-verification doc exists with grid checkbox) and L86 US-02 slot (Grid layout section complete)."
   last_result: pass
   consecutive_fails: 0
 
