@@ -1,0 +1,30 @@
+name: Phase retro check
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  retro-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check phase retro requirement
+        run: |
+          PROGRESS="docs/plan/progress.yaml"
+          if [ ! -f "$PROGRESS" ]; then
+            echo "No progress.yaml — skipping retro check"
+            exit 0
+          fi
+          if grep -q 'phase_complete: true' "$PROGRESS"; then
+            if grep -q 'retro_complete: true' "$PROGRESS"; then
+              echo "Phase retro complete — check passed"
+              exit 0
+            else
+              echo "::error::Phase is complete but no retrospective found."
+              echo "Run /sabs:phase-retro and push to this branch."
+              exit 1
+            fi
+          else
+            echo "No completed phase — retro not required"
+            exit 0
+          fi

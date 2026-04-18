@@ -1,0 +1,20 @@
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+
+# Build loop
+.build-loop.lock
+docs/plan/.build-loop.lock
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
