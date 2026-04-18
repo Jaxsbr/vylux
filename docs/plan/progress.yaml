@@ -16,8 +16,8 @@ state:
   status: running
 
   # --- Task orchestration (owner: iterator) ---
-  task_number: 10
-  next_task: null
+  task_number: 11
+  next_task: "[US-04] Pure hover logic. Extend src/placement.ts: add handlePointerMove(state, hit) where hit is { tileX, tileY } | null — returns state with updated hoveredTile (same reference on no-op, fresh object on change; never mutates input; off-grid clears hoveredTile to null). Add pure helpers hoverColorFor(faction: FactionId) -> string returning '#0d4d57' for blue and '#5a2311' for red (documented hexes from phase-goal L46/L81/L82), and ghostEmissiveFor(faction) -> string returning '#00e5ff' / '#ff5a1f'. Add occupancy helper isTileOccupied(state, tileX, tileY) used later by ghost hide and click. Extend src/placement.test.ts with: handlePointerMove 5-in-a-row leaves hoveredTile = last coord only (L55 pure portion); same-coord no-op returns same reference; null hit from non-null hoveredTile returns fresh state with hoveredTile=null; handlePointerMove preserves mode/selectedUnitType/placedUnits; hoverColorFor/ghostEmissiveFor hex assertions (L46); isTileOccupied true for a placedUnit coord, false otherwise. Closes US-04 L46 and the pure portion of L55; L81/L82 hex values verified (scene integration to apply them lands next task)."
   last_result: pass
   consecutive_fails: 0
 

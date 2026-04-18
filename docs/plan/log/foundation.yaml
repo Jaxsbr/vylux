@@ -149,3 +149,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean, vitest 35/35 (+3), playwright 9/9 (unchanged). Regression: net additive. Closes phase-level L93. Remaining phase-level: L92 error-path-coverage (still needs the mousemove/click/resize no-op branches — will be satisfied by US-04 and US-05 Playwright tests), L86 multi-story manual Controls + Hover + Click sections, and the operator sign-off ticks in docs/manual-verification/foundation.md."
     tokens: "~6k"
+  - task: 11
+    time: "2026-04-18T09:52:30Z"
+    story: "[US-04]"
+    description: "Branch B: queued US-04 pure hover logic — extend src/placement.ts with handlePointerMove(state, hit|null) + hoverColorFor(faction) + ghostEmissiveFor(faction) + isTileOccupied(state, x, y); Vitest covers 5-in-a-row leaves last coord, same-coord identity, null clears, hex mappings, occupancy lookup."
+    result: "queued"
+    notes: "Mirrors US-03 split: pure state/helpers first (this task), scene reconciliation + debug surface next, input wiring + Playwright after. Pure portion alone closes L46 and the pure slice of L55."
+    tokens: "~2k"
