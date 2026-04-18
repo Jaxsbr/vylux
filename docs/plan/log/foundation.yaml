@@ -37,3 +37,10 @@ entries:
     result: "pass"
     notes: "US-01 criteria met: scene mounted, background #0a0a0a, OrthographicCamera with 45°/-30°, ambient+directional, canvas resize, webglcontextlost. Remaining US-01: dev-server HTTP smoke script (polls 200 within 10s), prod preview window.__vylux undefined guard. No regressions — tests are net additive (scaffold stubs replaced with story-aligned tests)."
     tokens: "~14k"
+  - task: 3
+    time: "2026-04-18T08:18:00Z"
+    story: "[US-01]"
+    description: "Branch B: queued dev HTTP smoke + prod preview guard (Playwright two-project split) to close out US-01."
+    result: "queued"
+    notes: "Pause at checkpoint — 2 real task iterations completed this invocation. Operator can resume by invoking iterate. Remaining phase work: close US-01, then US-02 grid, US-03 state machine, US-04 hover, US-05 click, + doc/AGENTS reconciliation and manual-verification sign-off."
+    tokens: "~2k"
