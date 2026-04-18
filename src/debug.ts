@@ -7,11 +7,14 @@ export type VyluxDebug = {
   lightCounts: { ambient: number; directional: number };
   contextLost: boolean;
   tileCount: number;
+  tileColors: string[];
+  gridLineMaterial: { emissive: string; emissiveIntensity: number };
 };
 
 export type VyluxHook = {
   state: Record<string, unknown>;
   debug: VyluxDebug;
+  raycastCenter: () => { tileX: number; tileY: number } | null;
 };
 
 declare global {
@@ -27,7 +30,12 @@ export function buildDebugSnapshot(bundle: SceneBundle): VyluxDebug {
     cameraRotation: bundle.cameraRotation,
     lightCounts: bundle.lightCounts,
     contextLost: false,
-    tileCount: 0,
+    tileCount: bundle.grid.tileMeshes.length,
+    tileColors: bundle.grid.tileColors.slice(),
+    gridLineMaterial: {
+      emissive: bundle.grid.gridLineMaterial.emissive.getHexString(),
+      emissiveIntensity: bundle.grid.gridLineMaterial.emissiveIntensity,
+    },
   };
 }
 
@@ -38,6 +46,7 @@ export function attachDebugHook(bundle: SceneBundle): VyluxHook | null {
   const hook: VyluxHook = {
     state: {},
     debug: buildDebugSnapshot(bundle),
+    raycastCenter: bundle.raycastCenter,
   };
   window.__vylux = hook;
   return hook;

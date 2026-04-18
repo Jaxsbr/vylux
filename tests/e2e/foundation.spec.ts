@@ -36,6 +36,38 @@ test.describe('US-01 scene foundation', () => {
     expect(pageErrors).toEqual([]);
   });
 
+  test('grid is mounted with 400 tiles and emissive-white dividers', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    const debug = await page.evaluate(() => window.__vylux!.debug);
+    expect(debug.tileCount).toBe(400);
+    expect(debug.tileColors).toHaveLength(400);
+
+    for (let i = 0; i < 10; i++) {
+      const idx = Math.floor(Math.random() * 400);
+      expect(debug.tileColors[idx]).toBe('#0a0a0a');
+    }
+
+    expect(debug.gridLineMaterial.emissive).toBe('ffffff');
+    expect(debug.gridLineMaterial.emissiveIntensity).toBeGreaterThanOrEqual(0.1);
+    expect(debug.gridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(0.4);
+  });
+
+  test('raycast from viewport center hits a tile and returns a valid (tileX, tileY)', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    const hit = await page.evaluate(() => window.__vylux!.raycastCenter());
+    expect(hit).not.toBeNull();
+    expect(Number.isInteger(hit!.tileX)).toBe(true);
+    expect(Number.isInteger(hit!.tileY)).toBe(true);
+    expect(hit!.tileX).toBeGreaterThanOrEqual(0);
+    expect(hit!.tileX).toBeLessThan(20);
+    expect(hit!.tileY).toBeGreaterThanOrEqual(0);
+    expect(hit!.tileY).toBeLessThan(20);
+  });
+
   test('canvas resizes when viewport changes', async ({ page }) => {
     await page.goto('/');
     await page.waitForFunction(() => typeof window.__vylux !== 'undefined');

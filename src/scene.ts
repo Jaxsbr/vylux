@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildGrid, type GridBundle } from './grid';
 
 export const SCENE_CONSTANTS = {
   backgroundColor: '#0a0a0a',
@@ -15,10 +16,12 @@ export type SceneBundle = {
   camera: THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
   lights: { ambient: THREE.AmbientLight; directional: THREE.DirectionalLight };
+  grid: GridBundle;
   backgroundColor: string;
   cameraRotation: { yawDeg: number; pitchDeg: number };
   lightCounts: { ambient: number; directional: number };
   resize: (width: number, height: number) => void;
+  raycastCenter: () => { tileX: number; tileY: number } | null;
 };
 
 export function computeCameraPosition(
@@ -60,6 +63,9 @@ export function createScene(): SceneBundle {
   directional.position.set(10, 20, 10);
   scene.add(ambient, directional);
 
+  const grid = buildGrid();
+  scene.add(grid.group);
+
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -75,14 +81,31 @@ export function createScene(): SceneBundle {
   };
   resize(window.innerWidth, window.innerHeight);
 
+  const raycaster = new THREE.Raycaster();
+  const center = new THREE.Vector2(0, 0);
+  const raycastCenter = (): { tileX: number; tileY: number } | null => {
+    raycaster.setFromCamera(center, camera);
+    const hits = raycaster.intersectObjects(grid.tileMeshes, false);
+    if (hits.length === 0) {
+      return null;
+    }
+    const ud = hits[0].object.userData as { tileX?: unknown; tileY?: unknown };
+    if (typeof ud.tileX !== 'number' || typeof ud.tileY !== 'number') {
+      return null;
+    }
+    return { tileX: ud.tileX, tileY: ud.tileY };
+  };
+
   return {
     scene,
     camera,
     renderer,
     lights: { ambient, directional },
+    grid,
     backgroundColor,
     cameraRotation: { yawDeg: cameraYawDeg, pitchDeg: -cameraElevationDeg },
     lightCounts: { ambient: 1, directional: 1 },
     resize,
+    raycastCenter,
   };
 }

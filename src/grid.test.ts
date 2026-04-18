@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { GRID_CONSTANTS, TILE_COUNT, tileToWorld } from './grid';
+import { GRID_CONSTANTS, TILE_COUNT, tileToWorld, buildGrid } from './grid';
 
 describe('GRID_CONSTANTS', () => {
   it('is a 20x20 grid of unit tiles (400 total)', () => {
@@ -60,5 +60,37 @@ describe('tileToWorld — out-of-bounds', () => {
     [NaN, 0],
   ])('throws a descriptive error on (%s, %s)', (x, y) => {
     expect(() => tileToWorld(x, y)).toThrow(/tile coordinates/);
+  });
+});
+
+describe('buildGrid', () => {
+  it('returns 400 tile meshes with unique (tileX, tileY) userData', () => {
+    const grid = buildGrid();
+    expect(grid.tileMeshes).toHaveLength(TILE_COUNT);
+    const seen = new Set<string>();
+    for (const mesh of grid.tileMeshes) {
+      const ud = mesh.userData as { tileX: number; tileY: number };
+      expect(Number.isInteger(ud.tileX)).toBe(true);
+      expect(Number.isInteger(ud.tileY)).toBe(true);
+      seen.add(`${ud.tileX},${ud.tileY}`);
+    }
+    expect(seen.size).toBe(TILE_COUNT);
+  });
+
+  it('every tile material color is #0a0a0a and each tile has its own material instance', () => {
+    const grid = buildGrid();
+    expect(grid.tileColors).toHaveLength(TILE_COUNT);
+    for (const hex of grid.tileColors) {
+      expect(hex).toBe('#0a0a0a');
+    }
+    const materialIds = new Set(grid.tileMeshes.map((m) => (m.material as { uuid: string }).uuid));
+    expect(materialIds.size).toBe(TILE_COUNT);
+  });
+
+  it('gridLineMaterial is emissive white with low intensity and is shared across dividers', () => {
+    const grid = buildGrid();
+    expect(grid.gridLineMaterial.emissive.getHexString()).toBe('ffffff');
+    expect(grid.gridLineMaterial.emissiveIntensity).toBeGreaterThanOrEqual(0.1);
+    expect(grid.gridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(0.4);
   });
 });
