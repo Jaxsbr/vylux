@@ -93,6 +93,54 @@ test.describe('US-01 scene foundation', () => {
     );
   });
 
+  test('keyboard drives placement state and cursor (US-03)', async ({ page }) => {
+    const { consoleErrors, pageErrors } = attachConsoleGuard(page);
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    const initial = await page.evaluate(() => ({
+      mode: window.__vylux!.state.mode,
+      selectedUnitType: window.__vylux!.state.selectedUnitType,
+      cursor: (document.querySelector('canvas') as HTMLCanvasElement).style.cursor,
+    }));
+    expect(initial.mode).toBe('idle');
+    expect(initial.selectedUnitType).toBeNull();
+    expect(initial.cursor).toBe('default');
+
+    await page.keyboard.press('1');
+    const afterBlue = await page.evaluate(() => ({
+      mode: window.__vylux!.state.mode,
+      selectedUnitType: window.__vylux!.state.selectedUnitType,
+      cursor: (document.querySelector('canvas') as HTMLCanvasElement).style.cursor,
+    }));
+    expect(afterBlue.mode).toBe('placement');
+    expect(afterBlue.selectedUnitType).toBe('blue');
+    expect(afterBlue.cursor).toBe('none');
+
+    await page.keyboard.press('2');
+    const afterRed = await page.evaluate(() => ({
+      mode: window.__vylux!.state.mode,
+      selectedUnitType: window.__vylux!.state.selectedUnitType,
+      cursor: (document.querySelector('canvas') as HTMLCanvasElement).style.cursor,
+    }));
+    expect(afterRed.mode).toBe('placement');
+    expect(afterRed.selectedUnitType).toBe('red');
+    expect(afterRed.cursor).toBe('none');
+
+    await page.keyboard.press('Escape');
+    const afterEscape = await page.evaluate(() => ({
+      mode: window.__vylux!.state.mode,
+      selectedUnitType: window.__vylux!.state.selectedUnitType,
+      cursor: (document.querySelector('canvas') as HTMLCanvasElement).style.cursor,
+    }));
+    expect(afterEscape.mode).toBe('idle');
+    expect(afterEscape.selectedUnitType).toBeNull();
+    expect(afterEscape.cursor).toBe('default');
+
+    expect(consoleErrors).toEqual([]);
+    expect(pageErrors).toEqual([]);
+  });
+
   test('webglcontextlost is handled without uncaught error', async ({ page }) => {
     const { pageErrors } = attachConsoleGuard(page);
     await page.goto('/');

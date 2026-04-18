@@ -1,4 +1,5 @@
 import type { SceneBundle } from './scene';
+import { INITIAL_STATE, type PlacementState } from './placement';
 
 export type VyluxDebug = {
   backgroundColor: string;
@@ -12,7 +13,7 @@ export type VyluxDebug = {
 };
 
 export type VyluxHook = {
-  state: Record<string, unknown>;
+  state: PlacementState;
   debug: VyluxDebug;
   raycastCenter: () => { tileX: number; tileY: number } | null;
 };
@@ -44,7 +45,7 @@ export function attachDebugHook(bundle: SceneBundle): VyluxHook | null {
     return null;
   }
   const hook: VyluxHook = {
-    state: {},
+    state: INITIAL_STATE,
     debug: buildDebugSnapshot(bundle),
     raycastCenter: bundle.raycastCenter,
   };
