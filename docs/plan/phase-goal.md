@@ -14,18 +14,18 @@ Full spec: `docs/product/phases/foundation.md` (design direction, tech stack, st
 ### Done-when (observable)
 
 #### Scene and grid
-- [ ] `index.html` and `src/main.ts` exist at project root; `package.json` declares `three`, `@types/three`, `vite`, `typescript`, `vitest`, `@playwright/test` as dependencies [US-01]
-- [ ] `npm install && npm run build` completes without errors in a clean clone [US-01]
-- [ ] `npm run dev` smoke test: a short shell/Playwright script spawns the dev server, polls `http://localhost:<printed-port>/` for HTTP 200 within 10s, then kills the process; port is >= 1024 (non-privileged) [US-01]
-- [ ] `npm run dev` serves the app; page loads with no console errors and no uncaught promise rejections (verified by Playwright smoke test) [US-01]
+- [x] `index.html` and `src/main.ts` exist at project root; `package.json` declares `three`, `@types/three`, `vite`, `typescript`, `vitest`, `@playwright/test` as dependencies [US-01]
+- [x] `npm install && npm run build` completes without errors in a clean clone [US-01]
+- [x] `npm run dev` smoke test: a short shell/Playwright script spawns the dev server, polls `http://localhost:<printed-port>/` for HTTP 200 within 10s, then kills the process; port is >= 1024 (non-privileged) [US-01]
+- [x] `npm run dev` serves the app; page loads with no console errors and no uncaught promise rejections (verified by Playwright smoke test) [US-01]
 - [ ] `tsconfig.json` declares `"strict": true`, `"noUnusedParameters": true`, `"noUnusedLocals": true`; `npx tsc --noEmit` passes [phase]
 - [ ] Verify command documented in `AGENTS.md` is `npx tsc --noEmit && npm run test && npm run test:e2e` and is the same command the test-gate runs locally [phase]
-- [ ] WebGL context-loss handling: simulated `webglcontextlost` event on the canvas logs via `console.error` with context (never silent), does not throw uncaught, and sets `window.__vylux.debug.contextLost === true` (Playwright) [US-01]
-- [ ] Scene background color is exactly `#0a0a0a` (asserted via `window.__vylux.debug.backgroundColor`) [US-01]
-- [ ] Scene contains an `OrthographicCamera` (not `PerspectiveCamera`) — asserted by `window.__vylux.debug.cameraType === 'OrthographicCamera'` [US-01]
-- [ ] Camera rotation is 45° around world Y and pitched ~30° below horizontal (asserted within 0.5° tolerance via `window.__vylux.debug.cameraRotation`) [US-01]
-- [ ] Scene contains at least one `AmbientLight` and one `DirectionalLight` (asserted via `window.__vylux.debug.lightCounts`) [US-01]
-- [ ] Canvas resizes on `window.resize`: Playwright test that changes viewport size and asserts canvas width/height matches [US-01]
+- [x] WebGL context-loss handling: simulated `webglcontextlost` event on the canvas logs via `console.error` with context (never silent), does not throw uncaught, and sets `window.__vylux.debug.contextLost === true` (Playwright) [US-01]
+- [x] Scene background color is exactly `#0a0a0a` (asserted via `window.__vylux.debug.backgroundColor`) [US-01]
+- [x] Scene contains an `OrthographicCamera` (not `PerspectiveCamera`) — asserted by `window.__vylux.debug.cameraType === 'OrthographicCamera'` [US-01]
+- [x] Camera rotation is 45° around world Y and pitched ~30° below horizontal (asserted within 0.5° tolerance via `window.__vylux.debug.cameraRotation`) [US-01]
+- [x] Scene contains at least one `AmbientLight` and one `DirectionalLight` (asserted via `window.__vylux.debug.lightCounts`) [US-01]
+- [x] Canvas resizes on `window.resize`: Playwright test that changes viewport size and asserts canvas width/height matches [US-01]
 - [ ] Grid contains exactly 400 independent tile meshes (asserted via `window.__vylux.debug.tileCount === 400`) [US-02]
 - [ ] Tile coordinate helper `tileToWorld(tileX, tileY)` exists in `src/grid.ts` and is unit-tested (Vitest): `(0,0)`, `(19,19)`, and a mid-grid coordinate each return deterministic world positions; all 400 positions are unique [US-02]
 - [ ] Each tile's default material color is `#0a0a0a` (asserted by sampling `window.__vylux.debug.tileColors[i]` for 10 randomly-chosen indices) [US-02]
@@ -84,7 +84,7 @@ Full spec: `docs/product/phases/foundation.md` (design direction, tech stack, st
 
 #### Documentation and reconciliation
 - [ ] `docs/manual/foundation.md` exists and covers: how to run the app, the grid layout, the keyboard controls (`1`, `2`, `Esc`), hover preview, click to place, occupancy rule, exit via outside-grid click [US-01, US-02, US-03, US-04, US-05]
-- [ ] `README.md` top-level section includes the quick-start (`npm install`, `npm run dev`) and links to `docs/manual/foundation.md` [US-01]
+- [x] `README.md` top-level section includes the quick-start (`npm install`, `npm run dev`) and links to `docs/manual/foundation.md` [US-01]
 - [ ] `AGENTS.md` reflects the introduced stack (TypeScript + Three.js + Vite), the `src/` module layout, the state machine shape, the verify command, and the state-ownership contract introduced in this phase (handled at Phase Reconciliation Gate) [phase]
 - [ ] Production build guard: `npm run build` followed by `npm run preview` serves an index where `window.__vylux === undefined` (Playwright against the preview server); dev build at `npm run dev` exposes it [phase]
 
