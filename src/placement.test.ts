@@ -6,6 +6,8 @@ import {
   hoverColorFor,
   ghostEmissiveFor,
   isTileOccupied,
+  computeGhostView,
+  computeHoverView,
   type PlacementState,
 } from './placement';
 
@@ -182,5 +184,80 @@ describe('isTileOccupied', () => {
   });
   it('returns false on empty placedUnits', () => {
     expect(isTileOccupied(idle, 3, 4)).toBe(false);
+  });
+});
+
+describe('computeGhostView', () => {
+  it('idle -> visible: false', () => {
+    expect(computeGhostView(idle)).toEqual({ visible: false });
+  });
+
+  it('placement without hoveredTile -> visible: false', () => {
+    expect(computeGhostView(blue)).toEqual({ visible: false });
+  });
+
+  it('placement + blue + hovered empty tile -> visible cyan at coord', () => {
+    const state: PlacementState = { ...blue, hoveredTile: { tileX: 3, tileY: 7 } };
+    expect(computeGhostView(state)).toEqual({
+      visible: true,
+      tileX: 3,
+      tileY: 7,
+      emissiveHex: '#00e5ff',
+    });
+  });
+
+  it('placement + red + hovered empty tile -> visible red-orange at coord', () => {
+    const state: PlacementState = { ...red, hoveredTile: { tileX: 2, tileY: 2 } };
+    expect(computeGhostView(state)).toEqual({
+      visible: true,
+      tileX: 2,
+      tileY: 2,
+      emissiveHex: '#ff5a1f',
+    });
+  });
+
+  it('placement + hovered OCCUPIED tile -> visible: false (occupied signal)', () => {
+    const state: PlacementState = {
+      mode: 'placement',
+      selectedUnitType: 'blue',
+      hoveredTile: { tileX: 4, tileY: 4 },
+      placedUnits: [{ tileX: 4, tileY: 4, type: 'red' }],
+    };
+    expect(computeGhostView(state)).toEqual({ visible: false });
+  });
+});
+
+describe('computeHoverView', () => {
+  it('idle -> highlight: false', () => {
+    expect(computeHoverView(idle)).toEqual({ highlight: false });
+  });
+
+  it('placement without hoveredTile -> highlight: false', () => {
+    expect(computeHoverView(blue)).toEqual({ highlight: false });
+  });
+
+  it('placement + blue + hovered tile -> highlight dim cyan', () => {
+    const state: PlacementState = { ...blue, hoveredTile: { tileX: 3, tileY: 7 } };
+    expect(computeHoverView(state)).toEqual({
+      highlight: true,
+      tileX: 3,
+      tileY: 7,
+      colorHex: '#0d4d57',
+    });
+  });
+
+  it('placement + red + hovered tile -> highlight dim red-orange (even if occupied)', () => {
+    const state: PlacementState = {
+      mode: 'placement',
+      selectedUnitType: 'red',
+      hoveredTile: { tileX: 5, tileY: 5 },
+      placedUnits: [{ tileX: 5, tileY: 5, type: 'blue' }],
+    };
+    expect(computeHoverView(state)).toEqual({
+      highlight: true,
+      tileX: 5,
+      tileY: 5,
+      colorHex: '#5a2311',
+    });
   });
 });

@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { buildGrid, type GridBundle } from './grid';
+import { buildGrid, tileToWorld, GRID_CONSTANTS, type GridBundle } from './grid';
+import {
+  computeGhostView,
+  computeHoverView,
+  type PlacementState,
+} from './placement';
 
 export const SCENE_CONSTANTS = {
   backgroundColor: '#0a0a0a',
@@ -9,7 +14,18 @@ export const SCENE_CONSTANTS = {
   viewSize: 12,
   ambientIntensity: 0.3,
   directionalIntensity: 0.8,
+  ghostSize: 0.8,
+  ghostOpacity: 0.4,
+  ghostY: 0.5,
+  ghostInitialEmissive: 0x00e5ff,
 } as const;
+
+export type GhostBundle = {
+  mesh: THREE.Mesh;
+  material: THREE.MeshStandardMaterial;
+};
+
+export type ContextLostRef = { current: boolean };
 
 export type SceneBundle = {
   scene: THREE.Scene;
@@ -17,11 +33,14 @@ export type SceneBundle = {
   renderer: THREE.WebGLRenderer;
   lights: { ambient: THREE.AmbientLight; directional: THREE.DirectionalLight };
   grid: GridBundle;
+  ghost: GhostBundle;
   backgroundColor: string;
   cameraRotation: { yawDeg: number; pitchDeg: number };
   lightCounts: { ambient: number; directional: number };
+  contextLost: ContextLostRef;
   resize: (width: number, height: number) => void;
   raycastCenter: () => { tileX: number; tileY: number } | null;
+  reconcile: (state: PlacementState) => void;
 };
 
 export function computeCameraPosition(
@@ -39,6 +58,25 @@ export function computeCameraPosition(
   };
 }
 
+function buildGhost(): GhostBundle {
+  const geometry = new THREE.BoxGeometry(
+    SCENE_CONSTANTS.ghostSize,
+    SCENE_CONSTANTS.ghostSize,
+    SCENE_CONSTANTS.ghostSize,
+  );
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: SCENE_CONSTANTS.ghostOpacity,
+    emissive: SCENE_CONSTANTS.ghostInitialEmissive,
+    emissiveIntensity: 1,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = 'ghost';
+  mesh.visible = false;
+  return { mesh, material };
+}
+
 export function createScene(): SceneBundle {
   const {
     backgroundColor,
@@ -48,6 +86,7 @@ export function createScene(): SceneBundle {
     viewSize,
     ambientIntensity,
     directionalIntensity,
+    ghostY,
   } = SCENE_CONSTANTS;
 
   const scene = new THREE.Scene();
@@ -65,6 +104,9 @@ export function createScene(): SceneBundle {
 
   const grid = buildGrid();
   scene.add(grid.group);
+
+  const ghost = buildGhost();
+  scene.add(ghost.mesh);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
@@ -96,16 +138,51 @@ export function createScene(): SceneBundle {
     return { tileX: ud.tileX, tileY: ud.tileY };
   };
 
+  const tileIndex = (tileX: number, tileY: number): number =>
+    tileY * GRID_CONSTANTS.gridSize + tileX;
+
+  let lastHover: { tileX: number; tileY: number } | null = null;
+
+  const reconcile = (state: PlacementState): void => {
+    if (lastHover !== null) {
+      const prev = grid.tileMeshes[tileIndex(lastHover.tileX, lastHover.tileY)];
+      (prev.material as THREE.MeshStandardMaterial).color.set(GRID_CONSTANTS.tileColor);
+      lastHover = null;
+    }
+
+    const hoverView = computeHoverView(state);
+    if (hoverView.highlight) {
+      const mesh = grid.tileMeshes[tileIndex(hoverView.tileX, hoverView.tileY)];
+      (mesh.material as THREE.MeshStandardMaterial).color.set(hoverView.colorHex);
+      lastHover = { tileX: hoverView.tileX, tileY: hoverView.tileY };
+    }
+
+    const ghostView = computeGhostView(state);
+    if (ghostView.visible) {
+      const world = tileToWorld(ghostView.tileX, ghostView.tileY);
+      ghost.mesh.position.set(world.x, ghostY, world.z);
+      ghost.material.emissive.set(ghostView.emissiveHex);
+      ghost.mesh.visible = true;
+    } else {
+      ghost.mesh.visible = false;
+    }
+  };
+
+  const contextLost: ContextLostRef = { current: false };
+
   return {
     scene,
     camera,
     renderer,
     lights: { ambient, directional },
     grid,
+    ghost,
     backgroundColor,
     cameraRotation: { yawDeg: cameraYawDeg, pitchDeg: -cameraElevationDeg },
     lightCounts: { ambient: 1, directional: 1 },
+    contextLost,
     resize,
     raycastCenter,
+    reconcile,
   };
 }

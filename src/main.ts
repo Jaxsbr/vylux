@@ -27,6 +27,7 @@ attachInputHandlers({
 
 function animate(): void {
   requestAnimationFrame(animate);
+  bundle.reconcile(state);
   bundle.renderer.render(bundle.scene, bundle.camera);
 }
 animate();
@@ -38,7 +39,5 @@ window.addEventListener('resize', () => {
 canvas.addEventListener('webglcontextlost', (event) => {
   event.preventDefault();
   console.error('[vylux] webglcontextlost', { timestamp: Date.now() });
-  if (hook) {
-    hook.debug.contextLost = true;
-  }
+  bundle.contextLost.current = true;
 });

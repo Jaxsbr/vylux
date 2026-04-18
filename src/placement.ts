@@ -83,3 +83,48 @@ export function isTileOccupied(
   }
   return false;
 }
+
+export type GhostView =
+  | { visible: false }
+  | { visible: true; tileX: number; tileY: number; emissiveHex: string };
+
+export type HoverView =
+  | { highlight: false }
+  | { highlight: true; tileX: number; tileY: number; colorHex: string };
+
+export function computeGhostView(state: PlacementState): GhostView {
+  if (
+    state.mode !== 'placement' ||
+    state.hoveredTile === null ||
+    state.selectedUnitType === null
+  ) {
+    return { visible: false };
+  }
+  const { tileX, tileY } = state.hoveredTile;
+  if (isTileOccupied(state, tileX, tileY)) {
+    return { visible: false };
+  }
+  return {
+    visible: true,
+    tileX,
+    tileY,
+    emissiveHex: ghostEmissiveFor(state.selectedUnitType),
+  };
+}
+
+export function computeHoverView(state: PlacementState): HoverView {
+  if (
+    state.mode !== 'placement' ||
+    state.hoveredTile === null ||
+    state.selectedUnitType === null
+  ) {
+    return { highlight: false };
+  }
+  const { tileX, tileY } = state.hoveredTile;
+  return {
+    highlight: true,
+    tileX,
+    tileY,
+    colorHex: hoverColorFor(state.selectedUnitType),
+  };
+}
