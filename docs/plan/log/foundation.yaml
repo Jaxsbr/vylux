@@ -198,3 +198,10 @@ entries:
     result: "queued"
     notes: "Mirrors US-03/US-04 split: pure first (this task), scene integration (placed mesh per-faction + debug.placedMeshes) next, click wiring + Playwright last. Pure slice alone closes L58-L60."
     tokens: "~2k"
+  - task: 14
+    time: "2026-04-18T10:17:28Z"
+    story: "[US-05]"
+    description: "Branch A: added pure tryPlace to src/placement.ts — discriminated union { ok: true, state } | { ok: false, reason, state }. Guards: not-in-placement (mode !== placement or selectedUnitType null), out-of-bounds (non-integer/NaN/outside 0..19), occupied (via isTileOccupied). Success returns fresh state with mode=idle, selectedUnitType=null, hoveredTile preserved, placedUnits += new unit with faction. Failures return the SAME state reference. Also exported GRID_SIZE constant (matches grid.ts GRID_CONSTANTS.gridSize — keeps placement.ts free of a grid.ts import). Added 7 Vitest cases covering happy path (blue + red), occupied, 5 out-of-bounds coords, 4 non-integer/NaN coords, not-in-placement, and immutability via JSON.stringify snapshot."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 67/67 (+7), playwright 11/11 (unchanged). Regression: net additive. Closes pure slice of US-05 L58, L59, L60. Remaining: scene integration (per-faction placed mesh rendering, debug.placedMeshes surface, reconcile teaches about placedUnits) and click wiring + Playwright (L61-L67, L77-L80)."
+    tokens: "~6k"

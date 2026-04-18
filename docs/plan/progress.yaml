@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 14
-  next_task: "[US-05] Pure tryPlace. Extend src/placement.ts with tryPlace(state, tileX, tileY): { ok: true; state: PlacementState } | { ok: false; reason: 'occupied' | 'out-of-bounds' | 'not-in-placement' }. Bounds check via GRID_CONSTANTS.gridSize (0..19 inclusive, Number.isInteger); also rejects NaN. Not-in-placement reason when mode !== 'placement' or selectedUnitType is null. Occupied via isTileOccupied. On success: returns fresh state with mode='idle', selectedUnitType=null, hoveredTile preserved (scene reconcile will clear its visual since mode !== placement), placedUnits appended with { tileX, tileY, type: selectedUnitType }. On any failure: returns the ORIGINAL state reference (never mutates). Extend src/placement.test.ts: tryPlace on unoccupied tile returns ok:true + placedUnits.length+=1 + mode='idle' + selectedUnitType=null; tryPlace on occupied tile returns ok:false reason='occupied' AND state is same reference; tryPlace out-of-bounds for (-1,0), (0,20), (20,20), (NaN,0), (0.5, 1) returns ok:false reason='out-of-bounds' AND state same reference; tryPlace from idle mode returns ok:false reason='not-in-placement'; immutability via JSON.stringify snapshot. Closes US-05 L58, L59, L60 pure criteria. Scene/click wiring arrives next task."
+  next_task: null
   last_result: pass
   consecutive_fails: 0
 
