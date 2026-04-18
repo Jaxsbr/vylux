@@ -44,3 +44,10 @@ entries:
     result: "queued"
     notes: "Pause at checkpoint — 2 real task iterations completed this invocation. Operator can resume by invoking iterate. Remaining phase work: close US-01, then US-02 grid, US-03 state machine, US-04 hover, US-05 click, + doc/AGENTS reconciliation and manual-verification sign-off."
     tokens: "~2k"
+  - task: 3
+    time: "2026-04-18T08:24:30Z"
+    story: "[US-01]"
+    description: "Branch A: split playwright.config.ts into dev (5180) + preview (5181) projects with their own webServers; added tests/e2e/smoke-dev.spec.ts (dev port >= 1024 + HTTP 200 on /) and tests/e2e/preview.spec.ts (window.__vylux === undefined on production bundle after npm run build && npm run preview)."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 3/3, playwright 6/6 (dev project: foundation x3 + smoke-dev x2; preview project: preview x1). Regression check: net additive (3 -> 6 playwright, no tests removed or regressed). Closes dev HTTP smoke + production build guard US-01 criteria. US-01 is NOT yet story-complete: L87 README quick-start + link to docs/manual/foundation.md and L86 manual doc stub remain unmet — those are the next task."
+    tokens: "~8k"

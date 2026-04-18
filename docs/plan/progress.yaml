@@ -16,8 +16,8 @@ state:
   status: running
 
   # --- Task orchestration (owner: iterator) ---
-  task_number: 3
-  next_task: "[US-01] Finish US-01: add dev HTTP 200 smoke assertion (port >= 1024) and production-build guard. Update playwright.config.ts to use two projects (dev, preview) each with its own webServer: dev on 5180 (npm run dev), preview on 5181 (npm run build && npm run preview). Split tests by testMatch. Add tests/e2e/smoke-dev.spec.ts: assert page.goto('/').response().status() === 200 and config port >= 1024. Add tests/e2e/preview.spec.ts: assert window.__vylux === undefined on the preview server (production bundle strips dev-gated hook). Keep foundation.spec.ts assigned to the dev project. Confirm npm run test:e2e still passes for both projects."
+  task_number: 4
+  next_task: null
   last_result: pass
   consecutive_fails: 0
 
