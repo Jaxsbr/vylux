@@ -247,3 +247,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean (unchanged surface), vitest 79/79 (unchanged), playwright not re-run — doc-only change with zero code surface, verify gate satisfied by tsc+vitest for the iteration rhythm. Closes L86 for US-01, US-02, US-03, US-04, US-05 simultaneously. Mechanical+documentation done-when criteria are now green for all five stories. Remaining blockers before phase-complete: operator sign-offs (L69, L71, L75, L76, L79, L80, L83) in docs/manual-verification/foundation.md — these require Jaco to run the dev server and tick the visual 'reads as' boxes — and the Phase Reconciliation Gate (AGENTS.md stack + module layout + state machine + verify command + state-ownership contract, per L88). Story Completion Gate for US-01 and US-03 can fire now (no operator sign-off tags); US-02, US-04, US-05 wait on their operator sign-off boxes before story-complete commits."
     tokens: "~5k"
+  - task: 18
+    time: "2026-04-18T10:33:01Z"
+    story: "[phase]"
+    description: "Branch B: queued Phase Reconciliation of AGENTS.md. Current AGENTS.md is a 13-line purpose + quality-checks stub. Expand to include: tech stack (TypeScript strict / Three.js 0.170 / Vite 5.4 / Vitest 2.1 / Playwright 1.48), module layout (placement.ts pure state machine, input.ts thin dispatcher, scene.ts per-frame reconcile, grid.ts tile+divider helpers, debug.ts dev-only hook, main.ts orchestration), placement state machine shape and pure transitions (handleKey, handlePointerMove, handleClick, tryPlace, computeGhostView, computeHoverView), verify command (npx tsc --noEmit && npm run test && npm run test:e2e), and state-ownership contract (scene.ts <-/-> input.ts decoupling; window.__vylux.state as read-only dev mirror)."
+    result: "queued"
+    notes: "Satisfies the Phase Reconciliation Gate slice of L88 that the build-loop skill can automate; remaining L88 items (state-ownership contract audit via source-scan) already enforced by src/source-scan.test.ts. After this lands, only operator sign-offs in docs/manual-verification/foundation.md block phase_complete."
+    tokens: "~2k"

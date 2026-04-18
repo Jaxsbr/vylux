@@ -16,8 +16,8 @@ state:
   status: running
 
   # --- Task orchestration (owner: iterator) ---
-  task_number: 17
-  next_task: null
+  task_number: 18
+  next_task: "[phase] Phase Reconciliation — expand AGENTS.md with the stack introduced in the foundation phase (TypeScript strict + Three.js + Vite + Vitest + Playwright), src/ module layout (placement.ts pure state machine, input.ts thin dispatcher, scene.ts per-frame reconcile, grid.ts tile + divider helpers, debug.ts dev-only hook, main.ts orchestration), placement state machine shape ({ mode, selectedUnitType, hoveredTile, placedUnits } + pure transitions handleKey/handlePointerMove/handleClick/tryPlace), verify command (`npx tsc --noEmit && npm run test && npm run test:e2e` — same command test-gate runs), and state-ownership contract (scene.ts has zero imports from input.ts; input.ts has zero imports from scene.ts; window.__vylux.state is a read-only mirror gated by import.meta.env.DEV). Closes L88."
   last_result: pass
   consecutive_fails: 0
 
