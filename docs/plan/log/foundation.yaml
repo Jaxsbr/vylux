@@ -23,3 +23,10 @@ entries:
     result: "pass"
     notes: "US-01 criterion partially met: package.json + index.html + src/main.ts exist with all required deps declared. Remaining US-01 criteria (scene, camera, lights, background color, context-loss handling, canvas resize, dev-server smoke, prod build) are execution work for subsequent tasks. Test baseline promoted."
     tokens: "~8k"
+  - task: 2
+    time: "2026-04-18T08:08:00Z"
+    story: "[US-01]"
+    description: "Branch B: queued scene-foundation task — implement src/scene.ts, src/debug.ts, wire main.ts render loop + resize + webglcontextlost; expand Playwright to validate debug hook + visual contract."
+    result: "queued"
+    notes: "Single concern = render a bootable isometric scene with debug hooks validated by Playwright. Grid (US-02) and state machine (US-03+) remain for later tasks."
+    tokens: "~2k"

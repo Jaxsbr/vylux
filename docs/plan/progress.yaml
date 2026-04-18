@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 2
-  next_task: null
+  next_task: "[US-01] Implement isometric scene foundation. Create src/scene.ts (OrthographicCamera rotated 45° Y + pitched ~30°, AmbientLight + DirectionalLight, background #0a0a0a, WebGLRenderer appended to document.body). Create src/debug.ts with attachDebugHook() that dev-gates (import.meta.env.DEV) window.__vylux = { state: {}, debug: { backgroundColor, cameraType, cameraRotation: {yawDeg,pitchDeg}, lightCounts: {ambient,directional}, contextLost: false, tileCount: 0 } }. Update src/main.ts to construct scene, start render loop, handle window.resize (update camera + renderer), handle canvas webglcontextlost (console.error with context, set debug.contextLost=true, preventDefault). Add playwright.config.ts webServer: npm run dev on port 5173 with reuseExistingServer. Replace tests/e2e/scaffold.spec.ts with tests/e2e/foundation.spec.ts asserting: page loads without console errors, debug.backgroundColor === '#0a0a0a', debug.cameraType === 'OrthographicCamera', debug.cameraRotation yawDeg≈45 and pitchDeg≈-30 (±0.5), debug.lightCounts {ambient>=1,directional>=1}, canvas resizes on viewport change, webglcontextlost sets debug.contextLost=true. Keep src/scaffold.test.ts or replace with src/debug.test.ts covering debug hook shape."
   last_result: pass
   consecutive_fails: 0
 
