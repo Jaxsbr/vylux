@@ -32,3 +32,4 @@ state:
   # --- Tracking (owner: iterator) ---
   completed_stories:
     - US-01
+    - US-02

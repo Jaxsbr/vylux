@@ -26,11 +26,11 @@ Full spec: `docs/product/phases/foundation.md` (design direction, tech stack, st
 - [x] Camera rotation is 45° around world Y and pitched ~30° below horizontal (asserted within 0.5° tolerance via `window.__vylux.debug.cameraRotation`) [US-01]
 - [x] Scene contains at least one `AmbientLight` and one `DirectionalLight` (asserted via `window.__vylux.debug.lightCounts`) [US-01]
 - [x] Canvas resizes on `window.resize`: Playwright test that changes viewport size and asserts canvas width/height matches [US-01]
-- [ ] Grid contains exactly 400 independent tile meshes (asserted via `window.__vylux.debug.tileCount === 400`) [US-02]
-- [ ] Tile coordinate helper `tileToWorld(tileX, tileY)` exists in `src/grid.ts` and is unit-tested (Vitest): `(0,0)`, `(19,19)`, and a mid-grid coordinate each return deterministic world positions; all 400 positions are unique [US-02]
-- [ ] Each tile's default material color is `#0a0a0a` (asserted by sampling `window.__vylux.debug.tileColors[i]` for 10 randomly-chosen indices) [US-02]
-- [ ] Grid line meshes (or line segments) exist and use an emissive white material with low intensity (asserted via `window.__vylux.debug.gridLineMaterial.emissiveIntensity > 0 && emissive === 0xffffff`) [US-02]
-- [ ] Raycasting from viewport center hits a tile mesh and returns a valid `(tileX, tileY)` (Playwright test) [US-02]
+- [x] Grid contains exactly 400 independent tile meshes (asserted via `window.__vylux.debug.tileCount === 400`) [US-02]
+- [x] Tile coordinate helper `tileToWorld(tileX, tileY)` exists in `src/grid.ts` and is unit-tested (Vitest): `(0,0)`, `(19,19)`, and a mid-grid coordinate each return deterministic world positions; all 400 positions are unique [US-02]
+- [x] Each tile's default material color is `#0a0a0a` (asserted by sampling `window.__vylux.debug.tileColors[i]` for 10 randomly-chosen indices) [US-02]
+- [x] Grid line meshes (or line segments) exist and use an emissive white material with low intensity (asserted via `window.__vylux.debug.gridLineMaterial.emissiveIntensity > 0 && emissive === 0xffffff`) [US-02]
+- [x] Raycasting from viewport center hits a tile mesh and returns a valid `(tileX, tileY)` (Playwright test) [US-02]
 
 #### Placement-mode state machine
 - [ ] Unit test (Vitest): from `{ mode: 'idle', selectedUnitType: null }`, key `1` -> `{ mode: 'placement', selectedUnitType: 'blue' }` [US-03]
@@ -67,8 +67,8 @@ Full spec: `docs/product/phases/foundation.md` (design direction, tech stack, st
 
 #### Visual "reads as" criteria (paired: measurable proxy + operator sign-off)
 - [ ] Manual verification doc `docs/manual-verification/foundation.md` exists with one checkbox per "reads as" item below; every item is signed off before phase close [phase]
-- [ ] Grid divider material: `material.emissive.getHexString() === 'ffffff'` and `material.emissiveIntensity` is in `[0.1, 0.4]` (low-intensity band — asserted via `window.__vylux.debug.gridLineMaterial`) [US-02]
-- [ ] Operator sign-off: grid "reads as" a Tron-style neon grid — white dividers visible against charcoal, tiles nearly invisible between the lines [US-02]
+- [x] Grid divider material: `material.emissive.getHexString() === 'ffffff'` and `material.emissiveIntensity` is in `[0.1, 0.4]` (low-intensity band — asserted via `window.__vylux.debug.gridLineMaterial`) [US-02]
+- [x] Operator sign-off: grid "reads as" a Tron-style neon grid — white dividers visible against charcoal, tiles nearly invisible between the lines [US-02]
 - [ ] Ghost mesh material: `material.transparent === true` and `material.opacity` is in `[0.35, 0.45]` (asserted via `window.__vylux.debug.ghost.material`) [US-04]
 - [ ] Ghost mesh blue: `material.emissive.getHexString() === '00e5ff'` (documented cyan hex) [US-04]
 - [ ] Ghost mesh red: `material.emissive.getHexString() === 'ff5a1f'` (documented red-orange hex) [US-04]
