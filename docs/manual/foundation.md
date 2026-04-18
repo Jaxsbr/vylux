@@ -31,7 +31,26 @@ Production builds (`npm run build` → `npm run preview` on <http://localhost:51
 
 ## Grid layout
 
-> TODO (US-02): 20×20 grid, tile coordinates, tile→world mapping, neon divider lines.
+A 20×20 grid of unit tiles sits flat on the XZ ground plane, centered on the world origin. Coordinates `(tileX, tileY)` range from `(0, 0)` at the near corner to `(19, 19)` at the far corner:
+
+- Tile `(0, 0)` world position: `(-9.5, 0, -9.5)`
+- Tile `(19, 19)` world position: `(9.5, 0, 9.5)`
+- Tile `(10, 10)` world position: `(0.5, 0, 0.5)`
+
+Each tile is its own mesh with its own `MeshStandardMaterial` (default color `#0a0a0a`) so per-tile state changes — hover highlights, placed units — do not leak across the grid. Tile meshes carry `userData = { tileX, tileY }` for raycast lookup.
+
+Between the tiles, 21 horizontal + 21 vertical divider strips share a single emissive-white `MeshStandardMaterial` (`emissive = 0xffffff`, `emissiveIntensity = 0.25`) drawn slightly above the tile plane (`y = 0.02`) so they don't z-fight. The divider material is the single source of truth for "grid line" visuals — adjusting its intensity retunes the whole grid.
+
+The dev-only debug hook exposes grid state for Playwright and manual inspection:
+
+```js
+window.__vylux.debug.tileCount            // 400
+window.__vylux.debug.tileColors[i]        // '#0a0a0a' for every tile at rest
+window.__vylux.debug.gridLineMaterial     // { emissive: 'ffffff', emissiveIntensity: 0.25 }
+window.__vylux.raycastCenter()            // { tileX, tileY } from viewport center, or null
+```
+
+See `src/grid.ts` for `GRID_CONSTANTS` and the `tileToWorld(tileX, tileY)` helper.
 
 ## Controls
 
