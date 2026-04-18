@@ -146,6 +146,20 @@ export function tryPlace(
   return { ok: true, state: next };
 }
 
+export function handleClick(
+  state: PlacementState,
+  hit: TileRef | null,
+  button: number,
+): PlacementState {
+  if (button !== 0) return state;
+  if (state.mode !== 'placement' || state.selectedUnitType === null) return state;
+  if (hit === null) {
+    return { ...state, mode: 'idle', selectedUnitType: null };
+  }
+  const result = tryPlace(state, hit.tileX, hit.tileY);
+  return result.state;
+}
+
 export function computeHoverView(state: PlacementState): HoverView {
   if (
     state.mode !== 'placement' ||

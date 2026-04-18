@@ -9,6 +9,7 @@ import {
   computeGhostView,
   computeHoverView,
   tryPlace,
+  handleClick,
   type PlacementState,
 } from './placement';
 
@@ -346,5 +347,65 @@ describe('tryPlace — click placement + occupancy (phase-goal L58-L60)', () => 
     const snap = JSON.stringify(placementBlue);
     tryPlace(placementBlue, 9, 9);
     expect(JSON.stringify(placementBlue)).toBe(snap);
+  });
+});
+
+describe('handleClick — click dispatch (phase-goal L61-L66)', () => {
+  const placementBlue: PlacementState = {
+    mode: 'placement',
+    selectedUnitType: 'blue',
+    hoveredTile: { tileX: 5, tileY: 5 },
+    placedUnits: [],
+  };
+
+  it('left-click on empty tile places unit and exits to idle', () => {
+    const next = handleClick(placementBlue, { tileX: 5, tileY: 5 }, 0);
+    expect(next.placedUnits).toHaveLength(1);
+    expect(next.placedUnits[0]).toEqual({ tileX: 5, tileY: 5, type: 'blue' });
+    expect(next.mode).toBe('idle');
+    expect(next.selectedUnitType).toBeNull();
+  });
+
+  it('left-click on occupied tile returns same state reference (no placement, stays in placement mode)', () => {
+    const withUnit: PlacementState = {
+      ...placementBlue,
+      placedUnits: [{ tileX: 5, tileY: 5, type: 'red' }],
+    };
+    const next = handleClick(withUnit, { tileX: 5, tileY: 5 }, 0);
+    expect(next).toBe(withUnit);
+    expect(next.placedUnits).toHaveLength(1);
+    expect(next.mode).toBe('placement');
+  });
+
+  it('left-click with null hit (outside grid) exits to idle without placing', () => {
+    const next = handleClick(placementBlue, null, 0);
+    expect(next.mode).toBe('idle');
+    expect(next.selectedUnitType).toBeNull();
+    expect(next.placedUnits).toHaveLength(0);
+  });
+
+  it('left-click from idle is a no-op (same reference)', () => {
+    const next = handleClick(INITIAL_STATE, { tileX: 5, tileY: 5 }, 0);
+    expect(next).toBe(INITIAL_STATE);
+  });
+
+  it('right-click (button 2) in placement with hit is a no-op (same reference)', () => {
+    const next = handleClick(placementBlue, { tileX: 5, tileY: 5 }, 2);
+    expect(next).toBe(placementBlue);
+  });
+
+  it('middle-click (button 1) in placement with hit is a no-op (same reference)', () => {
+    const next = handleClick(placementBlue, { tileX: 5, tileY: 5 }, 1);
+    expect(next).toBe(placementBlue);
+  });
+
+  it('left-click with out-of-bounds hit returns same reference (tryPlace guard)', () => {
+    const next = handleClick(placementBlue, { tileX: -1, tileY: 0 }, 0);
+    expect(next).toBe(placementBlue);
+  });
+
+  it('left-click preserves hoveredTile on successful placement', () => {
+    const next = handleClick(placementBlue, { tileX: 5, tileY: 5 }, 0);
+    expect(next.hoveredTile).toEqual({ tileX: 5, tileY: 5 });
   });
 });

@@ -1,4 +1,10 @@
-import { handleKey, handlePointerMove, type PlacementState, type TileRef } from './placement';
+import {
+  handleClick,
+  handleKey,
+  handlePointerMove,
+  type PlacementState,
+  type TileRef,
+} from './placement';
 
 export type KeydownHandlerOptions = {
   getState: () => PlacementState;
@@ -42,6 +48,31 @@ export function createPointerMoveHandler(
   };
 }
 
+export type PointerDownHandlerOptions = {
+  getState: () => PlacementState;
+  setState: (next: PlacementState) => void;
+  raycastPointer: (clientX: number, clientY: number) => TileRef | null;
+  canvas: HTMLCanvasElement;
+};
+
+export function createPointerDownHandler(
+  options: PointerDownHandlerOptions,
+): (event: PointerEvent) => void {
+  const { getState, setState, raycastPointer, canvas } = options;
+  return (event: PointerEvent): void => {
+    const current = getState();
+    const hit = raycastPointer(event.clientX, event.clientY);
+    const next = handleClick(current, hit, event.button);
+    if (next === current) {
+      return;
+    }
+    setState(next);
+    if (next.mode === 'idle') {
+      canvas.style.cursor = 'default';
+    }
+  };
+}
+
 type WindowTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
 type CanvasTarget = Pick<HTMLCanvasElement, 'addEventListener' | 'removeEventListener'>;
 
@@ -66,10 +97,20 @@ export function attachInputHandlers(options: AttachInputHandlersOptions): InputH
   const canvasTarget = canvas as CanvasTarget;
   canvasTarget.addEventListener('pointermove', pointerMoveListener);
 
+  const pointerDownHandler = createPointerDownHandler({
+    getState,
+    setState,
+    raycastPointer,
+    canvas,
+  });
+  const pointerDownListener = pointerDownHandler as EventListener;
+  canvasTarget.addEventListener('pointerdown', pointerDownListener);
+
   return {
     detach: () => {
       target.removeEventListener('keydown', keydownListener);
       canvasTarget.removeEventListener('pointermove', pointerMoveListener);
+      canvasTarget.removeEventListener('pointerdown', pointerDownListener);
     },
   };
 }

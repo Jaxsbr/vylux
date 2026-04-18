@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createKeydownHandler,
   createPointerMoveHandler,
+  createPointerDownHandler,
   attachInputHandlers,
 } from './input';
 import { INITIAL_STATE, type PlacementState, type TileRef } from './placement';
@@ -152,8 +153,79 @@ describe('createPointerMoveHandler', () => {
   });
 });
 
+describe('createPointerDownHandler', () => {
+  it('left-click on a hovered empty tile places a unit, exits to idle, and restores cursor', () => {
+    const holder = stateHolder({
+      mode: 'placement',
+      selectedUnitType: 'blue',
+      hoveredTile: { tileX: 4, tileY: 4 },
+      placedUnits: [],
+    });
+    const canvas = makeCanvas();
+    canvas.style.cursor = 'none';
+    const raycastPointer = (): TileRef | null => ({ tileX: 4, tileY: 4 });
+    const handler = createPointerDownHandler({ ...holder, canvas, raycastPointer });
+    handler({ clientX: 0, clientY: 0, button: 0 } as PointerEvent);
+    const s = holder.getState();
+    expect(s.placedUnits).toHaveLength(1);
+    expect(s.placedUnits[0]).toEqual({ tileX: 4, tileY: 4, type: 'blue' });
+    expect(s.mode).toBe('idle');
+    expect(canvas.style.cursor).toBe('default');
+  });
+
+  it('right-click (button 2) is a no-op (no setState call, cursor unchanged)', () => {
+    const holder = stateHolder({
+      mode: 'placement',
+      selectedUnitType: 'blue',
+      hoveredTile: { tileX: 4, tileY: 4 },
+      placedUnits: [],
+    });
+    const canvas = makeCanvas();
+    canvas.style.cursor = 'none';
+    const raycastPointer = (): TileRef | null => ({ tileX: 4, tileY: 4 });
+    const handler = createPointerDownHandler({ ...holder, canvas, raycastPointer });
+    handler({ clientX: 0, clientY: 0, button: 2 } as PointerEvent);
+    expect(holder.setCount()).toBe(0);
+    expect(canvas.style.cursor).toBe('none');
+  });
+
+  it('left-click outside grid (null hit) exits to idle and restores cursor', () => {
+    const holder = stateHolder({
+      mode: 'placement',
+      selectedUnitType: 'red',
+      hoveredTile: null,
+      placedUnits: [],
+    });
+    const canvas = makeCanvas();
+    canvas.style.cursor = 'none';
+    const raycastPointer = (): TileRef | null => null;
+    const handler = createPointerDownHandler({ ...holder, canvas, raycastPointer });
+    handler({ clientX: 0, clientY: 0, button: 0 } as PointerEvent);
+    const s = holder.getState();
+    expect(s.mode).toBe('idle');
+    expect(s.placedUnits).toHaveLength(0);
+    expect(canvas.style.cursor).toBe('default');
+  });
+
+  it('left-click on occupied tile is a no-op (no setState call, cursor unchanged)', () => {
+    const holder = stateHolder({
+      mode: 'placement',
+      selectedUnitType: 'blue',
+      hoveredTile: { tileX: 2, tileY: 2 },
+      placedUnits: [{ tileX: 2, tileY: 2, type: 'red' }],
+    });
+    const canvas = makeCanvas();
+    canvas.style.cursor = 'none';
+    const raycastPointer = (): TileRef | null => ({ tileX: 2, tileY: 2 });
+    const handler = createPointerDownHandler({ ...holder, canvas, raycastPointer });
+    handler({ clientX: 0, clientY: 0, button: 0 } as PointerEvent);
+    expect(holder.setCount()).toBe(0);
+    expect(canvas.style.cursor).toBe('none');
+  });
+});
+
 describe('attachInputHandlers', () => {
-  it('binds keydown AND pointermove listeners and detach() removes both', () => {
+  it('binds keydown + pointermove + pointerdown listeners and detach() removes all three', () => {
     const listeners = new Map<string, EventListener>();
     const target = {
       addEventListener: vi.fn((type: string, listener: EventListener) => {
@@ -172,14 +244,23 @@ describe('attachInputHandlers', () => {
     const handle = attachInputHandlers({ ...holder, canvas, target, raycastPointer });
 
     expect(target.addEventListener).toHaveBeenCalledTimes(1);
-    expect(listeners.size).toBe(2);
+    expect(listeners.size).toBe(3);
     expect(listeners.get('window:keydown')).toBeDefined();
     expect(listeners.get('canvas:pointermove')).toBeDefined();
+    expect(listeners.get('canvas:pointerdown')).toBeDefined();
 
     listeners.get('window:keydown')!({ key: '1' } as unknown as Event);
     expect(holder.getState().selectedUnitType).toBe('blue');
     listeners.get('canvas:pointermove')!({ clientX: 5, clientY: 5 } as unknown as Event);
     expect(holder.getState().hoveredTile).toEqual({ tileX: 4, tileY: 4 });
+    listeners.get('canvas:pointerdown')!({
+      clientX: 5,
+      clientY: 5,
+      button: 0,
+    } as unknown as Event);
+    expect(holder.getState().placedUnits).toHaveLength(1);
+    expect(holder.getState().placedUnits[0]).toEqual({ tileX: 4, tileY: 4, type: 'blue' });
+    expect(holder.getState().mode).toBe('idle');
 
     handle.detach();
     expect(target.removeEventListener).toHaveBeenCalledTimes(1);

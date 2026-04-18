@@ -249,6 +249,161 @@ test.describe('US-01 scene foundation', () => {
     expect(hoveredTile).not.toBeNull();
   });
 
+  test('left-click places a blue unit, exits to idle, and materializes cyan mesh (US-05)', async ({
+    page,
+  }) => {
+    const { consoleErrors, pageErrors } = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    await page.keyboard.press('1');
+    await page.mouse.move(400, 300);
+    await page.waitForFunction(() => window.__vylux!.state.hoveredTile !== null);
+    await page.mouse.click(400, 300, { button: 'left' });
+
+    await page.waitForFunction(
+      () => window.__vylux!.state.placedUnits.length === 1 && window.__vylux!.state.mode === 'idle',
+      null,
+      { timeout: 2000 },
+    );
+
+    const snap = await page.evaluate(() => {
+      const v = window.__vylux!;
+      const m = v.debug.placedMeshes[0];
+      return {
+        unit: v.state.placedUnits[0],
+        mode: v.state.mode,
+        ghostVisible: v.debug.ghost.visible,
+        placedCount: v.debug.placedCount,
+        cursor: (document.querySelector('canvas') as HTMLCanvasElement).style.cursor,
+        material: m?.material,
+        position: m?.position,
+        type: m?.type,
+      };
+    });
+    expect(snap.unit.type).toBe('blue');
+    expect(Number.isInteger(snap.unit.tileX)).toBe(true);
+    expect(Number.isInteger(snap.unit.tileY)).toBe(true);
+    expect(snap.mode).toBe('idle');
+    expect(snap.ghostVisible).toBe(false);
+    expect(snap.placedCount).toBe(1);
+    expect(snap.cursor).toBe('default');
+    expect(snap.type).toBe('blue');
+    expect(snap.material!.emissive).toBe('00e5ff');
+    expect(snap.material!.opacity).toBe(1);
+    expect(snap.material!.transparent).toBe(false);
+    expect(snap.position!.y).toBeCloseTo(0.5, 5);
+
+    expect(consoleErrors).toEqual([]);
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('left-click places a red unit with red-orange emissive (US-05)', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    await page.keyboard.press('2');
+    await page.mouse.move(400, 300);
+    await page.waitForFunction(() => window.__vylux!.state.hoveredTile !== null);
+    await page.mouse.click(400, 300, { button: 'left' });
+
+    await page.waitForFunction(
+      () => window.__vylux!.state.placedUnits.length === 1 && window.__vylux!.state.mode === 'idle',
+      null,
+      { timeout: 2000 },
+    );
+
+    const snap = await page.evaluate(() => {
+      const v = window.__vylux!;
+      const m = v.debug.placedMeshes[0];
+      return { type: m?.type, emissive: m?.material.emissive, unitType: v.state.placedUnits[0].type };
+    });
+    expect(snap.unitType).toBe('red');
+    expect(snap.type).toBe('red');
+    expect(snap.emissive).toBe('ff5a1f');
+  });
+
+  test('clicking an occupied tile does not place a second unit and stays in placement mode (US-05 L64)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    await page.keyboard.press('1');
+    await page.mouse.move(400, 300);
+    await page.waitForFunction(() => window.__vylux!.state.hoveredTile !== null);
+    await page.mouse.click(400, 300, { button: 'left' });
+    await page.waitForFunction(() => window.__vylux!.state.placedUnits.length === 1);
+
+    await page.keyboard.press('1');
+    await page.mouse.move(400, 300);
+    await page.waitForFunction(() => window.__vylux!.state.mode === 'placement');
+    const ghostBefore = await page.evaluate(() => window.__vylux!.debug.ghost.visible);
+    expect(ghostBefore).toBe(false);
+
+    await page.mouse.click(400, 300, { button: 'left' });
+    await page.waitForTimeout(100);
+
+    const after = await page.evaluate(() => ({
+      length: window.__vylux!.state.placedUnits.length,
+      mode: window.__vylux!.state.mode,
+    }));
+    expect(after.length).toBe(1);
+    expect(after.mode).toBe('placement');
+  });
+
+  test('left-click outside the grid exits placement to idle (US-05 L65)', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    await page.keyboard.press('1');
+    await page.mouse.move(10, 10);
+    await page.waitForFunction(() => window.__vylux!.state.hoveredTile === null);
+    await page.mouse.click(10, 10, { button: 'left' });
+
+    await page.waitForFunction(() => window.__vylux!.state.mode === 'idle', null, { timeout: 2000 });
+    const after = await page.evaluate(() => ({
+      length: window.__vylux!.state.placedUnits.length,
+      selected: window.__vylux!.state.selectedUnitType,
+    }));
+    expect(after.length).toBe(0);
+    expect(after.selected).toBeNull();
+  });
+
+  test('right-click and middle-click do not place units or exit placement (US-05 L66)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    await page.keyboard.press('1');
+    await page.mouse.move(400, 300);
+    await page.waitForFunction(() => window.__vylux!.state.hoveredTile !== null);
+
+    await page.mouse.click(400, 300, { button: 'right' });
+    await page.waitForTimeout(100);
+    const afterRight = await page.evaluate(() => ({
+      length: window.__vylux!.state.placedUnits.length,
+      mode: window.__vylux!.state.mode,
+    }));
+    expect(afterRight.length).toBe(0);
+    expect(afterRight.mode).toBe('placement');
+
+    await page.mouse.click(400, 300, { button: 'middle' });
+    await page.waitForTimeout(100);
+    const afterMiddle = await page.evaluate(() => ({
+      length: window.__vylux!.state.placedUnits.length,
+      mode: window.__vylux!.state.mode,
+    }));
+    expect(afterMiddle.length).toBe(0);
+    expect(afterMiddle.mode).toBe('placement');
+  });
+
   test('webglcontextlost is handled without uncaught error', async ({ page }) => {
     const { pageErrors } = attachConsoleGuard(page);
     await page.goto('/');
