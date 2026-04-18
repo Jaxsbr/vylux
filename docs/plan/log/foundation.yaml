@@ -275,3 +275,10 @@ entries:
     result: "queued"
     notes: "Next iteration: Branch A executes review-pr skill, posts inline comments to PR #1, flips review_stage -> review_posted, queues handle-pr-review."
     tokens: "~4k"
+  - task: 21
+    time: "2026-04-18T11:40:54Z"
+    story: "[review]"
+    description: "review-pr executed against PR #1. Posted 5 inline comments: 0 Critical, 2 Concern (scene.reconcile no removal path; handleClick null-vs-oob asymmetry), 3 Nit (reconcile rewrites regardless of change; resize/webglcontextlost no teardown; handlePointerMove NaN-unsafe identity). Review id 4134280175, event COMMENT."
+    result: "pass"
+    notes: "review_stage -> review_posted. Next iteration: Branch B queues handle-pr-review to triage the 2 Concerns + 3 Nits."
+    tokens: "~8k"
