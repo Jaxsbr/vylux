@@ -177,3 +177,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean, vitest 57/57 (+9), playwright 9/9 (unchanged — webglcontextlost test still green via the new ref plumbing). Regression: net additive behavior. Closes pure slice of US-04 L47-L53, observable parts of L72-L74 (ghost material hex/opacity via debug.ghost) and L81-L82 (hover tile color via debug.tileColors). Playwright assertions for L47-L54 arrive in next task (input wiring — pointermove listener + off-grid handling). Also note: the per-frame reconcile model means debug.ghost/tileColors reflect the latest state every snapshot — good for Playwright timing."
     tokens: "~11k"
+  - task: 13
+    time: "2026-04-18T10:07:30Z"
+    story: "[US-04]"
+    description: "Branch B: queued pointermove wiring. Add bundle.raycastPointer(clientX, clientY) in src/scene.ts (converts client coords to NDC via canvas rect, raycasts tileMeshes). Extend src/input.ts AttachInputHandlersOptions with raycastPointer; attach a pointermove listener to canvas that pipes through handlePointerMove; extend detach() to unbind both keydown and pointermove. Playwright asserts ghost visibility + emissive flip on 1->2, hover tile color swap on move, Escape and off-grid clears, 20-move rapid sweep leaves ghostCount===1."
+    result: "queued"
+    notes: "Closes US-04 L47-L54, Playwright-visible slices of L72-L74, L81-L82, and mousemove portion of L92. After this lands US-04 story-complete EXCEPT for L86 manual Hover section and L75-L76/L83 operator sign-offs. Main risks: Playwright page.mouse.move addressing — ghost position is computed from tileToWorld(x,y) using the OrthographicCamera, so the center-of-viewport move should raycast to tile (10,10). Use a tolerance-free assert on debug.ghost.visible+emissive rather than exact tile coord to stay robust."
+    tokens: "~3k"
