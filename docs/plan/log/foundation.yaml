@@ -191,3 +191,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean, vitest 60/60 (+3), playwright 11/11 (+2). Regression: net additive — all prior tests still green. Closes US-04 L47-L54, visible slices of L72-L74 and L81-L82, and the mousemove portion of L92. US-04 remaining: L86 Hover manual section (docs, shares line with US-01/02/03/05), L75-L76 and L83 operator sign-offs (Jaco ticks at phase close)."
     tokens: "~10k"
+  - task: 14
+    time: "2026-04-18T10:15:30Z"
+    story: "[US-05]"
+    description: "Branch B: queued US-05 pure tryPlace. Extend src/placement.ts with tryPlace(state, tileX, tileY) returning discriminated union { ok: true, state } | { ok: false, reason: 'occupied'|'out-of-bounds'|'not-in-placement' }. On success mutates to idle + appends placedUnit with selectedUnitType. On failure returns same state reference. Vitest covers happy path, occupied, out-of-bounds (4 variants + NaN + non-integer), not-in-placement, and immutability."
+    result: "queued"
+    notes: "Mirrors US-03/US-04 split: pure first (this task), scene integration (placed mesh per-faction + debug.placedMeshes) next, click wiring + Playwright last. Pure slice alone closes L58-L60."
+    tokens: "~2k"
