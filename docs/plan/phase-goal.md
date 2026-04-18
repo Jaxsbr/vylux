@@ -33,14 +33,14 @@ Full spec: `docs/product/phases/foundation.md` (design direction, tech stack, st
 - [x] Raycasting from viewport center hits a tile mesh and returns a valid `(tileX, tileY)` (Playwright test) [US-02]
 
 #### Placement-mode state machine
-- [ ] Unit test (Vitest): from `{ mode: 'idle', selectedUnitType: null }`, key `1` -> `{ mode: 'placement', selectedUnitType: 'blue' }` [US-03]
-- [ ] Unit test (Vitest): from `{ mode: 'idle', selectedUnitType: null }`, key `2` -> `{ mode: 'placement', selectedUnitType: 'red' }` [US-03]
-- [ ] Unit test (Vitest): from `{ mode: 'placement', selectedUnitType: 'red' }`, key `1` -> `{ mode: 'placement', selectedUnitType: 'blue' }` [US-03]
-- [ ] Unit test (Vitest): from `{ mode: 'placement', selectedUnitType: 'blue' }`, key `2` -> `{ mode: 'placement', selectedUnitType: 'red' }` [US-03]
-- [ ] Unit test (Vitest): from `{ mode: 'placement', ... }`, key `Escape` -> `{ mode: 'idle', selectedUnitType: null }` [US-03]
-- [ ] Unit test (Vitest): unhandled keys (`a`, `3`, `Enter`, `Space`, `Shift`) leave state unchanged and throw no errors [US-03]
-- [ ] Playwright: pressing `1` sets canvas style `cursor: none`; pressing `Escape` restores `cursor: default` (or `pointer`) [US-03]
-- [ ] `window.__vylux.state.mode` and `window.__vylux.state.selectedUnitType` reflect the documented shape at every transition (Playwright assertion) [US-03]
+- [x] Unit test (Vitest): from `{ mode: 'idle', selectedUnitType: null }`, key `1` -> `{ mode: 'placement', selectedUnitType: 'blue' }` [US-03]
+- [x] Unit test (Vitest): from `{ mode: 'idle', selectedUnitType: null }`, key `2` -> `{ mode: 'placement', selectedUnitType: 'red' }` [US-03]
+- [x] Unit test (Vitest): from `{ mode: 'placement', selectedUnitType: 'red' }`, key `1` -> `{ mode: 'placement', selectedUnitType: 'blue' }` [US-03]
+- [x] Unit test (Vitest): from `{ mode: 'placement', selectedUnitType: 'blue' }`, key `2` -> `{ mode: 'placement', selectedUnitType: 'red' }` [US-03]
+- [x] Unit test (Vitest): from `{ mode: 'placement', ... }`, key `Escape` -> `{ mode: 'idle', selectedUnitType: null }` [US-03]
+- [x] Unit test (Vitest): unhandled keys (`a`, `3`, `Enter`, `Space`, `Shift`) leave state unchanged and throw no errors [US-03]
+- [x] Playwright: pressing `1` sets canvas style `cursor: none`; pressing `Escape` restores `cursor: default` (or `pointer`) [US-03]
+- [x] `window.__vylux.state.mode` and `window.__vylux.state.selectedUnitType` reflect the documented shape at every transition (Playwright assertion) [US-03]
 
 #### Hover preview
 - [ ] Unit test (Vitest): hover logic given a hovered tile returns correct dim color for blue (`#0d4d57`) and red (`#5a2311`) — matches documented hexes in the Design direction section [US-04]

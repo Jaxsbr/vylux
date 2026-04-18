@@ -33,3 +33,4 @@ state:
   completed_stories:
     - US-01
     - US-02
+    - US-03
