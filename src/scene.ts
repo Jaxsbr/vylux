@@ -206,6 +206,9 @@ export function createScene(): SceneBundle {
       ghost.mesh.visible = false;
     }
 
+    // Append-only contract: placedUnits only grows in this phase, so reconcile
+    // spawns meshes for new entries but never removes. Future phases that allow
+    // units to leave state must add a removal branch to keep the scene in sync.
     for (const unit of state.placedUnits) {
       const already = placed.meshes.some(
         (rec) =>

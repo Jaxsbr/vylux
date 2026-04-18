@@ -153,6 +153,11 @@ export function handleClick(
 ): PlacementState {
   if (button !== 0) return state;
   if (state.mode !== 'placement' || state.selectedUnitType === null) return state;
+  // Asymmetric on purpose: null hit means the pointer is off-canvas / past the
+  // raycastable band (commit-or-cancel UX — exit to idle), while an out-of-bounds
+  // coord from a valid raycast is treated as a rejected placement (stay in mode).
+  // Today tryPlace never receives out-of-bounds from raycastPointer, but keep the
+  // branches explicit so future raycast changes can't silently change UX.
   if (hit === null) {
     return { ...state, mode: 'idle', selectedUnitType: null };
   }
