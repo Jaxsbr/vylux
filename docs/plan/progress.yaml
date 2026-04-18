@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 17
-  next_task: "[US-01,US-02,US-03,US-04,US-05] Manual doc fill — replace the three TODO sections in docs/manual/foundation.md (Controls, Hover preview, Click to place) with full prose covering: (a) keyboard controls 1/2/Esc + cursor toggle (US-03); (b) hover preview — dim faction highlight, translucent ghost unit, faction hex values, occupied tile suppresses ghost, ghost re-emerges on re-enter (US-04); (c) click to place — left-click commits, enforces occupancy (one unit per tile), click-outside-grid exits to idle, right/middle-click ignored, placed mesh is solid+emissive vs. ghost translucent (US-05). Cross-reference module layout (placement.ts state ownership, input.ts dispatcher, scene.ts reconcile) and the debug hook shape (window.__vylux.debug.placedMeshes, ghost, tileColors) so a reader can self-verify. No code changes; doc-only. Closes L86 for all five stories simultaneously, which unblocks the Story Completion Gate for US-01..US-05."
+  next_task: null
   last_result: pass
   consecutive_fails: 0
 
