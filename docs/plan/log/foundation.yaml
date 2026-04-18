@@ -156,3 +156,10 @@ entries:
     result: "queued"
     notes: "Mirrors US-03 split: pure state/helpers first (this task), scene reconciliation + debug surface next, input wiring + Playwright after. Pure portion alone closes L46 and the pure slice of L55."
     tokens: "~2k"
+  - task: 11
+    time: "2026-04-18T09:54:35Z"
+    story: "[US-04]"
+    description: "Branch A: extended src/placement.ts with handlePointerMove(state, hit|null) (returns same reference on same-coord or null->null, fresh state on change, null hit clears hoveredTile, never mutates input), hoverColorFor/ghostEmissiveFor hex mappings (blue=#0d4d57/#00e5ff, red=#5a2311/#ff5a1f), and isTileOccupied(state, x, y) linear scan. Added 13 Vitest cases covering 5-in-a-row last-coord, same-coord identity, null clears + null->null no-op, mode/selectedUnitType/placedUnits preservation, immutability, hex mappings, and occupancy lookup (true/false/empty)."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 48/48 (+13), playwright 9/9 (unchanged). Regression: net additive. Closes US-04 L46 (hex mapping) and the pure slice of L55 (handlePointerMove leaves hoveredTile = last coord). Scene reconciliation + debug surface (ghost mesh, hover tile mutation, debug.ghost / debug.ghostCount) ships next task; input wiring + full Playwright hover coverage after that."
+    tokens: "~6k"

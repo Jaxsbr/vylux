@@ -1,3 +1,3 @@
 tsc: PASS (no output)
-vitest: 35 passed (src/input.test.ts 6 + src/placement.test.ts 10 + src/grid.test.ts 13 + src/scene.test.ts 3 + src/source-scan.test.ts 3)
+vitest: 48 passed (src/input.test.ts 6 + src/placement.test.ts 23 + src/grid.test.ts 13 + src/scene.test.ts 3 + src/source-scan.test.ts 3)
 playwright: 9 passed — dev project (foundation x6 + smoke-dev x2), preview project (preview x1)
