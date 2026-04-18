@@ -58,3 +58,10 @@ entries:
     result: "queued"
     notes: "Phase type: CSS/JS-only. Investigate-first not mandatory. Pure docs task — zero code-path impact, regression risk nil. Story Completion Gate will fire after pass (US-01 fully complete)."
     tokens: "~3k"
+  - task: 4
+    time: "2026-04-18T08:26:30Z"
+    story: "[US-01]"
+    description: "Branch A: wrote README.md quick-start (install, dev on 5180, build+preview on 5181, verify command) with link to docs/manual/foundation.md; created docs/manual/foundation.md with US-01 sections (overview, Quick start, debug hook behavior, production build guard) complete and US-02..US-05 sections stubbed with TODO markers."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 3/3, playwright 6/6 (no regressions). Docs-only change — all golden principles and quality checks trivially satisfied. Closes US-01 L87 (README quick-start + manual link). L86 (manual covers all 5 stories) partially advanced — US-01 portion complete. Story Completion Gate NOT fired: L86 is multi-tagged [US-01..US-05] and remains unmet overall until US-02..US-05 ship, so by the gate's strict 'ALL criteria tagged with [US-XX] must be met' rule, US-01 is functionally complete but formally blocks on L86. Expect US-01 milestone commit to fire alongside US-05's completion when the manual fills in."
+    tokens: "~7k"
