@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 9
-  next_task: "[US-03] Wire keyboard input to the placement state machine. Create src/input.ts with createKeydownHandler(options) returning a pure (event) => void (uses handleKey; sets canvas.style.cursor to 'none' in placement, 'default' in idle; only calls setState on a real transition) and attachInputHandlers(options) binding the handler to target.addEventListener('keydown', ...) and returning { detach() }. Update src/main.ts to own a mutable PlacementState ref seeded from INITIAL_STATE and wire attachInputHandlers with target=window and setState that updates both the ref and hook.state. Update src/debug.ts VyluxHook.state type to PlacementState and seed hook.state from INITIAL_STATE. Add src/input.test.ts: createKeydownHandler cases ('1' -> placement+blue, cursor 'none'; '2' -> red; 'Escape' -> idle, cursor 'default'; unhandled key leaves both alone); attachInputHandlers detach() removes the listener (mock target Pick<Window, 'addEventListener'|'removeEventListener'>, assert listener count drops to 0 and post-detach dispatch is a no-op). Extend tests/e2e/foundation.spec.ts (or new placement.spec.ts): initial state idle/null + cursor 'default'; '1' -> placement+blue + cursor 'none'; '2' switches faction to red; 'Escape' returns to idle/null + cursor 'default'. Closes US-03 L42, L43, L94, and the keydown portion of L92."
+  next_task: null
   last_result: pass
   consecutive_fails: 0
 

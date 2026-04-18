@@ -128,3 +128,10 @@ entries:
     result: "queued"
     notes: "Closes US-03 L42 (cursor toggle), L43 (state mirror), L94 (detach), and keydown portion of L92. Remaining after: US-03 L86 Controls manual section (US-04/US-05 also gate L86) and phase-level L93 source-scan for bare catches."
     tokens: "~2k"
+  - task: 9
+    time: "2026-04-18T09:23:33Z"
+    story: "[US-03]"
+    description: "Branch A: shipped src/input.ts (createKeydownHandler pure dispatcher over handleKey with canvas cursor 'none'/'default' toggle; attachInputHandlers binds keydown and returns detach()). Wired src/main.ts with a mutable PlacementState ref seeded from INITIAL_STATE and setState mirroring into hook.state. Widened VyluxHook.state to PlacementState in src/debug.ts (seeded from INITIAL_STATE). Added src/input.test.ts (6 cases: 1/2/Escape dispatch + cursor, unhandled-key no-op, same-faction repeat no-op, attach/detach listener-count lifecycle). Extended tests/e2e/foundation.spec.ts with keyboard-drives-state test (initial idle/default, 1->blue+none, 2->red, Escape->idle+default)."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 32/32 (+6), playwright 9/9 (+1). Regression: net additive, all prior tests still green. Closes US-03 L42 (cursor toggle), L43 (state mirror reflects transitions), L94 (detach removes listener), and keydown portion of L92 (unhandled keys are no-ops; handler never throws). US-03 remaining: L86 manual Controls section (shares L86 with US-04/US-05), and phase-level L93 source-scan for bare catches."
+    tokens: "~7k"
