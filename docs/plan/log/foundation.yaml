@@ -233,3 +233,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean, vitest 79/79 (+12), playwright 16/16 (+5). Regression: net additive — all 74 prior tests still green; existing input.test attachInputHandlers expanded to three listeners. Closes US-05 L61-L66, click portion of L92, and the observable/mechanical slice of L77-L80 (per-faction placedMeshes material asserts). Story-level status: US-05 observable criteria complete. Remaining for US-05: L79/L80 operator sign-offs (phase close) and L86 multi-story manual doc (docs/manual/foundation.md Controls + Hover preview + Click to place sections — currently TODO stubs). Story Completion Gate blocked on L86 for US-01/02/03/04/05 simultaneously — unblocks in task 17."
     tokens: "~10k"
+  - task: 17
+    time: "2026-04-18T10:29:47Z"
+    story: "[US-01,US-02,US-03,US-04,US-05]"
+    description: "Branch B: queued multi-story manual doc fill. Replace the three TODO stubs in docs/manual/foundation.md with prose covering controls (1/2/Esc + cursor toggle), hover preview (dim faction tile + translucent ghost, faction hex, occupied-tile ghost suppression), and click to place (left commits, occupancy, outside-grid exits to idle, right/middle ignored). Cross-reference src/placement.ts state ownership, src/input.ts dispatcher role, src/scene.ts per-frame reconcile, and the debug hook (placedMeshes, ghost, tileColors) for reader self-verification."
+    result: "queued"
+    notes: "Purely doc work — no code or test changes. Closes L86 across all five stories in a single write. After this lands, the Story Completion Gate can fire for US-01, US-02, US-03, US-04, US-05 back-to-back. Operator sign-offs in docs/manual-verification/foundation.md (L69, L71, L75, L76, L79, L80, L83) remain phase-close gates — not this task."
+    tokens: "~1.5k"
