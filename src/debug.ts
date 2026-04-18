@@ -1,6 +1,18 @@
 import type { SceneBundle } from './scene';
-import { INITIAL_STATE, type PlacementState } from './placement';
+import { INITIAL_STATE, type FactionId, type PlacementState } from './placement';
 import * as THREE from 'three';
+
+export type PlacedMeshDebug = {
+  tileX: number;
+  tileY: number;
+  type: FactionId;
+  position: { x: number; y: number; z: number };
+  material: {
+    emissive: string;
+    opacity: number;
+    transparent: boolean;
+  };
+};
 
 export type VyluxDebug = {
   backgroundColor: string;
@@ -21,6 +33,8 @@ export type VyluxDebug = {
     };
   };
   ghostCount: number;
+  placedMeshes: PlacedMeshDebug[];
+  placedCount: number;
 };
 
 export type VyluxHook = {
@@ -48,6 +62,21 @@ export function buildDebugSnapshot(bundle: SceneBundle): VyluxDebug {
     const mat = mesh.material as THREE.MeshStandardMaterial;
     return '#' + mat.color.getHexString();
   });
+  const placedMeshes: PlacedMeshDebug[] = bundle.placed.meshes.map((rec) => ({
+    tileX: rec.unit.tileX,
+    tileY: rec.unit.tileY,
+    type: rec.unit.type,
+    position: {
+      x: rec.mesh.position.x,
+      y: rec.mesh.position.y,
+      z: rec.mesh.position.z,
+    },
+    material: {
+      emissive: rec.material.emissive.getHexString(),
+      opacity: rec.material.opacity,
+      transparent: rec.material.transparent,
+    },
+  }));
   return {
     backgroundColor: bundle.backgroundColor,
     cameraType: bundle.camera.type,
@@ -74,6 +103,8 @@ export function buildDebugSnapshot(bundle: SceneBundle): VyluxDebug {
       },
     },
     ghostCount: countGhostMeshes(bundle.scene),
+    placedMeshes,
+    placedCount: placedMeshes.length,
   };
 }
 

@@ -3,6 +3,8 @@ import { buildGrid, tileToWorld, GRID_CONSTANTS, type GridBundle } from './grid'
 import {
   computeGhostView,
   computeHoverView,
+  ghostEmissiveFor,
+  type PlacedUnit,
   type PlacementState,
 } from './placement';
 
@@ -18,11 +20,24 @@ export const SCENE_CONSTANTS = {
   ghostOpacity: 0.4,
   ghostY: 0.5,
   ghostInitialEmissive: 0x00e5ff,
+  placedSize: 0.8,
+  placedY: 0.5,
 } as const;
 
 export type GhostBundle = {
   mesh: THREE.Mesh;
   material: THREE.MeshStandardMaterial;
+};
+
+export type PlacedMeshRecord = {
+  mesh: THREE.Mesh;
+  material: THREE.MeshStandardMaterial;
+  unit: PlacedUnit;
+};
+
+export type PlacedBundle = {
+  group: THREE.Group;
+  meshes: PlacedMeshRecord[];
 };
 
 export type ContextLostRef = { current: boolean };
@@ -34,6 +49,7 @@ export type SceneBundle = {
   lights: { ambient: THREE.AmbientLight; directional: THREE.DirectionalLight };
   grid: GridBundle;
   ghost: GhostBundle;
+  placed: PlacedBundle;
   backgroundColor: string;
   cameraRotation: { yawDeg: number; pitchDeg: number };
   lightCounts: { ambient: number; directional: number };
@@ -88,6 +104,8 @@ export function createScene(): SceneBundle {
     ambientIntensity,
     directionalIntensity,
     ghostY,
+    placedSize,
+    placedY,
   } = SCENE_CONSTANTS;
 
   const scene = new THREE.Scene();
@@ -108,6 +126,11 @@ export function createScene(): SceneBundle {
 
   const ghost = buildGhost();
   scene.add(ghost.mesh);
+
+  const placedGroup = new THREE.Group();
+  placedGroup.name = 'placed-units';
+  scene.add(placedGroup);
+  const placed: PlacedBundle = { group: placedGroup, meshes: [] };
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
@@ -182,6 +205,31 @@ export function createScene(): SceneBundle {
     } else {
       ghost.mesh.visible = false;
     }
+
+    for (const unit of state.placedUnits) {
+      const already = placed.meshes.some(
+        (rec) =>
+          rec.unit.tileX === unit.tileX &&
+          rec.unit.tileY === unit.tileY &&
+          rec.unit.type === unit.type,
+      );
+      if (already) continue;
+      const hex = ghostEmissiveFor(unit.type);
+      const geometry = new THREE.BoxGeometry(placedSize, placedSize, placedSize);
+      const material = new THREE.MeshStandardMaterial({
+        color: hex,
+        transparent: false,
+        opacity: 1,
+        emissive: hex,
+        emissiveIntensity: 1,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.name = 'placed-unit';
+      const world = tileToWorld(unit.tileX, unit.tileY);
+      mesh.position.set(world.x, placedY, world.z);
+      placed.group.add(mesh);
+      placed.meshes.push({ mesh, material, unit: { ...unit } });
+    }
   };
 
   const contextLost: ContextLostRef = { current: false };
@@ -193,6 +241,7 @@ export function createScene(): SceneBundle {
     lights: { ambient, directional },
     grid,
     ghost,
+    placed,
     backgroundColor,
     cameraRotation: { yawDeg: cameraYawDeg, pitchDeg: -cameraElevationDeg },
     lightCounts: { ambient: 1, directional: 1 },
