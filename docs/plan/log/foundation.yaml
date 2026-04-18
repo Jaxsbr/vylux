@@ -72,3 +72,10 @@ entries:
     result: "queued"
     notes: "Split US-02 into two tasks: (a) pure math + Vitest (this one), (b) mesh meshes + debug hook extensions + Playwright raycast. Phase type: CSS/JS-only, investigate-first not mandatory, but grid math is non-trivial and worth isolating. Y-axis convention: tileY maps to world Z because the ground plane spans XZ (camera is pitched down over it)."
     tokens: "~3k"
+  - task: 5
+    time: "2026-04-18T08:37:49Z"
+    story: "[US-02]"
+    description: "Branch A: wrote src/grid.ts (GRID_CONSTANTS {gridSize=20, tileSize=1, worldExtent=20}, TILE_COUNT=400, tileToWorld centered on origin XZ ground plane with descriptive-error guards for non-integer and out-of-range inputs) and src/grid.test.ts (10 Vitest cases: constants shape, three determinism anchors, purity, 400-position uniqueness, 4 out-of-bounds inputs throw)."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 13/13 (was 3 + 10 new), playwright 6/6 (unchanged). Regression check: net additive, no tests removed or flipped. Golden principles + quality checks trivially satisfied (no catch blocks; error-path for OOB is directly tested). Closes US-02 L30 (tileToWorld helper + Vitest determinism/uniqueness coverage). Next task queues mesh instantiation + debug-hook tileCount/tileColors/gridLineMaterial + Playwright raycast (L29, L31, L32, L33)."
+    tokens: "~9k"

@@ -16,8 +16,8 @@ state:
   status: running
 
   # --- Task orchestration (owner: iterator) ---
-  task_number: 5
-  next_task: "[US-02] Implement src/grid.ts as a pure module: export GRID_CONSTANTS (gridSize = 20 -> 400 tiles, tileSize, total worldExtent), and tileToWorld(tileX, tileY) -> {x, y, z} centered on the origin with tileX and tileY indices in [0, 19] (X maps to world X, Y maps to world Z, Y world coord is 0 for ground-plane tiles). Add src/grid.test.ts covering: (0,0), (19,19), and (10,10) each return deterministic world positions (assert against computed expected values); iterate all 400 in-bounds (tileX,tileY) pairs and assert every world (x,z) is unique (Set size === 400); out-of-bounds inputs (-1,0), (0,20), (20,20), (NaN,0) each throw a descriptive Error. No scene integration or debug hook changes this task — mesh instantiation, debug hook updates, and Playwright raycast coverage ship in the next task. Closes US-02 criterion L30 (tileToWorld pure helper unit-tested)."
+  task_number: 6
+  next_task: null
   last_result: pass
   consecutive_fails: 0
 
