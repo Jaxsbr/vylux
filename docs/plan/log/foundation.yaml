@@ -79,3 +79,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean, vitest 13/13 (was 3 + 10 new), playwright 6/6 (unchanged). Regression check: net additive, no tests removed or flipped. Golden principles + quality checks trivially satisfied (no catch blocks; error-path for OOB is directly tested). Closes US-02 L30 (tileToWorld helper + Vitest determinism/uniqueness coverage). Next task queues mesh instantiation + debug-hook tileCount/tileColors/gridLineMaterial + Playwright raycast (L29, L31, L32, L33)."
     tokens: "~9k"
+  - task: 6
+    time: "2026-04-18T08:38:10Z"
+    story: "[US-02]"
+    description: "Branch B: queued grid scene-integration task — buildGrid() factory (400 per-tile-material tile meshes + 42 divider strips sharing one emissive-white MeshStandardMaterial), scene wiring, raycastCenter helper, debug-hook extensions, Vitest + Playwright coverage."
+    result: "queued"
+    notes: "Closes US-02 L29/L31/L32/L33/L70 in one move. After this, remaining US-02 item is the operator sign-off (L71, reads-as — manual verification doc). L86 US-02 manual section still pending."
+    tokens: "~2k"

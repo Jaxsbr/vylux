@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 6
-  next_task: null
+  next_task: "[US-02] Integrate the grid into the scene. Extend src/grid.ts with buildGrid() returning { group, tileMeshes (400, row-major tileY*gridSize + tileX with userData={tileX,tileY}), tileColors (400 '#0a0a0a' hex strings), gridLineMaterial (shared MeshStandardMaterial with emissive 0xffffff, emissiveIntensity 0.25) }: tiles are PlaneGeometry rotated to the XZ ground, each with its OWN MeshStandardMaterial instance at color 0x0a0a0a; dividers are 21 horizontal + 21 vertical thin strips sharing gridLineMaterial. Update src/scene.ts to call buildGrid(), add group to scene, and expose SceneBundle.grid + raycastCenter(): {tileX, tileY} | null using THREE.Raycaster from camera direction through viewport center against tileMeshes. Extend src/debug.ts VyluxDebug with tileCount (400), tileColors, gridLineMaterial ({emissive: string, emissiveIntensity: number}), and raycastCenter (dev-only passthrough function). Add Vitest for buildGrid (tileMeshes.length === 400, every tileColors entry is '#0a0a0a', gridLineMaterial.emissive hex is 'ffffff' and emissiveIntensity is in [0.1, 0.4]). Add Playwright coverage in tests/e2e/foundation.spec.ts (or new grid.spec.ts) asserting: debug.tileCount === 400; 10 random tileColors entries equal '#0a0a0a'; debug.gridLineMaterial.emissive === 'ffffff' and emissiveIntensity in [0.1, 0.4]; raycastCenter() returns integer {tileX, tileY} with both in [0, 19]. Closes US-02 L29, L31, L32, L33, L70."
   last_result: pass
   consecutive_fails: 0
 
