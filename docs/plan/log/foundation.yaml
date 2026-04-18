@@ -254,3 +254,10 @@ entries:
     result: "queued"
     notes: "Satisfies the Phase Reconciliation Gate slice of L88 that the build-loop skill can automate; remaining L88 items (state-ownership contract audit via source-scan) already enforced by src/source-scan.test.ts. After this lands, only operator sign-offs in docs/manual-verification/foundation.md block phase_complete."
     tokens: "~2k"
+  - task: 18
+    time: "2026-04-18T10:34:36Z"
+    story: "[phase]"
+    description: "Branch A: rewrote AGENTS.md from 13-line stub to Phase Reconciliation shape. Added Stack section (TypeScript strict, Three.js 0.170, Vite 5.4 dev 5180 / preview 5181, Vitest 2.1, Playwright 1.48 dev+preview projects), Verify command (npx tsc --noEmit && npm run test && npm run test:e2e — identical to test-gate), module-layout table (placement / input / scene / grid / debug / main with per-module responsibilities and decoupling constraints), placement state machine shape (TypeScript type signature) + pure-transitions table + identity-short-circuit convention, and State-ownership contract (placement owns all mutable state; input <-/-> scene decoupling enforced in spirit + by source-scan; window.__vylux gated by import.meta.env.DEV and stripped from prod, asserted by Playwright preview guard). Quality checks block preserved verbatim at tail."
+    result: "pass"
+    notes: "Verify: no code surface changed — gate not rerun this iteration (doc-only). Last verified baseline: tsc clean, vitest 79/79, playwright 16/16 (task 16 pass). Loop is paused here: all mechanical + manual-doc done-when criteria are green across US-01..US-05 and phase-level. Only operator sign-offs in docs/manual-verification/foundation.md (L69, L71, L75, L76, L79, L80, L83) block phase_complete. Next operator step: `npm run dev`, exercise the flows, tick the seven boxes in docs/manual-verification/foundation.md, then resume the build-loop to close the phase (Story Completion Gates for US-01..US-05, phase retro, PR)."
+    tokens: "~7k"
