@@ -13,7 +13,7 @@ state:
   # --- Lifecycle (owner: iterator) ---
   phase: foundation
   phase_complete: false
-  status: paused
+  status: running
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 1
