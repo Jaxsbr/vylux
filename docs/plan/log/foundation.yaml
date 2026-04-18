@@ -86,3 +86,10 @@ entries:
     result: "queued"
     notes: "Closes US-02 L29/L31/L32/L33/L70 in one move. After this, remaining US-02 item is the operator sign-off (L71, reads-as — manual verification doc). L86 US-02 manual section still pending."
     tokens: "~2k"
+  - task: 6
+    time: "2026-04-18T08:42:48Z"
+    story: "[US-02]"
+    description: "Branch A: implemented buildGrid (400 tile meshes with unique per-tile MeshStandardMaterial color 0x0a0a0a and userData={tileX,tileY}; 42 divider strips sharing emissive-white material at intensity 0.25). Extended SceneBundle with grid and raycastCenter via THREE.Raycaster through NDC (0,0) against tileMeshes. Updated VyluxDebug with tileCount/tileColors/gridLineMaterial and exposed raycastCenter on the hook. Added buildGrid Vitest coverage (length, per-tile material uniqueness, divider material emissive hex + intensity band) and Playwright cases for grid mount + raycast center."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 16/16 (+3), playwright 8/8 (+2). Regression: net additive, all prior tests still green. Closes US-02 L29 (tileCount=400), L31 (tileColors all #0a0a0a), L32 + L70 (gridLineMaterial emissive/intensity), L33 (raycast hits integer tile coords in range). US-02 remaining: L71 operator sign-off (needs docs/manual-verification/foundation.md + Jaco's manual tick) and L86 US-02 manual section."
+    tokens: "~15k"
