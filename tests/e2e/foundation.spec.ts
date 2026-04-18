@@ -141,6 +141,114 @@ test.describe('US-01 scene foundation', () => {
     expect(pageErrors).toEqual([]);
   });
 
+  test('hover preview: ghost mesh appears, switches faction, clears on Escape and off-grid (US-04)', async ({
+    page,
+  }) => {
+    const { consoleErrors, pageErrors } = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    const initial = await page.evaluate(() => {
+      const d = window.__vylux!.debug;
+      return {
+        ghostVisible: d.ghost.visible,
+        opacity: d.ghost.material.opacity,
+        transparent: d.ghost.material.transparent,
+        ghostCount: d.ghostCount,
+      };
+    });
+    expect(initial.ghostVisible).toBe(false);
+    expect(initial.transparent).toBe(true);
+    expect(initial.opacity).toBeGreaterThanOrEqual(0.35);
+    expect(initial.opacity).toBeLessThanOrEqual(0.45);
+    expect(initial.ghostCount).toBe(1);
+
+    await page.keyboard.press('1');
+    await page.mouse.move(400, 300);
+    await page.waitForFunction(
+      () => window.__vylux!.state.hoveredTile !== null && window.__vylux!.debug.ghost.visible,
+      null,
+      { timeout: 2000 },
+    );
+    const afterMove = await page.evaluate(() => {
+      const v = window.__vylux!;
+      return {
+        hovered: v.state.hoveredTile,
+        visible: v.debug.ghost.visible,
+        emissive: v.debug.ghost.material.emissive,
+      };
+    });
+    expect(afterMove.hovered).not.toBeNull();
+    expect(afterMove.visible).toBe(true);
+    expect(afterMove.emissive).toBe('00e5ff');
+
+    const hoveredIdx = afterMove.hovered!.tileY * 20 + afterMove.hovered!.tileX;
+    const hoverColor = await page.evaluate(
+      (idx: number) => window.__vylux!.debug.tileColors[idx],
+      hoveredIdx,
+    );
+    expect(hoverColor).toBe('#0d4d57');
+
+    await page.keyboard.press('2');
+    await page.waitForFunction(
+      () => window.__vylux!.debug.ghost.material.emissive === 'ff5a1f',
+      null,
+      { timeout: 2000 },
+    );
+    const redHoverColor = await page.evaluate(
+      (idx: number) => window.__vylux!.debug.tileColors[idx],
+      hoveredIdx,
+    );
+    expect(redHoverColor).toBe('#5a2311');
+
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(
+      () => window.__vylux!.debug.ghost.visible === false,
+      null,
+      { timeout: 2000 },
+    );
+    const allDefault = await page.evaluate(() =>
+      window.__vylux!.debug.tileColors.every((c: string) => c === '#0a0a0a'),
+    );
+    expect(allDefault).toBe(true);
+
+    await page.keyboard.press('1');
+    await page.mouse.move(400, 300);
+    await page.waitForFunction(() => window.__vylux!.state.hoveredTile !== null);
+    await page.mouse.move(10, 10);
+    await page.waitForFunction(
+      () => window.__vylux!.state.hoveredTile === null && !window.__vylux!.debug.ghost.visible,
+      null,
+      { timeout: 2000 },
+    );
+
+    expect(consoleErrors).toEqual([]);
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('rapid mouse sweep never leaks ghost meshes (US-04 L54)', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
+
+    await page.keyboard.press('1');
+    const start = Date.now();
+    for (let i = 0; i < 20; i++) {
+      const x = 200 + i * 20;
+      const y = 200 + (i % 5) * 30;
+      await page.mouse.move(x, y);
+    }
+    expect(Date.now() - start).toBeLessThan(2000);
+
+    const { ghostCount, hoveredTile } = await page.evaluate(() => ({
+      ghostCount: window.__vylux!.debug.ghostCount,
+      hoveredTile: window.__vylux!.state.hoveredTile,
+    }));
+    expect(ghostCount).toBe(1);
+    expect(hoveredTile).not.toBeNull();
+  });
+
   test('webglcontextlost is handled without uncaught error', async ({ page }) => {
     const { pageErrors } = attachConsoleGuard(page);
     await page.goto('/');

@@ -16,6 +16,7 @@ let state: PlacementState = INITIAL_STATE;
 attachInputHandlers({
   target: window,
   canvas,
+  raycastPointer: bundle.raycastPointer,
   getState: () => state,
   setState: (next) => {
     state = next;

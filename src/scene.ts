@@ -40,6 +40,7 @@ export type SceneBundle = {
   contextLost: ContextLostRef;
   resize: (width: number, height: number) => void;
   raycastCenter: () => { tileX: number; tileY: number } | null;
+  raycastPointer: (clientX: number, clientY: number) => { tileX: number; tileY: number } | null;
   reconcile: (state: PlacementState) => void;
 };
 
@@ -125,8 +126,8 @@ export function createScene(): SceneBundle {
 
   const raycaster = new THREE.Raycaster();
   const center = new THREE.Vector2(0, 0);
-  const raycastCenter = (): { tileX: number; tileY: number } | null => {
-    raycaster.setFromCamera(center, camera);
+  const raycastHitAt = (ndc: THREE.Vector2): { tileX: number; tileY: number } | null => {
+    raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObjects(grid.tileMeshes, false);
     if (hits.length === 0) {
       return null;
@@ -136,6 +137,21 @@ export function createScene(): SceneBundle {
       return null;
     }
     return { tileX: ud.tileX, tileY: ud.tileY };
+  };
+
+  const raycastCenter = (): { tileX: number; tileY: number } | null => raycastHitAt(center);
+
+  const pointer = new THREE.Vector2(0, 0);
+  const raycastPointer = (
+    clientX: number,
+    clientY: number,
+  ): { tileX: number; tileY: number } | null => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
+    if (pointer.x < -1 || pointer.x > 1 || pointer.y < -1 || pointer.y > 1) return null;
+    return raycastHitAt(pointer);
   };
 
   const tileIndex = (tileX: number, tileY: number): number =>
@@ -183,6 +199,7 @@ export function createScene(): SceneBundle {
     contextLost,
     resize,
     raycastCenter,
+    raycastPointer,
     reconcile,
   };
 }

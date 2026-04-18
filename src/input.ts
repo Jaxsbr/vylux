@@ -1,4 +1,4 @@
-import { handleKey, type PlacementState } from './placement';
+import { handleKey, handlePointerMove, type PlacementState, type TileRef } from './placement';
 
 export type KeydownHandlerOptions = {
   getState: () => PlacementState;
@@ -21,10 +21,33 @@ export function createKeydownHandler(
   };
 }
 
-type ListenerTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
+export type PointerMoveHandlerOptions = {
+  getState: () => PlacementState;
+  setState: (next: PlacementState) => void;
+  raycastPointer: (clientX: number, clientY: number) => TileRef | null;
+};
+
+export function createPointerMoveHandler(
+  options: PointerMoveHandlerOptions,
+): (event: PointerEvent) => void {
+  const { getState, setState, raycastPointer } = options;
+  return (event: PointerEvent): void => {
+    const current = getState();
+    const hit = raycastPointer(event.clientX, event.clientY);
+    const next = handlePointerMove(current, hit);
+    if (next === current) {
+      return;
+    }
+    setState(next);
+  };
+}
+
+type WindowTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
+type CanvasTarget = Pick<HTMLCanvasElement, 'addEventListener' | 'removeEventListener'>;
 
 export type AttachInputHandlersOptions = KeydownHandlerOptions & {
-  target: ListenerTarget;
+  target: WindowTarget;
+  raycastPointer: (clientX: number, clientY: number) => TileRef | null;
 };
 
 export type InputHandlers = {
@@ -32,13 +55,21 @@ export type InputHandlers = {
 };
 
 export function attachInputHandlers(options: AttachInputHandlersOptions): InputHandlers {
-  const { target } = options;
-  const handler = createKeydownHandler(options);
-  const listener = handler as EventListener;
-  target.addEventListener('keydown', listener);
+  const { target, canvas, raycastPointer, getState, setState } = options;
+
+  const keydownHandler = createKeydownHandler({ getState, setState, canvas });
+  const keydownListener = keydownHandler as EventListener;
+  target.addEventListener('keydown', keydownListener);
+
+  const pointerMoveHandler = createPointerMoveHandler({ getState, setState, raycastPointer });
+  const pointerMoveListener = pointerMoveHandler as EventListener;
+  const canvasTarget = canvas as CanvasTarget;
+  canvasTarget.addEventListener('pointermove', pointerMoveListener);
+
   return {
     detach: () => {
-      target.removeEventListener('keydown', listener);
+      target.removeEventListener('keydown', keydownListener);
+      canvasTarget.removeEventListener('pointermove', pointerMoveListener);
     },
   };
 }
