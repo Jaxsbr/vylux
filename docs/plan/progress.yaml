@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 8
-  next_task: null
+  next_task: "[US-03] Implement src/placement.ts as a pure state machine. Export PlacementState type ({mode: 'idle'|'placement', selectedUnitType: 'blue'|'red'|null, hoveredTile: {tileX,tileY}|null, placedUnits: Array<{tileX,tileY,type}>}), INITIAL_STATE (idle, null, null, []), and handleKey(state, key) returning the next state: key '1' -> placement+blue, key '2' -> placement+red (both from idle and mid-placement switch), key 'Escape' from placement -> idle+null (leaves hoveredTile and placedUnits alone; no-op from idle). Any other key returns the input state unchanged. Pure: never mutates the input; returns a fresh object on real transitions and the same reference on no-ops (so identity checks work). Add src/placement.test.ts covering the 6 named transitions (L36-L41), Escape-from-idle no-op, unhandled keys ('a','3','Enter','Space','Shift') leave state unchanged + throw nothing, and immutability assertions. No DOM, no scene integration — next task handles input wiring and cursor toggle. Closes US-03 L36-L41."
   last_result: pass
   consecutive_fails: 0
 

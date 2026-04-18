@@ -107,3 +107,10 @@ entries:
     result: "pass"
     notes: "Verify: tsc clean, vitest 16/16, playwright 8/8 (unchanged). Docs-only, no regressions. Closes US-02 L69 (sign-off doc exists) and L86 US-02 slot. US-02 story-complete EXCEPT for L71 operator tick (Jaco eyes-on at phase close). Milestone commit deferred to phase close."
     tokens: "~5k"
+  - task: 8
+    time: "2026-04-18T09:11:15Z"
+    story: "[US-03]"
+    description: "Branch B: queued US-03 pure state machine — src/placement.ts with PlacementState, INITIAL_STATE, handleKey(state, key); Vitest covering 6 named transitions (L36-L41), Escape-from-idle no-op, unhandled keys, and immutability assertions. No DOM yet."
+    result: "queued"
+    notes: "Split US-03 across two tasks: (a) pure state machine + Vitest (this one), (b) src/input.ts attachInputHandlers + cursor toggle + debug state mirror + Playwright. State ownership contract: placement.ts owns state and exposes pure transitions; input.ts will be the thin dispatcher next task."
+    tokens: "~3k"
