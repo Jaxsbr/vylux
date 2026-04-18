@@ -268,3 +268,10 @@ entries:
     result: "phase-complete"
     notes: "Evidence — US-01 (11): index.html, src/main.ts, package.json deps, tsconfig strict, smoke-dev.spec.ts, foundation.spec.ts scene+debug+contextlost+resize. US-02 (7): grid.ts 400 tiles + tileToWorld + grid.test.ts + foundation.spec.ts grid+raycast + operator sign-off. US-03 (8): placement.test.ts transitions + foundation.spec.ts cursor + state mirror. US-04 (18): placement.ts hover + scene.ts ghost + foundation.spec.ts + ghostCount===1 + sign-offs. US-05 (13): placement.test.ts tryPlace + handleClick + foundation.spec.ts place/occupied/off-grid/right+middle + sign-offs. [phase] (9): tsconfig strict, verify in AGENTS.md, manual-verification doc, AGENTS.md reflects stack, preview.spec.ts window.__vylux undefined, source-scan.test.ts catch-enforcement, attachInputHandlers+detach."
     tokens: "~12k"
+  - task: 20
+    time: "2026-04-18T11:36:59Z"
+    story: "[review]"
+    description: "PR #1 created from build/foundation to main. Title: feat(foundation): isometric scene, neon grid, placement mode, hover preview, click placement. Body includes phase summary, 5 stories shipped, done-when evidence, design tokens, state-ownership contract, scope boundaries, and retro-rerun note. Queued [review] review-pr pr=1."
+    result: "queued"
+    notes: "Next iteration: Branch A executes review-pr skill, posts inline comments to PR #1, flips review_stage -> review_posted, queues handle-pr-review."
+    tokens: "~4k"
