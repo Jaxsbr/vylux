@@ -212,3 +212,10 @@ entries:
     result: "queued"
     notes: "No new Vitest (scene is impure — pure coverage is already in tryPlace tests). Playwright coverage lands with click wiring in task 16. Closes US-05 L77-L80 (placed mesh material assertions observable via debug.placedMeshes). Since placedUnits only grows in this phase, no removal logic yet — kept additive by design. No mouse/click handling yet."
     tokens: "~2k"
+  - task: 15
+    time: "2026-04-18T10:23:05Z"
+    story: "[US-05]"
+    description: "Branch A: shipped scene integration for placed meshes. src/scene.ts: SCENE_CONSTANTS gains placedSize=0.8 and placedY=0.5; new PlacedMeshRecord + PlacedBundle types; createScene builds a THREE.Group named 'placed-units' added to the scene with an empty meshes registry. reconcile(state) loops state.placedUnits and, for any unit not already represented (tileX/tileY/type identity), creates a BoxGeometry(0.8^3) Mesh with MeshStandardMaterial { color+emissive = ghostEmissiveFor(type), transparent:false, opacity:1, emissiveIntensity:1 }, positions it at tileToWorld(x,y) y=0.5, names it 'placed-unit', adds to placedGroup, and registers the record (with a defensively-copied unit) in placed.meshes. src/debug.ts: VyluxDebug gains PlacedMeshDebug[] (tileX, tileY, type, position, material{emissive,opacity,transparent}) and placedCount mirroring meshes.length. No production code surface beyond what the task description demands."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 67/67 (unchanged — scene impure), playwright 11/11 (unchanged — no input wiring yet). Regression: net additive, all prior tests green; existing debug shape extended only. Closes US-05 L77-L80 observable slice (per-faction material assertions now surfaceable via debug.placedMeshes). State-ownership contract held: scene.ts imports type PlacedUnit + ghostEmissiveFor from placement.ts — no back-import. Next: task 16 click wiring (pointerdown -> raycast -> tryPlace, click-outside-grid exits idle, right/middle-click ignored) + Playwright coverage for L61-L67, L77-L80."
+    tokens: "~8k"

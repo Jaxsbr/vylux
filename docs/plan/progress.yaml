@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 15
-  next_task: "[US-05] Scene integration for placed meshes + debug surface. (1) src/scene.ts: add placedGroup (THREE.Group named 'placed-units') and placedMeshes array of { mesh, material, unit } records. On each reconcile(state), iterate state.placedUnits — for any unit not yet represented (by tileX/tileY/type identity), add a new BoxGeometry(0.8,0.8,0.8) Mesh with MeshStandardMaterial { color: factionEmissiveHex, transparent: false, opacity: 1.0, emissive: factionEmissiveHex, emissiveIntensity: 1 }, positioned at tileToWorld(x,y) y=0.5, named 'placed-unit'; add to placedGroup and track in placedMeshes. (Since placedUnits only grows in this phase, no removal logic yet.) (2) Extend debug surface: VyluxDebug gains placedMeshes: Array<{ tileX, tileY, type, position, material: { emissive, opacity, transparent } }> and placedCount: number (sourced from placedMeshes.length). (3) Vitest: no new scene tests (impure) — pure slice already covered by tryPlace tests. Playwright coverage lands with click wiring next task. Closes US-05 L77-L80 (placed mesh material assertions observable via debug.placedMeshes). No mouse/click handling yet — next task."
+  next_task: null
   last_result: pass
   consecutive_fails: 0
 
