@@ -39,3 +39,47 @@ export function handleKey(state: PlacementState, key: string): PlacementState {
   }
   return state;
 }
+
+export function handlePointerMove(
+  state: PlacementState,
+  hit: TileRef | null,
+): PlacementState {
+  const current = state.hoveredTile;
+  if (hit === null) {
+    if (current === null) return state;
+    return { ...state, hoveredTile: null };
+  }
+  if (current !== null && current.tileX === hit.tileX && current.tileY === hit.tileY) {
+    return state;
+  }
+  return { ...state, hoveredTile: { tileX: hit.tileX, tileY: hit.tileY } };
+}
+
+const HOVER_COLORS: Record<FactionId, string> = {
+  blue: '#0d4d57',
+  red: '#5a2311',
+};
+
+const GHOST_EMISSIVE: Record<FactionId, string> = {
+  blue: '#00e5ff',
+  red: '#ff5a1f',
+};
+
+export function hoverColorFor(faction: FactionId): string {
+  return HOVER_COLORS[faction];
+}
+
+export function ghostEmissiveFor(faction: FactionId): string {
+  return GHOST_EMISSIVE[faction];
+}
+
+export function isTileOccupied(
+  state: PlacementState,
+  tileX: number,
+  tileY: number,
+): boolean {
+  for (const unit of state.placedUnits) {
+    if (unit.tileX === tileX && unit.tileY === tileY) return true;
+  }
+  return false;
+}

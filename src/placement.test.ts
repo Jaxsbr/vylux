@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { INITIAL_STATE, handleKey, type PlacementState } from './placement';
+import {
+  INITIAL_STATE,
+  handleKey,
+  handlePointerMove,
+  hoverColorFor,
+  ghostEmissiveFor,
+  isTileOccupied,
+  type PlacementState,
+} from './placement';
 
 const idle: PlacementState = INITIAL_STATE;
 const blue: PlacementState = { ...idle, mode: 'placement', selectedUnitType: 'blue' };
@@ -75,5 +83,104 @@ describe('handleKey — immutability', () => {
     const after = handleKey(withHoverAndUnits, 'Escape');
     expect(after.hoveredTile).toEqual({ tileX: 3, tileY: 7 });
     expect(after.placedUnits).toEqual([{ tileX: 1, tileY: 2, type: 'blue' }]);
+  });
+});
+
+describe('handlePointerMove — hovered tile tracking (phase-goal L55)', () => {
+  it('5 sequential moves leave hoveredTile equal to the last coord only', () => {
+    const coords = [
+      { tileX: 0, tileY: 0 },
+      { tileX: 1, tileY: 1 },
+      { tileX: 2, tileY: 5 },
+      { tileX: 10, tileY: 3 },
+      { tileX: 19, tileY: 19 },
+    ];
+    let s: PlacementState = blue;
+    for (const c of coords) s = handlePointerMove(s, c);
+    expect(s.hoveredTile).toEqual({ tileX: 19, tileY: 19 });
+    expect(s.mode).toBe('placement');
+    expect(s.selectedUnitType).toBe('blue');
+  });
+
+  it('same-coord repeat is a no-op (returns same reference)', () => {
+    const once = handlePointerMove(idle, { tileX: 4, tileY: 4 });
+    const twice = handlePointerMove(once, { tileX: 4, tileY: 4 });
+    expect(twice).toBe(once);
+  });
+
+  it('null hit from non-null hoveredTile clears to null (fresh object)', () => {
+    const hovering = handlePointerMove(idle, { tileX: 2, tileY: 2 });
+    const cleared = handlePointerMove(hovering, null);
+    expect(cleared).not.toBe(hovering);
+    expect(cleared.hoveredTile).toBeNull();
+  });
+
+  it('null hit when already null is a no-op (returns same reference)', () => {
+    expect(handlePointerMove(idle, null)).toBe(idle);
+  });
+
+  it('preserves mode / selectedUnitType / placedUnits', () => {
+    const state: PlacementState = {
+      mode: 'placement',
+      selectedUnitType: 'red',
+      hoveredTile: null,
+      placedUnits: [{ tileX: 7, tileY: 7, type: 'blue' }],
+    };
+    const next = handlePointerMove(state, { tileX: 8, tileY: 9 });
+    expect(next.mode).toBe('placement');
+    expect(next.selectedUnitType).toBe('red');
+    expect(next.placedUnits).toBe(state.placedUnits);
+    expect(next.hoveredTile).toEqual({ tileX: 8, tileY: 9 });
+  });
+
+  it('does not mutate the input state', () => {
+    const state: PlacementState = {
+      mode: 'placement',
+      selectedUnitType: 'blue',
+      hoveredTile: null,
+      placedUnits: [],
+    };
+    const snap = JSON.stringify(state);
+    handlePointerMove(state, { tileX: 1, tileY: 1 });
+    expect(JSON.stringify(state)).toBe(snap);
+  });
+});
+
+describe('hoverColorFor / ghostEmissiveFor (phase-goal L46, L73-74, L81-82)', () => {
+  it('blue -> dim cyan #0d4d57', () => {
+    expect(hoverColorFor('blue')).toBe('#0d4d57');
+  });
+  it('red -> dim red-orange #5a2311', () => {
+    expect(hoverColorFor('red')).toBe('#5a2311');
+  });
+  it('ghost blue emissive -> #00e5ff', () => {
+    expect(ghostEmissiveFor('blue')).toBe('#00e5ff');
+  });
+  it('ghost red emissive -> #ff5a1f', () => {
+    expect(ghostEmissiveFor('red')).toBe('#ff5a1f');
+  });
+});
+
+describe('isTileOccupied', () => {
+  const occupied: PlacementState = {
+    mode: 'placement',
+    selectedUnitType: 'blue',
+    hoveredTile: null,
+    placedUnits: [
+      { tileX: 3, tileY: 4, type: 'blue' },
+      { tileX: 10, tileY: 11, type: 'red' },
+    ],
+  };
+
+  it('returns true for a placed unit coord', () => {
+    expect(isTileOccupied(occupied, 3, 4)).toBe(true);
+    expect(isTileOccupied(occupied, 10, 11)).toBe(true);
+  });
+  it('returns false for an empty tile', () => {
+    expect(isTileOccupied(occupied, 0, 0)).toBe(false);
+    expect(isTileOccupied(occupied, 3, 5)).toBe(false);
+  });
+  it('returns false on empty placedUnits', () => {
+    expect(isTileOccupied(idle, 3, 4)).toBe(false);
   });
 });
