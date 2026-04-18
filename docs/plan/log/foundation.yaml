@@ -142,3 +142,10 @@ entries:
     result: "queued"
     notes: "Doing L93 before expanding code surface with US-04 so the safety net is in place as hover/click handlers are added. Deliberately NOT bundling L109 (scene↔input import separation) since L109 is in the state-ownership contract but not in done-when; keep one concern per iteration."
     tokens: "~2k"
+  - task: 10
+    time: "2026-04-18T09:52:04Z"
+    story: "[phase]"
+    description: "Branch A: shipped src/source-scan.test.ts. Loads every non-test src/**/*.ts via import.meta.glob with ?raw (avoids @types/node), then for each `catch (` walks the catch block braces (comment- and string-literal aware) and asserts the body contains `throw` or `console.error`. Includes a meta-test that proves the detector catches a synthetic bare catch and exonerates throw-only and console.error-only blocks, plus a glob-regression guard that at least one source file is scanned. No production code changes required — scan clean on first pass."
+    result: "pass"
+    notes: "Verify: tsc clean, vitest 35/35 (+3), playwright 9/9 (unchanged). Regression: net additive. Closes phase-level L93. Remaining phase-level: L92 error-path-coverage (still needs the mousemove/click/resize no-op branches — will be satisfied by US-04 and US-05 Playwright tests), L86 multi-story manual Controls + Hover + Click sections, and the operator sign-off ticks in docs/manual-verification/foundation.md."
+    tokens: "~6k"

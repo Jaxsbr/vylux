@@ -17,7 +17,7 @@ state:
 
   # --- Task orchestration (owner: iterator) ---
   task_number: 10
-  next_task: "[phase] L93 source-scan test: add src/source-scan.test.ts that reads every src/**/*.ts file (excluding *.test.ts), finds each `catch (` occurrence, and asserts the enclosing block contains either `throw` or `console.error` before its closing brace. Use a simple brace-walk (track depth from the `{` after `catch (...)`) rather than a full parser. Include a positive assertion that at least one src file is scanned (guards against glob regression). No changes to production code expected; if the scan reveals a violation, fix it in the SAME task by adding the missing throw/console.error with context. Closes phase-level L93 (no bare catches / silent swallowing)."
+  next_task: null
   last_result: pass
   consecutive_fails: 0
 
