@@ -18,3 +18,14 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+*.log
+
+# Test artifacts
+test-results/
+playwright-report/
+coverage/

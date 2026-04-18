@@ -2,32 +2,37 @@
 # Schema: config + state read every iteration. Validate with yamllint.
 
 config:
-  verify: "echo \"no verify command configured\""
+  verify: "npx tsc --noEmit && npm run test && npm run test:e2e"
   max_tasks_per_phase: 200
   quality_check_suppressions: []
   build_loop_version:
     init_version: 13
-    builds: []
+    builds: [13]
 
 state:
   # --- Lifecycle (owner: iterator) ---
-  phase: null
-  phase_complete: false
-  status: idle
+  phase: foundation
+  phase_complete: true
+  status: running
 
   # --- Task orchestration (owner: iterator) ---
-  task_number: 1
+  task_number: 23
   next_task: null
-  last_result: null
+  last_result: pass
   consecutive_fails: 0
 
   # --- Review (owner: iterator) ---
-  review_stage: null
-  review_complete: false
-  pr_number: null
+  review_stage: review_posted
+  review_complete: true
+  pr_number: 1
 
   # --- Retrospective (owner: retro) ---
-  retro_complete: false
+  retro_complete: true
 
   # --- Tracking (owner: iterator) ---
-  completed_stories: []
+  completed_stories:
+    - US-01
+    - US-02
+    - US-03
+    - US-04
+    - US-05
