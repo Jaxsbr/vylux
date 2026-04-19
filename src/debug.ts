@@ -90,6 +90,9 @@ export type VyluxHook = {
   getWorkerSelectionRingVisible?: (index: number) => boolean;
   giveWorkerMoveOrder?: (index: number, tileX: number, tileY: number) => void;
   getWorkerTargetTile?: (index: number) => { tileX: number; tileY: number } | null;
+  // Raider placement hooks — present when ?e2e=1.
+  spawnRaider?: (faction: string, tileX: number, tileY: number) => number;
+  getRaiderTile?: (faction: string, index: number) => { tileX: number; tileY: number } | null;
 };
 
 declare global {

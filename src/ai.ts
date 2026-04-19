@@ -12,9 +12,10 @@ import type { DefenderBundle } from './defender';
 import type { RaiderBundle } from './raider';
 import type { EnergyNodeBundle } from './energy-node';
 import type { HQBundle } from './hq';
-import { UNIT_COSTS, type UnitKind } from './units-config';
+import { UNIT_COSTS, UNIT_STATS, type UnitKind } from './units-config';
 import { trainUnit, buildOccupiedSet } from './training';
 import { GRID_CONSTANTS } from './grid';
+import { advanceRaiders, type AdvanceTarget } from './advance';
 
 export const AI_TRAIN_COOLDOWN = 0.5;
 export const AI_WORKER_ASSIGN_INTERVAL = 1.0;
@@ -164,18 +165,23 @@ export function tickAi(params: TickAiParams): void {
     }
   }
 
-  // --- Raider muster pass ---
+  // --- Raider advance pass ---
+  // Replace ad-hoc muster/send-at-blue-HQ with the shared advance primitive so
+  // red raiders use the same auto-path logic as blue raiders (advance.ts).
   const livingRedRaiders = redRaiders.filter((r) => r.hp > 0);
   if (!state.mustering && livingRedRaiders.length >= AI_RAIDER_MUSTER) {
     state.mustering = true;
   }
   if (state.mustering) {
-    for (const r of livingRedRaiders) {
-      // Send to blue HQ if not already heading there.
-      if (r.targetTileX !== blueHq.tileX || r.targetTileY !== blueHq.tileY) {
-        r.moveTo(blueHq.tileX, blueHq.tileY);
-      }
-    }
+    // Delegate targeting to the shared advance primitive.
+    const blueWorkers = allWorkers.filter((w) => w.faction === 'blue');
+    const enemyWorkerTargets: AdvanceTarget[] = blueWorkers.map((w) => ({
+      tileX: w.tileX, tileY: w.tileY, hp: w.hp,
+    }));
+    const hqTarget: AdvanceTarget = {
+      tileX: blueHq.tileX, tileY: blueHq.tileY, hp: blueHq.hp,
+    };
+    advanceRaiders(livingRedRaiders, enemyWorkerTargets, hqTarget, UNIT_STATS.raider.range);
   } else {
     // Pre-muster: park idle raiders that are too close to HQ so spawn tile clears.
     for (const r of livingRedRaiders) {

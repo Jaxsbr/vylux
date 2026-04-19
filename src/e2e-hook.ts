@@ -5,11 +5,13 @@ import { tickEnergy } from './economy';
 import type { FactionPoints } from './points';
 import type { FactionHold } from './energy-node';
 import { buildWorker } from './worker';
+import { UNIT_STATS } from './units-config';
 import { buildDefender } from './defender';
 import { buildRaider } from './raider';
 import type { UnitKind } from './units-config';
 import { selectHq as selectionSelectHq, selectWorker as selectionSelectWorker, clearSelection, getSelectedHq } from './selection';
 import { tickCombat, type PointsLedger } from './combat';
+import { advanceRaidersFaction } from './advance';
 import { tickNodePoints } from './node-points';
 import { tickAi, type AiState } from './ai';
 import { evaluateMatch } from './match';
@@ -224,6 +226,9 @@ export type E2EHookExtension = {
   getWorkerSelectionRingVisible: (index: number) => boolean;
   giveWorkerMoveOrder: (index: number, tileX: number, tileY: number) => void;
   getWorkerTargetTile: (index: number) => { tileX: number; tileY: number } | null;
+  // Raider placement hooks.
+  spawnRaider: (faction: string, tileX: number, tileY: number) => number;
+  getRaiderTile: (faction: string, index: number) => { tileX: number; tileY: number } | null;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -405,6 +410,23 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
         for (const d of bundle.defenders) d.tick(dt);
         for (const r of bundle.raiders) r.tick(dt);
 
+        // Advance raiders toward nearest enemy (mirrors main.ts).
+        const raiderRange = UNIT_STATS.raider.range;
+        advanceRaidersFaction(
+          'blue',
+          bundle.raiders,
+          bundle.workers.filter((w) => w.faction === 'red'),
+          bundle.hqs.red,
+          raiderRange,
+        );
+        advanceRaidersFaction(
+          'red',
+          bundle.raiders,
+          bundle.workers.filter((w) => w.faction === 'blue'),
+          bundle.hqs.blue,
+          raiderRange,
+        );
+
         tickCombat({
           units: {
             workers: bundle.workers,
@@ -539,6 +561,23 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
       const w = blueWorkers[index];
       if (w === undefined) return null;
       return { tileX: w.targetTileX, tileY: w.targetTileY };
+    },
+
+    spawnRaider(faction: string, tileX: number, tileY: number): number {
+      const f = faction === 'red' ? 'red' : 'blue';
+      const r = buildRaider(f, tileX, tileY);
+      r.mesh.name = 'e2e-spawned-' + f + '-raider';
+      bundle.scene.add(r.mesh);
+      bundle.raiders.push(r);
+      return bundle.raiders.filter((u) => u.faction === f).length - 1;
+    },
+
+    getRaiderTile(faction: string, index: number): { tileX: number; tileY: number } | null {
+      const f = faction === 'red' ? 'red' : 'blue';
+      const factionRaiders = bundle.raiders.filter((u) => u.faction === f);
+      const r = factionRaiders[index];
+      if (r === undefined) return null;
+      return { tileX: r.tileX, tileY: r.tileY };
     },
   };
 

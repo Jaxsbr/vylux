@@ -1,139 +1,106 @@
 ---
-task_id: mouse-driven-end-to-end
-priority: P0
+id: offensive-reach
+opened_at: 2026-04-19T09:01:01Z
 status: done_by_engineer
-dispatched_at: 2026-04-19T07:40:58Z
-dispatched_tick: 5A954E85
-mvp_link: "pm/mvp.md — final acceptance item 'Mouse-driven end-to-end match'"
-inbox_link: "pm/inbox/2026-04-19-mvp-failure.md"
+priority: P0
 ---
 
-# Mouse-driven end-to-end match — verify the holistic RTS loop
+# Offensive reach — raiders travel across the map and engage enemy
 
-## Why this task
+## Outcome
 
-Every piece of the reopen is shipped:
-- `mouse-driven-training` (b89e162) — click HQ → buildables panel →
-  click tile to place.
-- `onboarding-cue` (fd3dd0a) — "CLICK YOUR HQ TO BEGIN" prompt on
-  fresh match, dismisses on first HQ click, reappears on PLAY AGAIN.
-- `visual-concept-match-pass` (264bfe2) — dark silhouettes with
-  accented neon; rubric v2 scored 57/48 on visual-eval-v10.
-- `dev-hotkey-demotion` (e0965e5) — keys 1/2 + Q/W/E all gated
-  behind `isDevMode()`.
-
-The only remaining MVP acceptance item is the **holistic** check:
-a fresh match can be played idle-start → victory/defeat using the
-mouse only. Each piece has unit and e2e coverage, but no single test
-proves the full flow. Add one.
-
-## Scope
-
-### In scope
-
-1. **New Playwright e2e spec: `tests/e2e/mouse-end-to-end.spec.ts`.**
-   Single test that exercises the full loop using **only** mouse
-   clicks (no keydowns) and the `window.__vylux` hook for time
-   advancement / state seeding. No assertions should depend on Q/W/E
-   or keys 1/2 firing.
-
-2. **Required flow inside the test:**
-   1. Load the dev scene. Assert the onboarding cue is visible.
-   2. Click the blue HQ mesh (via raycast on the canvas, or via a
-      dedicated `window.__vylux.clickBlueHq()` helper if one is
-      already wired — use whatever the `mouse-training` e2e tests
-      use for consistency). Assert the cue disappears and the
-      buildables panel opens.
-   3. Seed enough energy via `window.__vylux` so the test is not
-      gated on minutes of `BASE_INCOME` accrual. A helper like
-      `setBlueEnergy(500)` is fine.
-   4. Click the Worker buildable. Assert place-mode armed.
-   5. Click a grid tile adjacent to the blue HQ. Assert a new worker
-      spawned (worker count increased by 1, energy decremented by
-      `WORKER_COST`).
-   6. Click the newly-spawned worker mesh. Assert selection ring
-      visible.
-   7. Click an energy-node tile. Assert the worker has a move-order
-      to that tile.
-   8. Via the panel, train a Raider (click HQ → click Raider → click
-      tile). Assert it spawned.
-   9. Advance simulated time (`advanceTime` via `window.__vylux`) so
-      combat and point accrual run, **or** seed blue points directly
-      to `WIN_POINTS` via the hook. Either path is acceptable — the
-      goal is proving that **victory fires from gameplay state, not
-      a test shortcut that bypasses the match resolver**. Prefer
-      whichever the existing `win-lose.spec.ts` uses.
-   10. Assert the VICTORY overlay appears.
-   11. Click the PLAY AGAIN button. Assert the overlay clears, the
-       onboarding cue reappears, the buildables panel is closed, and
-       energy/points reset.
-
-3. **No keyboard in the spec.** The test must not call
-   `page.keyboard.press(...)` or `page.keyboard.type(...)`. All
-   inputs are mouse clicks or direct `window.__vylux` helper calls
-   that mirror mouse actions (like `openBuildablesPanel`,
-   `armBuildable`, `mouseTrainUnit`, `placementClickTile`, etc.).
-
-4. **Leave existing tests alone.** Do not modify
-   `tests/e2e/mouse-training.spec.ts` or any other already-green
-   spec. This is a new, additive verification.
-
-### Out of scope
-
-- Any gameplay tuning.
-- Any new mouse helpers that duplicate existing ones — reuse what
-  the `mouse-driven-training` e2e suite already uses.
-- Visual changes.
-- Touching combat / economy / ai / match / points / node-points.
-
-## Constraints
-
-- Playwright dev project only (not preview) so `window.__vylux` is
-  available.
-- Test must run deterministically — use `advanceTime` or direct
-  state seeding, never real-time waits longer than a few hundred ms.
-- No new external dependencies.
-- Do not add new exports to `window.__vylux` unless the spec
-  genuinely cannot express the flow with existing ones. If you do
-  add one, document why in the handoff.
+From the player's perspective: after training a raider (mouse → click HQ →
+click Raider → click tile to place), the raider does not sit where placed.
+It travels across the grid toward the nearest red unit or the red HQ and
+exchanges fire when in range. A player cannot currently push offence across
+the map — this fixes that. Combat becomes reachable.
 
 ## Acceptance
 
-- [ ] `tests/e2e/mouse-end-to-end.spec.ts` exists and exercises the
-      full flow above.
-- [ ] Spec contains zero `page.keyboard.*` calls.
-- [ ] `npm run test` still passes.
-- [ ] `npm run test:e2e` passes with the new spec included.
-- [ ] `playwright.config.ts` includes the new spec in the `dev`
-      project `testMatch`.
-- [ ] Commit locally with `test(mouse-e2e): full mouse-only
-      idle→victory playthrough` or equivalent. Do NOT push.
+- Placing a blue raider at any tile causes it to begin moving toward the
+  nearest enemy target (red unit or red HQ) as soon as it spawns. It does
+  **not** require a separate move-click to start advancing.
+- Target selection is re-evaluated when the current target dies or is out
+  of reach. Simple: nearest-enemy-by-tile-distance, recomputed each
+  pathing step. No A* — straight-line tile hops reusing the worker
+  movement primitive (`worker.ts` / whichever module holds tile-hop
+  movement).
+- On reaching range of a target, the raider stops moving and the existing
+  auto-attack loop in `src/combat.ts` takes over. When the target dies
+  (or leaves range), it resumes moving to the next nearest target.
+- Defender behaviour is unchanged (still stationary, attacks adjacent
+  tiles). Worker behaviour is unchanged. Only the Raider gains
+  auto-advance.
+- Red AI raiders already try to push at blue HQ (`src/ai.ts`). Reconcile
+  so both factions use the same "advance toward nearest enemy" primitive
+  — AI should no longer need its own ad-hoc muster logic for raiders.
+  Defender AI path is unaffected.
+- New Playwright spec `tests/e2e/offensive-reach.spec.ts`:
+  1. Seed a match with a blue raider placed near blue HQ (bottom-left
+     corner region).
+  2. Advance time via existing `window.__vylux.advanceTime` hook until
+     the raider reaches within attack range of any red unit or the red
+     HQ, with a reasonable deadline (e.g. 20 s of sim time).
+  3. Assert: the raider's tile position changed from spawn, ended up
+     on the red side of the grid (e.g. tile row/col > grid midpoint),
+     and the red HQ or a red unit took damage.
+  4. Write `pm/screenshots/mid-combat.png` at a moment where the blue
+     raider is engaged on the red half of the map. The image must show
+     a blue raider **not at the blue HQ** with a red target in frame.
+- Unit test coverage on the new advance primitive (pure function taking
+  units + grid, returns next-tile for a given raider). At least:
+  picks nearest enemy, handles no-targets (stands still), handles
+  dead-target switchover.
+
+## Constraints
+
+- Do **not** rewrite `src/combat.ts`. Hook the new advance-step into the
+  existing per-tick loop.
+- Do **not** introduce A* or any pathfinding graph. Straight-line greedy
+  tile-hop per step is fine. Obstacles on a 20×20 open grid are
+  non-existent by design.
+- Keep mouse-only input. No new hotkeys. No attack-move keyboard verb.
+- Do not alter `WIN_POINTS`, income constants, or AI build-order cadence
+  in this task — tuning is a separate backlog item (`idle-loses-tuning`).
+- Do not break the existing mouse-end-to-end spec
+  (`tests/e2e/mouse-end-to-end.spec.ts`). If the raider now advances, the
+  existing victory path should still complete — it will just look
+  different (raider reaches red HQ faster).
+- Reuse `window.__vylux` hooks where possible. If you add a new hook
+  (e.g. `getUnitTilePosition`), justify it in the handoff.
 
 ## Handoff
 
-**Commit:** `3e1d7c4`
+### Summary
 
-**Files touched:**
-- `tests/e2e/mouse-end-to-end.spec.ts` — new spec (created)
-- `playwright.config.ts` — added `mouse-end-to-end.spec.ts` to dev `testMatch`
-- `src/e2e-hook.ts` — added 5 new `window.__vylux` exports + implementation
-- `src/debug.ts` — added optional type declarations for the 5 new hooks
-- `src/main.ts` — added `trainingPanelState = INITIAL_TRAINING_PANEL_STATE` + `syncBuildablesPanel()` to `resetMatch()` so panel closes on PLAY AGAIN
-- `pm/screenshots/mouse-e2e-victory.png` — screenshot emitted by the spec
+Added `src/advance.ts` — a pure `advanceRaiders` function (no Three.js, no scene) that, given a list of raiders and enemy targets, calls `moveTo` toward the nearest live enemy (workers first, then HQ) if not already in attack range (Chebyshev <= 1.5). Also exports `advanceRaidersFaction` for callers with mixed-faction arrays.
 
-**New `window.__vylux` hooks added (all justified):**
-- `getEnergy(): FactionEnergy` — required to assert energy deduction after worker train; no read-back hook existed
-- `selectWorkerByIndex(index: number): void` — required to select a worker programmatically (mirrors canvas click on worker mesh); no hook existed
-- `getWorkerSelectionRingVisible(index: number): boolean` — required to assert selection ring state after select
-- `giveWorkerMoveOrder(index: number, tileX: number, tileY: number): void` — required to issue a move command without a real canvas pointer event
-- `getWorkerTargetTile(index: number): {tileX, tileY} | null` — required to assert the worker's move target (distinct from current tile)
+The advance step runs each tick after unit movement but before `tickCombat`, so raiders close distance every frame and the existing auto-attack loop fires when they arrive. Wired into `main.ts` (animate loop) and `e2e-hook.ts` (advanceTime loop) for both blue and red factions.
 
-**Deviations:**
-- Energy assertions after training and after reset use range checks (`toBeLessThan`/`toBeGreaterThan`) rather than exact equality because the game's `energyLedger.tick` fires on every animation frame between `page.evaluate` calls; exact values are not stable.
-- `resetMatch()` in `main.ts` now closes the buildables panel — this is correct behavior (fresh match should not start with panel open) and was required to satisfy the "panel closed after PLAY AGAIN" acceptance criterion.
+AI's ad-hoc muster logic in `ai.ts` — which hardcoded `r.moveTo(blueHq.tileX, blueHq.tileY)` — replaced with a call to `advanceRaiders` so both factions share one path. Pre-muster spawn-clearing parking is unchanged.
 
-**Verify:** `npx tsc --noEmit && npm run test && npm run test:e2e` — 57 e2e + 254 unit tests, all green.
+### Files touched
 
-**Screenshots regenerated:** `pm/screenshots/mouse-e2e-victory.png`
+- `src/advance.ts` — new pure advance primitive
+- `src/advance.test.ts` — 10 unit tests (nearest enemy, no targets, dead switchover, in-range stops, no moveTo spam)
+- `src/main.ts` — import + wire advance calls before tickCombat
+- `src/e2e-hook.ts` — import + wire advance in advanceTime loop; add `spawnRaider` and `getRaiderTile` hooks
+- `src/ai.ts` — replace muster moveTo with advanceRaiders call
+- `src/debug.ts` — add `spawnRaider` and `getRaiderTile` to VyluxHook type
+- `playwright.config.ts` — add `offensive-reach.spec.ts` to dev testMatch
+- `tests/e2e/offensive-reach.spec.ts` — new E2E spec
 
-**Follow-ups:** None — all acceptance criteria met.
+### New window.__vylux hooks
+
+- `spawnRaider(faction, tileX, tileY) => index` — needed by the E2E spec to seed a blue raider without going through the player build panel. Returns the faction-scoped index.
+- `getRaiderTile(faction, index) => {tileX, tileY} | null` — allows the spec to assert tile position mid-advance. Returns null if raider died.
+
+Both are only present when `?e2e=1`.
+
+### Verify output
+
+tsc --noEmit: clean. Unit tests: 264 passed (21 files). E2E: 58 passed (0 failed).
+
+### Screenshots regenerated
+
+- `pm/screenshots/mid-combat.png` — shows blue raider advanced into red territory attacking the red HQ.

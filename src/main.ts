@@ -13,6 +13,7 @@ import { buildRaider } from './raider';
 import { trainUnit, buildOccupiedSet, findFreeNeighbour } from './training';
 import { GRID_CONSTANTS } from './grid';
 import { tickCombat } from './combat';
+import { advanceRaidersFaction } from './advance';
 import { tickNodePoints, computeNodeHolder } from './node-points';
 import { tickAi, createAiState } from './ai';
 import { evaluateMatch, type MatchOutcome } from './match';
@@ -26,7 +27,7 @@ import {
   INITIAL_ONBOARDING_CUE_STATE,
   type OnboardingCueState,
 } from './onboarding-cue';
-import type { UnitKind } from './units-config';
+import { UNIT_STATS, type UnitKind } from './units-config';
 import {
   INITIAL_TRAINING_PANEL_STATE,
   handleHqClick,
@@ -568,6 +569,24 @@ function animate(): void {
     for (const r of bundle.raiders) {
       r.tick(deltaSeconds);
     }
+
+    // Advance raiders toward nearest enemy — runs before combat so raiders
+    // close distance each frame and the auto-attack loop fires when in range.
+    const raiderRange = UNIT_STATS.raider.range;
+    advanceRaidersFaction(
+      'blue',
+      bundle.raiders,
+      bundle.workers.filter((w) => w.faction === 'red'),
+      bundle.hqs.red,
+      raiderRange,
+    );
+    advanceRaidersFaction(
+      'red',
+      bundle.raiders,
+      bundle.workers.filter((w) => w.faction === 'blue'),
+      bundle.hqs.blue,
+      raiderRange,
+    );
 
     // Tick combat — resolves attacks, deaths, and scoring.
     tickCombat({
