@@ -13,7 +13,7 @@ import type { RaiderBundle } from './raider';
 import type { EnergyNodeBundle } from './energy-node';
 import type { HQBundle } from './hq';
 import { UNIT_COSTS, UNIT_STATS, type UnitKind } from './units-config';
-import { trainUnit, buildOccupiedSet } from './training';
+import { trainUnit } from './training';
 import { GRID_CONSTANTS } from './grid';
 import { advanceRaiders, type AdvanceTarget } from './advance';
 
@@ -82,7 +82,7 @@ export function tickAi(params: TickAiParams): void {
   const {
     state, dt,
     energy, redWorkers, redDefenders, redRaiders,
-    allWorkers, allDefenders, allRaiders,
+    allWorkers,
     energyNodes, redHq, blueHq,
     onTrained, onEnergyChanged,
   } = params;
@@ -96,24 +96,17 @@ export function tickAi(params: TickAiParams): void {
     const kind = state.buildQueue[0];
     const cost = UNIT_COSTS[kind];
     if (energy.red >= cost) {
-      // Build occupied set from all units + both HQs.
-      const allUnits = [...allWorkers, ...allDefenders, ...allRaiders];
-      const hqTiles = [redHq, blueHq];
-      const occupied = buildOccupiedSet(allUnits, hqTiles);
-      const isOccupied = (tx: number, ty: number): boolean => occupied.has(`${tx},${ty}`);
-
       const result = trainUnit(
         energy,
         'red',
         kind,
         redHq.tileX,
         redHq.tileY,
-        GRID_CONSTANTS.gridSize,
-        isOccupied,
       );
 
       if (result.ok) {
         onEnergyChanged(result.newEnergy);
+        // Units spawn at HQ tile; onTrained handler issues moveTo(spawnPoint) for red.
         onTrained(kind, result.spawnTile.tileX, result.spawnTile.tileY);
         state.buildQueue.shift();
         // Refill queue from loop pattern when exhausted.

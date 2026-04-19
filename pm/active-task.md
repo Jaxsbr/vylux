@@ -1,156 +1,113 @@
 ---
-id: event-feedback-pulses
-opened_at: 2026-04-19T09:42:20Z
-status: done_by_engineer
+id: hq-spawn-point
+opened_at: 2026-04-20T19:45:27Z
+status: open
 priority: P0
 ---
 
-# Event feedback pulses — place / death / node-capture / point-tick
+# HQ spawn point — repositionable; unblocks Raider training when HQ is walled
 
 ## Outcome
 
-From the player's perspective: when something meaningful happens in the
-match, there is a brief visible cue. When a unit is placed, the tile
-and/or the new unit briefly pulses. When a unit dies, its tile briefly
-flashes before the mesh is removed. When a node changes ownership
-(capture), the node ring pulses in the new faction's color. When the
-player or AI accrues points, the HUD point counter briefly flashes. The
-game no longer feels silent — players can tell what they caused.
+Each HQ has a designated **spawn point** (a single tile near the HQ).
+Selecting the HQ makes the spawn point visible. Training any unit
+(Worker / Defender / Raider) spawns the unit **at the HQ** and it
+immediately **moves to the spawn point** using the existing
+straight-line tile-hop mover. This replaces the current rule where a
+unit requires an adjacent free tile at spawn time — which blocks Raider
+training whenever the HQ is surrounded by buildings. Clicking the HQ
+then clicking a valid tile (inside the HQ's 7×7 proximity zone, free of
+other units/buildings, not the HQ tile itself) **relocates** the spawn
+point, and the next trained unit uses the new one. The spawn point is
+per-faction; the player controls only the blue one, and the AI has its
+own (default fine — no AI rewrite).
+
+Alongside the spawn-point work, fix the two rubric-v13 regressions
+exposed by the post-layout mid-combat screenshot:
+
+1. **mid-combat scene seed** — after the left/right HQ layout change,
+   the scripted `tests/e2e/scenes/mid-combat.spec.ts` no longer stages
+   "raiders clashing near an enemy HQ". Re-seed so the captured frame
+   shows at least one blue raider + one red raider within striking
+   range of the red HQ (or workers), with HP bars and/or attack beams
+   visibly mid-exchange. This is scene-seed tuning, not combat balance.
+2. **Onboarding cue dismissal** — the "CLICK YOUR HQ TO BEGIN" prompt
+   currently persists into early-economy and mid-combat screenshots
+   even though the match is clearly underway. Fix the dismissal so the
+   cue clears the first time a meaningful HQ-driven action happens —
+   whether that's a real mouse click on the HQ, a scripted
+   `selectHq()` via the test hook, or a trained unit being spawned.
+   The cue must still appear on fresh idle-start.
 
 ## Acceptance
 
-Four event types, each with its own pulse. Each pulse must be:
-
-- Tied 1:1 to the logical event fire (not a free-running clock).
-- Brief (≤ ~300ms total).
-- Visible in a static screenshot captured during the pulse peak.
-- Respecting the existing visual language (charcoal background, cyan
-  / red-orange neon; no new palette entries, no particle systems).
-
-### 1. Unit-placement pulse
-
-- Fires on `trainUnit` (both factions: player mouse-driven training AND
-  AI-triggered training).
-- Tile under the newly-placed unit shows a short scale or emissive
-  flash in the owning faction's color. Mesh scale-in tween on the unit
-  itself is acceptable as the pulse (e.g. 0.4 → 1.0 over 200ms with
-  ease-out).
-- No pulse on scene-initial spawn (the two starter workers per
-  faction). Opening state is static.
-
-### 2. Unit-death pulse
-
-- Fires on unit death in `combat.ts`.
-- The tile under the dying unit flashes briefly (≤ 200ms) before the
-  mesh disposes. Alternative: the unit mesh itself fades-out with an
-  emissive spike.
-
-### 3. Node-capture pulse
-
-- Fires when an energy node's `computeNodeHolder` flips from one
-  faction to another (or from neutral to faction).
-- The node ring / hex pulses in the new faction's color for ≤ 300ms
-  (scale tween or emissive spike).
-- Must not fire every tick while held — only on ownership change.
-
-### 4. Point-tick flash
-
-- Fires on each DOM `BLUE` / `RED` point-total change in the HUD.
-- The affected point counter's number flashes briefly (background
-  color spike or scale tween on the counter cell, ≤ 200ms).
-- Must not permanently alter HUD layout.
-
-### Coverage
-
-- Pure animation curves for each pulse (one shared curve is fine, or
-  per-event if they need different peaks/decay). Unit-tested, no
-  Three.js / no DOM in the unit tests.
-- Event-to-pulse wiring tests: prove each of the four events fires
-  its pulse exactly once per logical occurrence. If pure state
-  machines are used for the pulse accumulators, test those directly.
-- Playwright spec `tests/e2e/event-feedback-pulses.spec.ts`:
-  1. Seed a match. Place a worker via mouse path, sample the unit
-     mesh scale / tile emissive within 100ms of placement and assert
-     it's non-baseline; sample again at 400ms and assert baseline.
-  2. Force a unit death via a window.__vylux hook (`killUnit` or the
-     existing damage path). Assert the death pulse visible sample.
-  3. Force a node-holder flip via advanceTime with both factions'
-     workers on the same node then swapping. Assert the node pulse
-     visible sample on flip, not on subsequent holds.
-  4. Observe a point-tick (any source — node control is easy).
-     Assert the HUD counter's flash class/scale within 100ms of the
-     point increment.
-- Regenerate `pm/screenshots/mid-combat.png` so at least one live
-  event cue is visible in the frame (a death pulse, a node-capture
-  pulse, or a just-placed unit pulse). If the scene runner is
-  deterministic, snap at the peak.
-
-### Additional rubric guardrails
-
-- No hard-fail trigger introduced. In particular point-tick flashes
-  must not obscure the blue HQ silhouette.
-- Do not reduce existing rubric v2 score (≥ 48 total, ≥ 7 per axis).
+- **Spawn-point data model** — each HQ carries a `spawnTile: {x, y}`
+  field, initialised to a sensible default tile inside the HQ's
+  proximity zone (e.g. one tile "in front of" the HQ toward the centre
+  of the map, so blue's default spawn is a tile to the right of blue
+  HQ and red's is a tile to the left of red HQ).
+- **Visible indicator** — when the HQ is selected, the spawn tile is
+  highlighted (e.g. cyan ring, or an edge-lit outline consistent with
+  existing tile highlights). Deselecting the HQ hides it.
+- **Train path** — training a Worker / Defender / Raider spawns the
+  unit on the HQ tile (or as close as possible), then the unit
+  immediately issues a move order to the spawn tile using the existing
+  mover. No unit training ever fails because "adjacent tile is
+  occupied" — the only remaining failure mode is "insufficient energy".
+- **Walled-HQ regression** — add a Playwright scene / spec that
+  scripts blue HQ fully surrounded by four defenders and proves a
+  blue Raider can still be trained and walks out to the spawn point.
+- **Reposition interaction** — with the HQ selected, clicking a valid
+  tile inside the HQ's proximity zone (and not the HQ itself, not a
+  unit, not an energy node) relocates the spawn point. Clicking an
+  invalid tile surfaces brief HUD feedback and does NOT relocate.
+  Clicking a buildable in the panel still arms place-mode as before
+  (spawn-repositioning only triggers when the panel is *not* armed).
+- **Unit + e2e coverage** — spawn-tile default, spawn-tile
+  repositioning, train-from-walled-HQ, and the mover-to-spawn-tile
+  behaviour each covered by unit or Playwright tests.
+- **Mid-combat scene seed fix** — updated
+  `tests/e2e/scenes/mid-combat.spec.ts` regenerates
+  `pm/screenshots/mid-combat.png` showing raiders clashing near the
+  red HQ (or red workers) under the left/right layout. Re-scoring
+  that scene under rubric v2 must return composition ≥ 7 and
+  silhouette ≥ 7.
+- **Onboarding cue dismissal fix** — the overlay clears on any first
+  HQ-driven action (click, scripted `selectHq`, or first successful
+  `trainUnit`), not only on an explicit DOM click. Regenerated
+  `pm/screenshots/early-economy.png` and `pm/screenshots/mid-combat.png`
+  do NOT contain the onboarding cue. Regenerated
+  `pm/screenshots/idle-start.png` DOES still contain it.
+- `mouse-e2e-victory` and `idle-loses-end` remain green under the new
+  spawn-point flow.
 
 ## Constraints
 
-- Do **not** introduce a particle system, sprite atlas, or
-  post-processing pass.
-- Do **not** introduce audio.
-- Do **not** touch `NODE_INCOME` / `BASE_INCOME` / `WIN_POINTS` /
-  AI cadence. Balance lives under `idle-loses-tuning` (already done).
-- Keep mouse-only input. No new hotkeys.
-- Do **not** change the worker harvest pulse from `worker-legibility`.
-  This task is about place / death / capture / point-tick — separate
-  event surface.
-- Reuse `computeNodeHolder` and existing HUD setters for the point
-  flash. Do not duplicate authority.
-- Keep existing specs green: mouse-end-to-end, offensive-reach,
-  idle-loses, tooltips, worker-legibility, onboarding-cue.
+- Mouse-only input. Do NOT add a keyboard shortcut for relocating the
+  spawn point.
+- Do NOT change the proximity-zone size (7×7, radius 3) or the layout
+  (blue left / red right, 3-tile inset). Those are load-bearing from
+  the previous task.
+- Do NOT touch the worker task loop, node exhaustion, node neutral
+  visuals, or worker animation model in this task — that's the next
+  task (`worker-task-loop`). Workers still tick passively on nodes for
+  now.
+- Do NOT alter combat numbers, AI build order, or economy constants
+  beyond what's strictly needed to keep `idle-loses-tuning` green
+  after the spawn-point change. If AI Raider behaviour drifts because
+  red's spawn tile differs from where its raiders used to appear, tune
+  only the minimum needed.
+- No new pathfinding. Reuse the existing straight-line tile-hop mover.
+  If the spawn tile is blocked at train time, unit walks as close as
+  it can (consistent with current blocked-tile handling) — do NOT
+  introduce A*.
+- Keep existing `placement.ts` helpers (`proximityZoneTiles`,
+  `isInProximityZone`) as-is. Add new helpers for spawn-tile
+  validation; don't refactor the placement module wholesale.
+- Keep the existing buildables panel structure in `src/hud.ts` /
+  `src/training.ts` untouched apart from the minimal wiring needed to
+  distinguish "panel armed" vs "panel idle" click handling on the HQ.
 
 ## Handoff
 
-**Commit:** `f7994a8`
-**Verify:** 305 unit tests + 79 e2e tests — all green.
-
-### What shipped
-
-Four event-feedback pulses, each 1:1 with its logical event:
-
-1. **Unit placement** — `triggerPlacementPulse()` called after every `trainUnit` success (player mouse path, keyboard path, AI `onTrained`). Scale-in tween 0.4→1.0 over 200ms (ease-out) on the mesh group. NOT called for scene-initial starter workers.
-
-2. **Unit death** — `triggerDeathPulse()` called from `combat.ts` `removeDead` when `hp <= 0`. Emissive spike (150ms) on the accent/tip material. Dispose is deferred until the pulse completes; both `main.ts` and `e2e-hook.ts` advanceTime drain death-pulse units before splicing.
-
-3. **Node capture** — `triggerCapturePulse()` called in the animate loop (and advanceTime loop) when `computeNodeHolder` returns a different value than the pre-`tickNodePoints` snapshot of `node.lastHolder`. Rim emissive spike 250ms. Does NOT fire while held, only on flip.
-
-4. **Point-tick** — `triggerPointFlash(el)` in `hud.ts` `updatePoints` whenever the floored integer value changes. CSS `@keyframes` flash animation (180ms) added via an injected `<style>` tag. `hasPointFlashClass(faction)` exposed for e2e assertions.
-
-### Curve choice
-
-Single shared curve in `src/event-pulse.ts`: linear attack (first 20% of duration) + quadratic decay. Same shape as `worker-harvest-pulse` but parameterised. All four event types use it. The harvest pulse is untouched.
-
-### Files touched
-
-- `src/event-pulse.ts` — new pure curve module
-- `src/event-pulse.test.ts` — 17 unit tests
-- `src/worker.ts` — placement + death pulse methods added
-- `src/defender.ts` — same; `buildDefenderMesh` now returns `{ group, accentMat }`
-- `src/raider.ts` — same; `buildRaiderMesh` now returns `{ group, tipMat }`
-- `src/energy-node.ts` — capture pulse methods + `capturePulseElapsed` added to `EnergyNodeBundle`
-- `src/hud.ts` — CSS flash injection + `hasPointFlashClass` + point-diff in `updatePoints`
-- `src/combat.ts` — `removeDead` now triggers death pulse and defers dispose
-- `src/main.ts` — wires all pulse ticks in animate loop; snapshots `nodeHolderPrev` for capture diff; AI `onTrained` triggers placement pulse
-- `src/e2e-hook.ts` — mirrors all pulse ticks in `advanceTime`; adds `getUnitPlacementPulseElapsed`, `getUnitDeathPulseActive`, `getNodeCapturePulseElapsed`, `getPointFlashClass`, `killUnit` hooks
-- `src/debug.ts` — adds hook type declarations for new hooks
-- `src/node-points.test.ts` — updated `makeNode` mock to satisfy new `EnergyNodeBundle` interface
-- `playwright.config.ts` — adds `event-feedback-pulses.spec.ts` to dev testMatch
-- `tests/e2e/event-feedback-pulses.spec.ts` — new 5-test spec covering all four event types
-- `pm/screenshots/mid-combat.png` — regenerated with a just-placed unit at pulse peak (scale-in in progress)
-
-### New window.__vylux hooks (justification)
-
-All added via `e2e-hook.ts` (only active when `?e2e=1`):
-- `getUnitPlacementPulseElapsed({ kind, faction, index })` — sample scale-in progress
-- `getUnitDeathPulseActive({ kind, faction, index })` — confirm death pulse is running
-- `getNodeCapturePulseElapsed(nodeIndex)` — sample rim emissive spike progress
-- `getPointFlashClass(faction)` — confirm CSS flash class on point counter
-- `killUnit({ kind, faction, index })` — force hp=0 to trigger death path without combat sim
+(Empty. Engineer fills this in with a summary + commit SHA on completion.)

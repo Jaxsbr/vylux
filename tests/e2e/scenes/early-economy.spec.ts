@@ -10,7 +10,8 @@ test('early-economy scene snapshot', async ({ page }) => {
       typeof window.__vylux.setScene === 'function' &&
       typeof window.__vylux.ready === 'function' &&
       typeof window.__vylux.advanceTime === 'function' &&
-      typeof window.__vylux.setAiEnabled === 'function',
+      typeof window.__vylux.setAiEnabled === 'function' &&
+      typeof window.__vylux.dismissOnboardingCue === 'function',
     null,
     { timeout: 15_000 },
   );
@@ -24,6 +25,10 @@ test('early-economy scene snapshot', async ({ page }) => {
   // Workers are already positioned at nodes by seedEarlyEconomy — advance time so
   // node-control points accrue and HUD shows a small non-zero blue total.
   await page.evaluate(() => window.__vylux!.advanceTime!(2.0));
+
+  // Dismiss onboarding cue — match is clearly underway (workers on nodes, points accruing).
+  await page.evaluate(() => window.__vylux!.dismissOnboardingCue!());
+
   await page.evaluate(() => window.__vylux!.ready!());
 
   await page.screenshot({ path: 'pm/screenshots/early-economy.png' });

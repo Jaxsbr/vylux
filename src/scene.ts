@@ -103,9 +103,14 @@ export type SceneBundle = {
   /**
    * Call every frame with the current placement state. Also pass the armed
    * HQ position (null when no buildable is armed) so the proximity zone
-   * highlight can be rendered.
+   * highlight can be rendered. Pass the selected HQ (or null) so the spawn
+   * ring is shown on the spawn tile when the blue HQ is selected.
    */
-  reconcile: (state: PlacementState, zoneHq: { tileX: number; tileY: number } | null) => void;
+  reconcile: (
+    state: PlacementState,
+    zoneHq: { tileX: number; tileY: number } | null,
+    selectedHq: import('./hq').HQBundle | null,
+  ) => void;
 };
 
 export function computeCameraPosition(
@@ -189,6 +194,8 @@ export function createScene(): SceneBundle {
   const blueHQ = buildHQ('blue', hqBlueTileX, hqBlueTileY);
   const redHQ = buildHQ('red', hqRedTileX, hqRedTileY);
   scene.add(blueHQ.group, redHQ.group);
+  // Spawn rings are NOT parented to HQ groups — they sit at the spawn tile, not HQ tile.
+  scene.add(blueHQ.spawnRing, redHQ.spawnRing);
   const hqs = { blue: blueHQ, red: redHQ };
 
   // Pre-placed energy nodes — 4 hex platforms at fixed grid positions.
@@ -346,7 +353,11 @@ export function createScene(): SceneBundle {
   // Semi-transparent cyan overlay for the proximity zone preview.
   const ZONE_COLOR = '#0a3040';
 
-  const reconcile = (state: PlacementState, zoneHq: { tileX: number; tileY: number } | null): void => {
+  const reconcile = (
+    state: PlacementState,
+    zoneHq: { tileX: number; tileY: number } | null,
+    selectedHq: import('./hq').HQBundle | null,
+  ): void => {
     // Clear previous zone highlights first.
     for (const t of lastZoneTiles) {
       const mesh = grid.tileMeshes[tileIndex(t.tileX, t.tileY)];
@@ -372,6 +383,17 @@ export function createScene(): SceneBundle {
           lastZoneTiles.push(t);
         }
       }
+    }
+
+    // Spawn ring — shown on the spawn tile when blue HQ is selected.
+    // Only blue HQ's spawn ring is player-visible; red's stays hidden.
+    if (selectedHq !== null && selectedHq.faction === 'blue') {
+      const sp = selectedHq.spawnTile;
+      const spWorld = tileToWorld(sp.x, sp.y);
+      selectedHq.spawnRing.position.set(spWorld.x, 0.01, spWorld.z);
+      selectedHq.spawnRing.visible = true;
+    } else {
+      blueHQ.spawnRing.visible = false;
     }
 
     const hoverView = computeHoverView(state);

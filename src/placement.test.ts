@@ -14,6 +14,9 @@ import {
   isInProximityZone,
   PROXIMITY_RADIUS,
   GRID_SIZE,
+  defaultSpawnTile,
+  validateSpawnTile,
+  relocateSpawnTile,
   type PlacementState,
 } from './placement';
 
@@ -485,5 +488,67 @@ describe('isInProximityZone', () => {
     for (const t of tiles) {
       expect(isInProximityZone(t.tileX, t.tileY, hqX, hqY)).toBe(true);
     }
+  });
+});
+
+describe('defaultSpawnTile', () => {
+  it('blue faction default spawn is one tile right of HQ', () => {
+    const sp = defaultSpawnTile(3, 9, 'blue');
+    expect(sp).toEqual({ x: 4, y: 9 });
+  });
+
+  it('red faction default spawn is one tile left of HQ', () => {
+    const sp = defaultSpawnTile(16, 9, 'red');
+    expect(sp).toEqual({ x: 15, y: 9 });
+  });
+
+  it('default spawn tile is inside the proximity zone', () => {
+    const blue = defaultSpawnTile(3, 9, 'blue');
+    expect(isInProximityZone(blue.x, blue.y, 3, 9)).toBe(true);
+    const red = defaultSpawnTile(16, 9, 'red');
+    expect(isInProximityZone(red.x, red.y, 16, 9)).toBe(true);
+  });
+});
+
+describe('validateSpawnTile', () => {
+  const noOccupied = (_tx: number, _ty: number): boolean => false;
+
+  it('returns true for a valid tile inside the proximity zone', () => {
+    // Blue HQ at (3,9): tile (4,8) is in zone and not occupied.
+    expect(validateSpawnTile(4, 8, 3, 9, noOccupied)).toBe(true);
+  });
+
+  it('returns false when tile is the HQ tile itself', () => {
+    expect(validateSpawnTile(3, 9, 3, 9, noOccupied)).toBe(false);
+  });
+
+  it('returns false when tile is outside the proximity zone', () => {
+    // (0,0) is far from (3,9)
+    expect(validateSpawnTile(0, 0, 3, 9, noOccupied)).toBe(false);
+  });
+
+  it('returns false when tile is occupied', () => {
+    const occupied = (_tx: number, _ty: number): boolean => true;
+    expect(validateSpawnTile(4, 9, 3, 9, occupied)).toBe(false);
+  });
+});
+
+describe('relocateSpawnTile', () => {
+  const noOccupied = (_tx: number, _ty: number): boolean => false;
+
+  it('returns new coords when tile is valid', () => {
+    const result = relocateSpawnTile(4, 8, 3, 9, noOccupied);
+    expect(result).toEqual({ x: 4, y: 8 });
+  });
+
+  it('returns null when tile is invalid (outside zone)', () => {
+    const result = relocateSpawnTile(0, 0, 3, 9, noOccupied);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when tile is occupied', () => {
+    const occupied = (_tx: number, _ty: number): boolean => true;
+    const result = relocateSpawnTile(4, 9, 3, 9, occupied);
+    expect(result).toBeNull();
   });
 });

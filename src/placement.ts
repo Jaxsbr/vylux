@@ -154,6 +154,57 @@ export function isInProximityZone(
   return dx <= PROXIMITY_RADIUS && dy <= PROXIMITY_RADIUS;
 }
 
+// ── Spawn-tile helpers ────────────────────────────────────────────────────────
+
+/**
+ * Default spawn tile for an HQ: one tile toward the map centre from the HQ.
+ * Blue HQ (left side) → one tile right; Red HQ (right side) → one tile left.
+ */
+export function defaultSpawnTile(
+  hqX: number,
+  hqY: number,
+  faction: FactionId,
+): { x: number; y: number } {
+  if (faction === 'blue') {
+    return { x: hqX + 1, y: hqY };
+  }
+  return { x: hqX - 1, y: hqY };
+}
+
+/**
+ * Returns true if a tile is a valid spawn-point relocation target for an HQ:
+ *   - inside the proximity zone (not the HQ tile, within PROXIMITY_RADIUS)
+ *   - not occupied by a unit or node
+ * The `isOccupied` callback should return true for unit tiles and node tiles
+ * (but NOT the HQ tile itself, since the proximity zone already excludes that).
+ */
+export function validateSpawnTile(
+  tileX: number,
+  tileY: number,
+  hqX: number,
+  hqY: number,
+  isOccupied: (tx: number, ty: number) => boolean,
+): boolean {
+  if (!isInProximityZone(tileX, tileY, hqX, hqY)) return false;
+  if (isOccupied(tileX, tileY)) return false;
+  return true;
+}
+
+/**
+ * Returns a new spawn tile coordinate if the relocation is valid, or null.
+ * Pure transition — no side effects.
+ */
+export function relocateSpawnTile(
+  tileX: number,
+  tileY: number,
+  hqX: number,
+  hqY: number,
+  isOccupied: (tx: number, ty: number) => boolean,
+): { x: number; y: number } | null {
+  if (!validateSpawnTile(tileX, tileY, hqX, hqY, isOccupied)) return null;
+  return { x: tileX, y: tileY };
+}
+
 export type TryPlaceReason = 'occupied' | 'out-of-bounds' | 'not-in-placement' | 'out-of-zone';
 
 export type TryPlaceResult =

@@ -51,16 +51,17 @@ describe('trainUnit', () => {
   const poorEnergy: FactionEnergy = { blue: 5, red: 5 };
 
   it('returns ok=true and deducts cost for worker when energy >= 20', () => {
-    const result = trainUnit(richEnergy, 'blue', 'worker', 0, 0, GRID_SIZE, noOccupied);
+    const result = trainUnit(richEnergy, 'blue', 'worker', 0, 0);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.blue).toBe(200 - 20);
-      expect(result.spawnTile).not.toBeNull();
+      // Unit always spawns at HQ tile.
+      expect(result.spawnTile).toEqual({ tileX: 0, tileY: 0 });
     }
   });
 
   it('returns ok=true and deducts cost for defender when energy >= 60', () => {
-    const result = trainUnit(richEnergy, 'blue', 'defender', 0, 0, GRID_SIZE, noOccupied);
+    const result = trainUnit(richEnergy, 'blue', 'defender', 0, 0);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.blue).toBe(200 - 60);
@@ -68,7 +69,7 @@ describe('trainUnit', () => {
   });
 
   it('returns ok=true and deducts cost for raider when energy >= 100', () => {
-    const result = trainUnit(richEnergy, 'blue', 'raider', 0, 0, GRID_SIZE, noOccupied);
+    const result = trainUnit(richEnergy, 'blue', 'raider', 0, 0);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.blue).toBe(200 - 100);
@@ -76,7 +77,7 @@ describe('trainUnit', () => {
   });
 
   it('returns ok=false (insufficient-energy) when energy < cost', () => {
-    const result = trainUnit(poorEnergy, 'blue', 'worker', 0, 0, GRID_SIZE, noOccupied);
+    const result = trainUnit(poorEnergy, 'blue', 'worker', 0, 0);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toBe('insufficient-energy');
@@ -84,27 +85,22 @@ describe('trainUnit', () => {
   });
 
   it('does not deduct energy on insufficient-energy failure', () => {
-    const result = trainUnit(poorEnergy, 'blue', 'defender', 0, 0, GRID_SIZE, noOccupied);
+    const result = trainUnit(poorEnergy, 'blue', 'defender', 0, 0);
     expect(result.ok).toBe(false);
     // Energy is unchanged — no side effects on failure.
   });
 
-  it('returns ok=false (no-free-tile) when all neighbours are occupied', () => {
-    const result = trainUnit(richEnergy, 'blue', 'worker', 0, 0, GRID_SIZE, allOccupied);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe('no-free-tile');
+  it('always spawns at HQ tile even when neighbours would be occupied', () => {
+    // Walled HQ: training never fails due to blocked neighbours — only energy matters.
+    const result = trainUnit(richEnergy, 'blue', 'worker', 5, 5);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.spawnTile).toEqual({ tileX: 5, tileY: 5 });
     }
   });
 
-  it('does not deduct energy when no free tile exists', () => {
-    // With all neighbours occupied, energy must remain untouched.
-    const result = trainUnit(richEnergy, 'blue', 'worker', 0, 0, GRID_SIZE, allOccupied);
-    expect(result.ok).toBe(false);
-  });
-
   it('red faction energy is unchanged when blue trains', () => {
-    const result = trainUnit(richEnergy, 'blue', 'raider', 0, 0, GRID_SIZE, noOccupied);
+    const result = trainUnit(richEnergy, 'blue', 'raider', 0, 0);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.red).toBe(200);
@@ -113,7 +109,7 @@ describe('trainUnit', () => {
 
   it('checks energy >= cost (exact boundary: blue = cost)', () => {
     const exactEnergy: FactionEnergy = { blue: 60, red: 0 };
-    const result = trainUnit(exactEnergy, 'blue', 'defender', 0, 0, GRID_SIZE, noOccupied);
+    const result = trainUnit(exactEnergy, 'blue', 'defender', 0, 0);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.blue).toBe(0);
@@ -122,7 +118,7 @@ describe('trainUnit', () => {
 
   it('one below boundary: blue = cost - 1 fails', () => {
     const nearEnergy: FactionEnergy = { blue: 59, red: 0 };
-    const result = trainUnit(nearEnergy, 'blue', 'defender', 0, 0, GRID_SIZE, noOccupied);
+    const result = trainUnit(nearEnergy, 'blue', 'defender', 0, 0);
     expect(result.ok).toBe(false);
   });
 });

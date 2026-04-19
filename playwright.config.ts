@@ -11,7 +11,7 @@ export default defineConfig({
   projects: [
     {
       name: 'dev',
-      testMatch: ['foundation.spec.ts', 'smoke-dev.spec.ts', 'worker.spec.ts', 'training.spec.ts', 'combat.spec.ts', 'node-points.spec.ts', 'ai-opponent.spec.ts', 'win-lose.spec.ts', 'mouse-training.spec.ts', 'onboarding-cue.spec.ts', 'mouse-end-to-end.spec.ts', 'offensive-reach.spec.ts', 'idle-loses.spec.ts', 'tooltips.spec.ts', 'worker-legibility.spec.ts', 'event-feedback-pulses.spec.ts'],
+      testMatch: ['foundation.spec.ts', 'smoke-dev.spec.ts', 'worker.spec.ts', 'training.spec.ts', 'combat.spec.ts', 'node-points.spec.ts', 'ai-opponent.spec.ts', 'win-lose.spec.ts', 'mouse-training.spec.ts', 'onboarding-cue.spec.ts', 'mouse-end-to-end.spec.ts', 'offensive-reach.spec.ts', 'idle-loses.spec.ts', 'tooltips.spec.ts', 'worker-legibility.spec.ts', 'event-feedback-pulses.spec.ts', 'walled-hq-spawn.spec.ts'],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },
     {

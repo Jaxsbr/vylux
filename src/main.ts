@@ -2,7 +2,7 @@ import { createScene } from './scene';
 import { attachDebugHook } from './debug';
 import { attachE2EHook } from './e2e-hook';
 import { attachInputHandlers } from './input';
-import { INITIAL_STATE, type PlacementState, isInProximityZone } from './placement';
+import { INITIAL_STATE, type PlacementState, isInProximityZone, relocateSpawnTile } from './placement';
 import { createEnergyLedger, tickEnergyWithNodes, NODE_INCOME } from './economy';
 import type { NodeWorkerCount } from './economy';
 import { createPointsLedger } from './points';
@@ -11,8 +11,7 @@ import { selectWorker, selectHq, getSelected, getSelectedHq, clearSelection } fr
 import { buildWorker } from './worker';
 import { buildDefender } from './defender';
 import { buildRaider } from './raider';
-import { trainUnit, buildOccupiedSet, findFreeNeighbour } from './training';
-import { GRID_CONSTANTS } from './grid';
+import { trainUnit, buildOccupiedSet } from './training';
 import { tickCombat } from './combat';
 import { advanceRaidersFaction } from './advance';
 import { tickNodePoints, computeNodeHolder } from './node-points';
@@ -103,23 +102,12 @@ const setPoints = (patch: Parameters<typeof pointsLedger.set>[0]): void => {
 // Training: attempt to train a unit of the given kind for blue faction.
 // Shared by keyboard handler and e2e hook pressTrainKey.
 function attemptTrain(kind: 'worker' | 'defender' | 'raider'): void {
-  const allUnits = [
-    ...bundle.workers,
-    ...bundle.defenders,
-    ...bundle.raiders,
-  ];
-  const hqTiles = [bundle.hqs.blue, bundle.hqs.red];
-  const occupied = buildOccupiedSet(allUnits, hqTiles);
-  const isOccupied = (tx: number, ty: number): boolean => occupied.has(`${tx},${ty}`);
-
   const result = trainUnit(
     energyLedger.get(),
     'blue',
     kind,
     bundle.hqs.blue.tileX,
     bundle.hqs.blue.tileY,
-    GRID_CONSTANTS.gridSize,
-    isOccupied,
   );
 
   if (!result.ok) return;
@@ -128,24 +116,33 @@ function attemptTrain(kind: 'worker' | 'defender' | 'raider'): void {
   energyLedger.set({ blue: result.newEnergy.blue, red: result.newEnergy.red });
   hud.updateEnergy(energyLedger.get());
 
+  // Units spawn at HQ tile then walk to the spawn point.
   const { tileX, tileY } = result.spawnTile;
+  const sp = bundle.hqs.blue.spawnTile;
 
   if (kind === 'worker') {
     const w = buildWorker('blue', tileX, tileY);
     bundle.scene.add(w.mesh);
     bundle.workers.push(w);
     w.triggerPlacementPulse();
+    w.moveTo(sp.x, sp.y);
   } else if (kind === 'defender') {
     const d = buildDefender('blue', tileX, tileY);
     bundle.scene.add(d.mesh);
     bundle.defenders.push(d);
     d.triggerPlacementPulse();
+    d.moveTo(sp.x, sp.y);
   } else {
     const r = buildRaider('blue', tileX, tileY);
     bundle.scene.add(r.mesh);
     bundle.raiders.push(r);
     r.triggerPlacementPulse();
+    r.moveTo(sp.x, sp.y);
   }
+
+  // Dismiss onboarding cue on first successful train.
+  onboardingCueState = dismissCue(onboardingCueState);
+  syncOnboardingCue();
 }
 
 let matchActive = true;
@@ -272,6 +269,10 @@ attachE2EHook(bundle, {
     matchActive = false;
     matchOutcome = outcome;
   },
+  onHqSelected: () => {
+    onboardingCueState = dismissCue(onboardingCueState);
+    syncOnboardingCue();
+  },
   openBuildablesPanel: () => {
     const next = handleHqClick(trainingPanelState);
     if (!next.panelOpen) {
@@ -328,8 +329,9 @@ attachInputHandlers({
 });
 
 /**
- * Try to place the armed unit kind at (tileX, tileY), or fall back to
- * findFreeNeighbour if the clicked tile is occupied.
+ * Train a unit of the given kind for blue. The clicked tile is validated as
+ * being inside the proximity zone (for panel UX feedback), but spawning always
+ * occurs at the HQ tile and the unit immediately walks to the spawn point.
  * Returns true on success.
  */
 function attemptMouseTrain(kind: UnitKind, tileX: number, tileY: number): boolean {
@@ -341,71 +343,49 @@ function attemptMouseTrain(kind: UnitKind, tileX: number, tileY: number): boolea
     return false;
   }
 
-  const allUnits = [
-    ...bundle.workers,
-    ...bundle.defenders,
-    ...bundle.raiders,
-  ];
-  const hqTiles = [bundle.hqs.blue, bundle.hqs.red];
-  const occupied = buildOccupiedSet(allUnits, hqTiles);
-  const isOccupied = (tx: number, ty: number): boolean => occupied.has(`${tx},${ty}`);
-
-  // If the clicked tile is occupied, try the nearest free neighbour.
-  let spawnX = tileX;
-  let spawnY = tileY;
-  if (isOccupied(tileX, tileY)) {
-    const fallback = findFreeNeighbour(hqX, hqY, GRID_CONSTANTS.gridSize, isOccupied);
-    if (fallback === null) {
-      buildablesPanel.showFeedback('No free tile near HQ');
-      return false;
-    }
-    spawnX = fallback.tileX;
-    spawnY = fallback.tileY;
-  }
-
   const result = trainUnit(
     energyLedger.get(),
     'blue',
     kind,
     hqX,
     hqY,
-    GRID_CONSTANTS.gridSize,
-    (tx, ty) => {
-      // When we have a specific spawn tile, only reject if it's that exact tile occupied.
-      // We already resolved the spawn tile above — just use the occupied set.
-      return occupied.has(`${tx},${ty}`);
-    },
   );
 
   if (!result.ok) {
-    if (result.reason === 'insufficient-energy') {
-      buildablesPanel.showFeedback('Not enough energy');
-    } else {
-      buildablesPanel.showFeedback('No free tile near HQ');
-    }
+    buildablesPanel.showFeedback('Not enough energy');
     return false;
   }
 
-  // Use our resolved spawn tile (not the one from trainUnit which uses findFreeNeighbour).
   energyLedger.set({ blue: result.newEnergy.blue, red: result.newEnergy.red });
   hud.updateEnergy(energyLedger.get());
+
+  // Units spawn at HQ tile then walk to the spawn point.
+  const { tileX: spawnX, tileY: spawnY } = result.spawnTile;
+  const sp = bundle.hqs.blue.spawnTile;
 
   if (kind === 'worker') {
     const w = buildWorker('blue', spawnX, spawnY);
     bundle.scene.add(w.mesh);
     bundle.workers.push(w);
     w.triggerPlacementPulse();
+    w.moveTo(sp.x, sp.y);
   } else if (kind === 'defender') {
     const d = buildDefender('blue', spawnX, spawnY);
     bundle.scene.add(d.mesh);
     bundle.defenders.push(d);
     d.triggerPlacementPulse();
+    d.moveTo(sp.x, sp.y);
   } else {
     const r = buildRaider('blue', spawnX, spawnY);
     bundle.scene.add(r.mesh);
     bundle.raiders.push(r);
     r.triggerPlacementPulse();
+    r.moveTo(sp.x, sp.y);
   }
+
+  // Dismiss onboarding cue on first successful train.
+  onboardingCueState = dismissCue(onboardingCueState);
+  syncOnboardingCue();
 
   return true;
 }
@@ -449,11 +429,9 @@ canvas.addEventListener('pointerdown', (event: PointerEvent) => {
       const next = handleHqClick(trainingPanelState);
       setTrainingPanelState(next);
       syncBuildablesPanel();
-      // Dismiss onboarding cue on the first panel open.
-      if (next.panelOpen) {
-        onboardingCueState = dismissCue(onboardingCueState);
-        syncOnboardingCue();
-      }
+      // Dismiss onboarding cue whenever the blue HQ is clicked.
+      onboardingCueState = dismissCue(onboardingCueState);
+      syncOnboardingCue();
       selectHq(hqHit);
     } else {
       // Red HQ click — deselect everything.
@@ -474,6 +452,38 @@ canvas.addEventListener('pointerdown', (event: PointerEvent) => {
   }
 
   const tileHit = bundle.raycastPointer(event.clientX, event.clientY);
+
+  // Spawn-tile reposition: blue HQ selected + panel NOT armed + valid tile click.
+  const selectedHqForSpawn = getSelectedHq();
+  if (
+    selectedHqForSpawn !== null &&
+    selectedHqForSpawn.faction === 'blue' &&
+    trainingPanelState.armedKind === null &&
+    tileHit !== null
+  ) {
+    const allUnits = [
+      ...bundle.workers,
+      ...bundle.defenders,
+      ...bundle.raiders,
+    ];
+    const hqTiles = [bundle.hqs.blue, bundle.hqs.red];
+    const occupied = buildOccupiedSet(allUnits, hqTiles);
+    const isOccupied = (tx: number, ty: number): boolean => occupied.has(`${tx},${ty}`);
+    const newSpawn = relocateSpawnTile(
+      tileHit.tileX,
+      tileHit.tileY,
+      selectedHqForSpawn.tileX,
+      selectedHqForSpawn.tileY,
+      isOccupied,
+    );
+    if (newSpawn !== null) {
+      selectedHqForSpawn.spawnTile = newSpawn;
+    } else {
+      buildablesPanel.showFeedback('Invalid spawn point');
+    }
+    return;
+  }
+
   const current = getSelected();
   if (current !== null && tileHit !== null) {
     current.moveTo(tileHit.tileX, tileHit.tileY);
@@ -577,24 +587,30 @@ function animate(): void {
           hud.updateEnergy(energyLedger.get());
         },
         onTrained: (kind, tileX, tileY) => {
+          // Units spawn at HQ tile; walk to red HQ's spawn point.
+          const rsp = bundle.hqs.red.spawnTile;
           if (kind === 'worker') {
             const w = buildWorker('red', tileX, tileY);
             bundle.scene.add(w.mesh);
             bundle.workers.push(w);
             w.triggerPlacementPulse();
+            w.moveTo(rsp.x, rsp.y);
           } else if (kind === 'defender') {
             const d = buildDefender('red', tileX, tileY);
             bundle.scene.add(d.mesh);
             bundle.defenders.push(d);
             d.triggerPlacementPulse();
+            d.moveTo(rsp.x, rsp.y);
           } else {
             const r = buildRaider('red', tileX, tileY);
             bundle.scene.add(r.mesh);
             bundle.raiders.push(r);
             r.triggerPlacementPulse();
-            // If already mustering, send the new raider immediately.
             if (aiState.mustering) {
+              // If mustering, send directly toward blue HQ.
               r.moveTo(bundle.hqs.blue.tileX, bundle.hqs.blue.tileY);
+            } else {
+              r.moveTo(rsp.x, rsp.y);
             }
           }
         },
@@ -773,7 +789,9 @@ function animate(): void {
 
   // Pass blue HQ position when a buildable is armed so the proximity zone renders.
   const zoneHq = trainingPanelState.armedKind !== null ? bundle.hqs.blue : null;
-  bundle.reconcile(state, zoneHq);
+  // Pass selected HQ so the spawn ring can be shown/hidden on the spawn tile.
+  const selectedHqForRing = getSelectedHq();
+  bundle.reconcile(state, zoneHq, selectedHqForRing);
   bundle.render();
 }
 animate();

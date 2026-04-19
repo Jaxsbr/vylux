@@ -3,6 +3,7 @@ import type { FactionId } from './placement';
 import { tileToWorld } from './grid';
 import { HQ_MAX_HP } from './units-config';
 import { buildHpBar, type HpBar } from './hp-bar';
+import { defaultSpawnTile } from './placement';
 
 // Faction emissive hex values — match the palette used in placement.ts ghost emissive.
 const FACTION_EMISSIVE: Record<FactionId, number> = {
@@ -110,6 +111,10 @@ export type HQBundle = {
   tileY: number;
   /** Selection ring rendered under the HQ tile — shown when selected. */
   selectionRing: THREE.Mesh;
+  /** Spawn tile for trained units — relocatable within the proximity zone. */
+  spawnTile: { x: number; y: number };
+  /** Cyan ring rendered on the spawn tile when HQ is selected. */
+  spawnRing: THREE.Mesh;
   hp: number;
   maxHp: number;
   hpBar: HpBar;
@@ -136,6 +141,26 @@ function buildHQSelectionRing(emissiveHex: number): THREE.Mesh {
 }
 
 /**
+ * Thin cyan ring rendered on the spawn tile when the HQ is selected.
+ * Distinct from the selection ring (which sits under the HQ tile itself).
+ */
+function buildHQSpawnRing(): THREE.Mesh {
+  const ringGeo = new THREE.RingGeometry(0.40, 0.52, 32);
+  const ringMat = new THREE.MeshStandardMaterial({
+    color: 0x00ffcc,
+    emissive: 0x00ffcc,
+    emissiveIntensity: 1.8,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.01;
+  ring.name = 'hq-spawn-ring';
+  ring.visible = false;
+  return ring;
+}
+
+/**
  * Build a Tron-style HQ group at the given tile coordinate.
  *
  * Silhouette: wide base → narrower mid tier → narrow spire → thin antenna.
@@ -156,6 +181,10 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
   const selectionRing = buildHQSelectionRing(emissive);
   group.add(selectionRing);
 
+  // Spawn ring — NOT added to the HQ group (it needs to sit at the spawn tile, not HQ tile).
+  // Scene.ts positions and parents it; we just build the mesh here.
+  const spawnRing = buildHQSpawnRing();
+
   // HP bar — always visible on HQs.
   const hpBar = buildHpBar(faction, 2.1);
   hpBar.group.visible = true;
@@ -173,6 +202,8 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
     tileX,
     tileY,
     selectionRing,
+    spawnTile: defaultSpawnTile(tileX, tileY, faction),
+    spawnRing,
     hp: maxHp,
     maxHp,
     hpBar,

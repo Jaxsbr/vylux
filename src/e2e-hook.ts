@@ -96,15 +96,16 @@ function seedMidCombat(group: THREE.Group, bundle: SceneBundle): void {
   if (bundle.workers[0]) bundle.workers[0].setTile(5, 5);
   if (bundle.workers[1]) bundle.workers[1].setTile(4, 5);
 
-  // Red workers near their HQ (now at 16,9).
-  if (bundle.workers[2]) bundle.workers[2].setTile(15, 8);
-  if (bundle.workers[3]) bundle.workers[3].setTile(16, 8);
+  // Red workers near red HQ (16,9) — visible behind the defenders.
+  if (bundle.workers[2]) bundle.workers[2].setTile(17, 8);
+  if (bundle.workers[3]) bundle.workers[3].setTile(17, 10);
 
-  // Blue raiders charging toward the red HQ (now at 16,9) — real raider meshes.
+  // Blue raiders right up against the red HQ cluster so combat fires immediately.
+  // Red HQ at (16,9); raiders at (14,9),(14,8),(14,10) — within raider range 2.
   const blueRaiderPositions: [number, number][] = [
-    [13, 9],
-    [13, 10],
     [14, 9],
+    [14, 8],
+    [14, 10],
   ];
   for (const [tx, ty] of blueRaiderPositions) {
     const raider = buildRaider('blue', tx, ty);
@@ -113,10 +114,22 @@ function seedMidCombat(group: THREE.Group, bundle: SceneBundle): void {
     bundle.raiders.push(raider);
   }
 
-  // Red defenders near their HQ (16,9) — real defender meshes.
-  const redDefenderPositions: [number, number][] = [
+  // Red raiders near HQ about to engage — adds to the clash density.
+  const redRaiderPositions: [number, number][] = [
     [15, 9],
+    [15, 8],
+  ];
+  for (const [tx, ty] of redRaiderPositions) {
+    const raider = buildRaider('red', tx, ty);
+    raider.mesh.name = 'e2e-red-raider';
+    bundle.scene.add(raider.mesh);
+    bundle.raiders.push(raider);
+  }
+
+  // Red defenders flanking their HQ for silhouette depth.
+  const redDefenderPositions: [number, number][] = [
     [15, 10],
+    [16, 8],
   ];
   for (const [tx, ty] of redDefenderPositions) {
     const defender = buildDefender('red', tx, ty);
@@ -124,6 +137,7 @@ function seedMidCombat(group: THREE.Group, bundle: SceneBundle): void {
     bundle.scene.add(defender.mesh);
     bundle.defenders.push(defender);
   }
+
 }
 
 function seedScene(name: SceneName, group: THREE.Group, bundle: SceneBundle): void {
@@ -184,6 +198,8 @@ export type HudSetters = {
   // Onboarding cue hooks.
   getOnboardingCueVisible: () => boolean;
   dismissOnboardingCue: () => void;
+  // Called internally when selectHq fires via e2e hook, to dismiss cue.
+  onHqSelected: () => void;
   // Node tooltip hooks.
   getNodeTooltipVisible: () => boolean;
   showNodeTooltip: (x: number, y: number) => void;
@@ -315,6 +331,8 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
         clearSelection();
       } else {
         selectionSelectHq(bundle.hqs.blue);
+        // Dismiss the onboarding cue whenever blue HQ is selected via script.
+        hudSetters.onHqSelected();
       }
     },
     pressTrainKey(key: string): void {
@@ -427,20 +445,25 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
               energyCache = { ...newEnergy };
             },
             onTrained: (kind, tileX, tileY) => {
+              const rsp = bundle.hqs.red.spawnTile;
               if (kind === 'worker') {
                 const w = buildWorker('red', tileX, tileY);
                 bundle.scene.add(w.mesh);
                 bundle.workers.push(w);
+                w.moveTo(rsp.x, rsp.y);
               } else if (kind === 'defender') {
                 const d = buildDefender('red', tileX, tileY);
                 bundle.scene.add(d.mesh);
                 bundle.defenders.push(d);
+                d.moveTo(rsp.x, rsp.y);
               } else {
                 const r = buildRaider('red', tileX, tileY);
                 bundle.scene.add(r.mesh);
                 bundle.raiders.push(r);
                 if (hudSetters.aiState.mustering) {
                   r.moveTo(bundle.hqs.blue.tileX, bundle.hqs.blue.tileY);
+                } else {
+                  r.moveTo(rsp.x, rsp.y);
                 }
               }
             },
