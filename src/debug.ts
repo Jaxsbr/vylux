@@ -74,6 +74,13 @@ export type VyluxHook = {
   // Match hooks.
   getMatchState?: () => { outcome: import('./match').MatchOutcome | null; active: boolean };
   playAgain?: () => void;
+  // Mouse-training hooks — present when ?e2e=1.
+  openBuildablesPanel?: () => void;
+  closeBuildablesPanel?: () => void;
+  getBuildablesPanelOpen?: () => boolean;
+  armBuildable?: (kind: string) => void;
+  getArmedKind?: () => string | null;
+  mouseTrainUnit?: (kind: string, tileX: number, tileY: number) => boolean;
 };
 
 declare global {

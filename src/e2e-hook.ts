@@ -170,6 +170,13 @@ export type HudSetters = {
   playAgain: () => void;
   /** Called by e2e advanceTime when evaluateMatch returns non-null. */
   onMatchEnd: (outcome: import('./match').MatchOutcome, score: { blue: number; red: number }) => void;
+  // Mouse-training panel hooks — wired by main.ts after panel is created.
+  openBuildablesPanel: () => void;
+  closeBuildablesPanel: () => void;
+  getBuildablesPanelOpen: () => boolean;
+  armBuildable: (kind: UnitKind) => void;
+  getArmedKind: () => UnitKind | null;
+  mouseTrainUnit: (kind: UnitKind, tileX: number, tileY: number) => boolean;
 };
 
 export type E2EHookExtension = {
@@ -198,6 +205,13 @@ export type E2EHookExtension = {
   // Match hooks.
   getMatchState: () => { outcome: import('./match').MatchOutcome | null; active: boolean };
   playAgain: () => void;
+  // Mouse-training panel hooks.
+  openBuildablesPanel: () => void;
+  closeBuildablesPanel: () => void;
+  getBuildablesPanelOpen: () => boolean;
+  armBuildable: (kind: string) => void;
+  getArmedKind: () => string | null;
+  mouseTrainUnit: (kind: string, tileX: number, tileY: number) => boolean;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -449,6 +463,31 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
 
     playAgain(): void {
       hudSetters.playAgain();
+    },
+
+    openBuildablesPanel(): void {
+      hudSetters.openBuildablesPanel();
+    },
+
+    closeBuildablesPanel(): void {
+      hudSetters.closeBuildablesPanel();
+    },
+
+    getBuildablesPanelOpen(): boolean {
+      return hudSetters.getBuildablesPanelOpen();
+    },
+
+    armBuildable(kind: string): void {
+      const k = kind as UnitKind;
+      hudSetters.armBuildable(k);
+    },
+
+    getArmedKind(): string | null {
+      return hudSetters.getArmedKind();
+    },
+
+    mouseTrainUnit(kind: string, tileX: number, tileY: number): boolean {
+      return hudSetters.mouseTrainUnit(kind as UnitKind, tileX, tileY);
     },
   };
 

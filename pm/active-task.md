@@ -1,134 +1,167 @@
 ---
-id: win-lose-screen
-opened_at: 2026-04-19T05:52:43Z
+task_id: mouse-driven-training
 priority: P0
-status: open
+status: dispatched
+dispatched_at: 2026-04-19T07:06:46Z
+dispatched_tick: 1C68398E
+mvp_link: "pm/mvp.md — acceptance items 'Unit training (mouse-driven)' and 'Mouse-driven end-to-end match'"
+inbox_link: "pm/inbox/2026-04-19-mvp-failure.md"
 ---
 
-# Win / lose screen — VICTORY / DEFEAT overlay + in-place reset
+# Mouse-driven training — click HQ → buildables panel → click tile to place
 
-## Outcome
-Matches now end. When either faction's points cross `WIN_POINTS = 500`
-**or** either HQ's HP hits 0, a full-screen overlay appears: `VICTORY` in
-cyan if blue wins, `DEFEAT` in red-orange if red wins. A single
-`PLAY AGAIN` button resets the match in-place — no page reload, no
-lingering stale state — dropping the player back into a fresh `idle-start`
-equivalent (HQs full HP, 4 starter workers per faction, points and energy
-zeroed, AI re-enabled from the default, units/beams cleared).
+## Why this task
 
-This ticks the final MVP checklist item `Win / lose screen`, which — with
-the visual-target axis already satisfied — makes the MVP **complete**.
+The MVP was reopened by the owner because the on-screen experience does
+not read as a real RTS. The single biggest gap is **input**: training a
+unit today requires the player to know that Q/W/E trains a
+worker/defender/raider. Those hotkeys were a placement test scaffold, not
+the intended input model. Replace them with a mouse-driven flow that a
+first-time player can discover by clicking.
 
-## Acceptance
-- New module `src/match.ts`. Pure match-state owner. Expose:
-    - `evaluateMatch({ pointsLedger, hqs }): 'blue-wins' | 'red-wins' | null`
-      — pure check; `null` while match continues.
-    - Uses existing `WIN_POINTS` constant (500). Do not duplicate; import
-      from wherever it lives (likely `src/mvp-config.ts` or equivalent —
-      check first, add the constant there if it doesn't yet exist in a
-      shared config).
-    - `resetMatch(world)` — tears down current units, beams, node
-      accumulators, points, HQ HP, HQ damage accumulators, AI state; then
-      rebuilds the initial scene by calling the same helper `createScene`
-      (or equivalent bootstrap) uses. Return value: the new world bundle
-      references so `main.ts` can rebind.
-- New module `src/overlay.ts` (DOM-based, echoes the existing HUD style):
-    - Full-screen fixed overlay, `pointer-events: auto` on a centred
-      panel but `pointer-events: none` on the backdrop so stray clicks
-      don't leak through.
-    - Charcoal semi-transparent backdrop (`rgba(0,0,0,0.55)`).
-    - Centred panel: monospace font, neon outlined box matching HUD
-      chrome. Large heading (`VICTORY` cyan / `DEFEAT` red-orange),
-      subtitle showing final score (`BLUE 517  RED 362`), and a single
-      button `PLAY AGAIN` styled like HUD buttons (outlined, neon
-      accented).
-    - Expose: `showMatchOverlay(outcome: 'blue-wins'|'red-wins', score)
-      ` and `hideMatchOverlay()`.
-    - Button `onclick` calls back into `main.ts` which invokes
-      `resetMatch` then `hideMatchOverlay`.
-- `src/main.ts` integration:
-    - Each frame, after existing ticks, call `evaluateMatch`. If non-null
-      AND no overlay is currently shown:
-        - Pause per-frame gameplay ticks (`tickCombat`, `tickAi`,
-          `tickNodePoints`, economy trickle) — guard with a
-          `matchActive: boolean` flag. Rendering and HP-bar billboarding
-          continue so the frozen tableau still looks alive.
-        - Call `showMatchOverlay(outcome, { blue, red })`.
-    - `PLAY AGAIN` handler → `resetMatch(world)` → `matchActive = true` →
-      `hideMatchOverlay()`.
-- HQ-death trigger:
-    - If an HQ's HP reaches 0 during a `tickCombat` frame, `evaluateMatch`
-      should report the opposite faction as winner (blue HQ dies → red
-      wins, vice versa).
-    - Do **not** auto-destroy the HQ mesh — combat already keeps it
-      rendered at 0 HP per the existing spec. Overlay is the signal.
-- Test-only hook additions:
-    - `window.__vylux.getMatchState()` — returns
-      `{ outcome: 'blue-wins'|'red-wins'|null, active: boolean }`.
-    - `window.__vylux.playAgain()` — programmatic click of the button
-      (bypasses DOM) for deterministic e2e.
-- Unit tests (`src/match.test.ts`, pure — no DOM, no Three.js):
-    - Blue at WIN_POINTS → outcome `'blue-wins'`.
-    - Red at WIN_POINTS → `'red-wins'`.
-    - Blue HQ hp=0 → `'red-wins'`. Red HQ hp=0 → `'blue-wins'`.
-    - Both below threshold AND both HQs > 0 → `null`.
-    - **Tie-break**: if both conditions trigger same frame, the side with
-      strictly more points wins. If points tied, whoever reached
-      WIN_POINTS this frame (track via previous ledger snapshot) wins.
-      If truly simultaneous, blue wins (deterministic tiebreaker —
-      document in comment above the branch).
-- Playwright coverage: new spec `tests/e2e/win-lose.spec.ts`:
-    - Test 1 — blue-wins-points: `setPoints('blue', 500)`, advance one
-      frame, assert `getMatchState().outcome === 'blue-wins'` and
-      overlay visible in DOM with text `VICTORY`.
-    - Test 2 — red-wins-hq: `setUnitHp({ kind: 'hq', faction: 'blue',
-      hp: 0 })`, advance, assert `'red-wins'` and `DEFEAT` text.
-    - Test 3 — play-again resets: trigger blue win, call `playAgain()`,
-      assert overlay gone, `getPoints('blue') === 0`,
-      `getHqHp('blue') === 500`, red workers + HQ back to starter
-      count, and `advanceTime(0.2)` does not re-trigger the overlay
-      (meaning state is genuinely reset, not stale).
-- Scene spec updates:
-    - No changes to the three existing scenes. This task does **not**
-      add a win-lose screenshot scene — the overlay is covered by the
-      Playwright spec above, not by rubric scoring. If it's trivial to
-      capture `victory.png` as a 4th scene for future bragging rights,
-      feel free, but do not add it to `rubric.md`'s scenes list and do
-      not expand rubric scoring scope.
-- Regenerate the existing three screenshots via `npm run scenes` in case
-  anything shifted, and commit.
-- Verify passes (lint + type + unit + all Playwright projects). Commit to
-  local `main`.
+This task is the **foundation** of the reopen — every other remaining
+MVP item (onboarding cue, visual concept-match, mouse-driven end-to-end
+match) builds on this input surface.
+
+## Scope
+
+### In scope
+
+1. **HQ click → buildables panel.**
+   - When the player clicks the blue HQ mesh, a DOM buildables panel
+     opens anchored to the HUD (cyan outline, mono font, matching
+     `src/hud.ts` / `src/overlay.ts` chrome).
+   - Panel lists Worker / Defender / Raider with their energy cost from
+     `src/units-config.ts`. Disable buildables the player cannot afford
+     (greyed out, not removed).
+   - Clicking the blue HQ again (or pressing Escape) closes the panel
+     without picking anything.
+
+2. **Buildable click → armed "place mode".**
+   - Clicking an enabled buildable arms place-mode for that unit type.
+     The cursor / hover tile reads as armed (e.g. colored preview ring
+     on the hovered grid tile using the existing grid hover code).
+   - Only blue-side training is mouse-driven (owner constraint: blue is
+     the player, red is AI).
+
+3. **Tile click → spawn unit.**
+   - In armed state, clicking a grid tile **adjacent to the blue HQ**
+     (same adjacency rule `findFreeNeighbour` already uses) calls the
+     existing `trainUnit` pure function with the selected kind, deducts
+     energy, and spawns the unit **on the clicked tile** if it's free,
+     otherwise falls back to `findFreeNeighbour`.
+   - Clicking a non-adjacent or occupied tile shows a quick negative
+     feedback (tile flash or panel message) and **stays armed**. The
+     player doesn't lose the selection on a misclick.
+   - After a successful placement, place-mode disarms and the buildables
+     panel stays open (so the player can queue another).
+
+4. **Input routing separation.**
+   - The existing pointerdown raycast in `src/main.ts` currently handles
+     {worker select, HQ select, tile → moveTo}. Extend it to also route
+     {HQ click → open panel} and {tile click in armed mode → place unit}.
+   - Keep selection-of-workers and click-to-move behaviour intact. The
+     armed place-mode takes priority over worker move-orders only while
+     armed.
+
+5. **Q/W/E → dev-only fallback.**
+   - Q/W/E must still work when the URL contains `?dev=1` **or** when
+     `window.__vylux` is present (e2e hook). In normal play they are
+     disabled. This keeps every existing test passing without forcing
+     players to know the hotkeys.
+
+6. **Tests.**
+   - Unit tests for any new pure helpers (e.g. `armPlaceMode`,
+     `handleBuildableClick`, `handleTilePlacement`). Follow the
+     existing pattern: pure functions in their own module, tested in
+     isolation.
+   - E2E test `tests/e2e/training.spec.ts` updated (or a new
+     `tests/e2e/mouse-training.spec.ts`) that clicks the HQ, clicks a
+     buildable, clicks a tile, and asserts a unit mesh exists and
+     energy decremented. The existing Q/W/E e2e test stays under
+     `?dev=1`.
+
+### Out of scope
+
+- Onboarding cue (`onboarding-cue` backlog item — separate task).
+- Visual material rework (`visual-concept-match-pass` — separate task).
+- Demoting / removing keys 1/2 (`dev-hotkey-demotion` — separate task,
+  though you may land the `?dev=1` gate for Q/W/E here since it's in
+  the same input file).
+- Rewriting `combat.ts`, `economy.ts`, `ai.ts`, `match.ts`,
+  `points.ts`, `node-points.ts`. **Do not touch the combat or
+  economy systems.** Their pieces exist and just need to stay wired.
+- Build queues, tech tree, production buildings, side-selection UI.
+- New unit types.
 
 ## Constraints
-- Do **not** touch `pm/mvp.md`, `pm/persona.md`, `pm/rubric.md`, or
-  `pm/backlog.yaml` — PM-owned.
-- Do not implement: difficulty settings, statistics screen, replay,
-  multi-round series, leaderboards, animations on the overlay beyond a
-  subtle fade-in (optional; skip if non-trivial).
-- Overlay must be DOM, not canvas-rendered. Match HUD chrome style.
-- Reset must be in-place. No `window.location.reload()`. No URL param
-  changes.
-- Keep new LOC under ~250.
-- No `git push`.
+
+- **Blue is the fixed player side.** Red remains AI. No faction picker.
+- **Preserve all existing passing tests** unless a test asserted the
+  old Q/W/E-only flow as the player's path — in which case, update it
+  to use mouse and move the Q/W/E assertion under a `?dev=1` variant.
+- **Reuse**, don't rewrite: `trainUnit` / `findFreeNeighbour` in
+  `src/training.ts`, `Selection` in `src/selection.ts`, HUD chrome in
+  `src/hud.ts` / `src/overlay.ts`, grid hover in `src/grid.ts`.
+- No new external dependencies.
+- No canvas-rendered UI for the buildables panel — DOM-overlay, to match
+  the existing HUD and VICTORY/DEFEAT overlays.
+
+## Acceptance
+
+- [ ] Clicking the blue HQ opens a buildables panel showing Worker /
+      Defender / Raider with costs. Panel chrome matches HUD style.
+- [ ] Unaffordable buildables render disabled.
+- [ ] Clicking a buildable arms place-mode; hovering a grid tile
+      previews placement.
+- [ ] Clicking a valid adjacent tile spawns the unit, deducts energy,
+      and keeps the panel open for repeat training.
+- [ ] Clicking an invalid tile gives feedback and stays armed.
+- [ ] Clicking the HQ again or pressing Escape closes the panel.
+- [ ] Worker click-to-select and click-to-move still work unchanged
+      when the panel is closed.
+- [ ] Q/W/E no longer train in default play; still train when
+      `?dev=1` or `window.__vylux` is present.
+- [ ] `npm run test` passes. `npm run test:e2e` passes.
+- [ ] Commit message follows existing convention
+      (`feat(mouse-training): ...`). Commit locally. Do **not** push.
+
+## Handoff notes
+
+When done, fill out the `## Handoff` section below with:
+- commit hash,
+- files touched,
+- any deviations from this spec and why,
+- any follow-ups you'd like the PM to queue (e.g. if you noticed the
+  buildables panel needs a pulse animation, file it as a note here,
+  don't scope-creep the task).
 
 ## Handoff
 
-status: done_by_engineer
+**Status:** done_by_engineer
+**Commit:** (see below — filled after commit)
 
-Commit: dd96f51
+### Files touched
 
-### What shipped
+- `src/training-panel-state.ts` — new pure state module: `panelOpen`, `armedKind`, pure transitions `handleHqClick`, `handleBuildableClick`, `handleEscape`, `handlePlacementSuccess`
+- `src/training-panel-state.test.ts` — 14 unit tests covering all transitions
+- `src/buildables-panel.ts` — new DOM panel module (no scene/input imports): cyan HUD-style chrome, Worker/Defender/Raider buttons with cost, affordability disabling, armed highlight, feedback message
+- `src/main.ts` — wired panel: HQ click toggles panel, tile click in armed mode calls `attemptMouseTrain`, Escape closes panel, Q/W/E gated behind `isDevMode()` (`?dev=1` or `window.__vylux`), per-frame affordability sync, all panel hooks passed to `attachE2EHook`
+- `src/e2e-hook.ts` — added `openBuildablesPanel`, `closeBuildablesPanel`, `getBuildablesPanelOpen`, `armBuildable`, `getArmedKind`, `mouseTrainUnit` to `HudSetters` + `E2EHookExtension`
+- `src/debug.ts` — added matching optional hook fields to `VyluxHook` type
+- `tests/e2e/mouse-training.spec.ts` — 14 E2E tests: panel show/hide, button listing, affordability, arm/disarm, train worker/defender/raider, invalid tile rejection, energy failure, Q/W/E dev-gate positive test, screenshot
+- `playwright.config.ts` — added `mouse-training.spec.ts` to `dev` project testMatch
 
-- `src/match.ts` — pure `evaluateMatch` + `WIN_POINTS=500`. No Three.js.
-- `src/overlay.ts` — DOM overlay with VICTORY/DEFEAT heading, score subtitle, PLAY AGAIN button. Backdrop pointer-events:none, panel auto.
-- `src/main.ts` — `matchActive` flag gates all gameplay ticks; `evaluateMatch` called each frame; `resetMatch()` tears down units/beams/energy/points/nodes/AI and rebuilds 4 starter workers; overlay wired with play-again callback.
-- `src/e2e-hook.ts` — `setUnitHp` extended for `kind:'hq'`; `getMatchState`/`playAgain` added; `evaluateMatch` called inside `advanceTime` loop so e2e tests see match state synchronously; `onMatchEnd` callback lets main.ts update its local `matchActive`/`matchOutcome`.
-- `src/debug.ts` — `VyluxHook` type extended with `getMatchState`/`playAgain`.
-- `playwright.config.ts` — `win-lose.spec.ts` added to `dev` project testMatch.
-- `src/match.test.ts` — 10 pure unit tests (all pass).
-- `tests/e2e/win-lose.spec.ts` — 3 e2e tests: blue-wins-points, red-wins-hq, play-again-resets.
-- Screenshots regenerated via `npm run scenes`.
+### Verify result
 
-### Verify
-`npx tsc --noEmit && npm run test && npm run test:e2e` — 228 unit tests + 38 e2e tests, all green.
+`npx tsc --noEmit && npm run test && npm run test:e2e` — 242 unit tests + 52 E2E tests, all green.
+
+### Deviations
+
+1. **Q/W/E negative test** — The task requested asserting Q/W/E does NOT train in normal play. On the dev server `window.__vylux` is always present (debug hook mounts in `import.meta.env.DEV`), so `isDevMode()` is always true there. The test instead asserts the positive: Q trains when `?dev=1` is explicit. The negative (no Q/W/E in production) is covered by the `isDevMode()` guard logic and the existing preview-build test which confirms `window.__vylux === undefined` on production. If a separate negative test is wanted, it would need to run on the preview server.
+
+2. **`attemptMouseTrain` reuses `trainUnit` but overrides the spawn tile** — `trainUnit` calls `findFreeNeighbour` internally, but we need to use the player's clicked tile (not the first free neighbour). The function calls `trainUnit` for energy checking/deduction, then spawns at the player-chosen tile (or falls back to `findFreeNeighbour` if that tile is occupied). This keeps `trainUnit` as the canonical authority for energy.
+
+### Screenshots regenerated
+
+- `pm/screenshots/buildables-panel.png` — panel open with worker armed, 200 blue energy

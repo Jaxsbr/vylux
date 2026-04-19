@@ -10,13 +10,23 @@ import { selectWorker, selectHq, getSelected, getSelectedHq, clearSelection } fr
 import { buildWorker } from './worker';
 import { buildDefender } from './defender';
 import { buildRaider } from './raider';
-import { trainUnit, buildOccupiedSet } from './training';
+import { trainUnit, buildOccupiedSet, findFreeNeighbour } from './training';
 import { GRID_CONSTANTS } from './grid';
 import { tickCombat } from './combat';
 import { tickNodePoints, computeNodeHolder } from './node-points';
 import { tickAi, createAiState } from './ai';
 import { evaluateMatch, type MatchOutcome } from './match';
 import { showMatchOverlay, hideMatchOverlay, isOverlayVisible } from './overlay';
+import { createBuildablesPanel } from './buildables-panel';
+import type { UnitKind } from './units-config';
+import {
+  INITIAL_TRAINING_PANEL_STATE,
+  handleHqClick,
+  handleBuildableClick,
+  handleEscape,
+  handlePlacementSuccess,
+  type TrainingPanelState,
+} from './training-panel-state';
 
 const bundle = createScene();
 const canvas = bundle.renderer.domElement;
@@ -29,6 +39,28 @@ const hook = attachDebugHook(bundle);
 const energyLedger = createEnergyLedger();
 const pointsLedger = createPointsLedger();
 const hud = createHud();
+
+let trainingPanelState: TrainingPanelState = INITIAL_TRAINING_PANEL_STATE;
+
+function setTrainingPanelState(next: TrainingPanelState): void {
+  trainingPanelState = next;
+}
+
+// Whether Q/W/E dev hotkeys are active (requires ?dev=1 in URL or window.__vylux present).
+const devParams = new URLSearchParams(window.location.search);
+const isDevMode = (): boolean =>
+  devParams.get('dev') === '1' || typeof window.__vylux !== 'undefined';
+
+// Build panel — callback fires when a buildable button is clicked.
+function onBuildableButtonClick(kind: UnitKind): void {
+  const next = handleBuildableClick(trainingPanelState, kind);
+  if (next !== trainingPanelState) {
+    setTrainingPanelState(next);
+    buildablesPanel.setArmed(next.armedKind);
+  }
+}
+
+const buildablesPanel = createBuildablesPanel(onBuildableButtonClick);
 
 // Expose HUD setters on the window hook so E2E specs and debug can
 // force deterministic values.
@@ -195,6 +227,31 @@ attachE2EHook(bundle, {
     matchActive = false;
     matchOutcome = outcome;
   },
+  openBuildablesPanel: () => {
+    const next = handleHqClick(trainingPanelState);
+    if (!next.panelOpen) {
+      // Was open, close it — open it fresh.
+      setTrainingPanelState({ panelOpen: true, armedKind: null });
+    } else {
+      setTrainingPanelState(next);
+    }
+    syncBuildablesPanel();
+  },
+  closeBuildablesPanel: () => {
+    const next = handleEscape(trainingPanelState);
+    setTrainingPanelState(next);
+    syncBuildablesPanel();
+  },
+  getBuildablesPanelOpen: () => trainingPanelState.panelOpen,
+  armBuildable: (kind: UnitKind) => {
+    const next = handleBuildableClick(trainingPanelState, kind);
+    setTrainingPanelState(next);
+    syncBuildablesPanel();
+  },
+  getArmedKind: () => trainingPanelState.armedKind,
+  mouseTrainUnit: (kind: UnitKind, tileX: number, tileY: number) => {
+    return attemptMouseTrain(kind, tileX, tileY);
+  },
 });
 
 let state: PlacementState = INITIAL_STATE;
@@ -212,17 +269,132 @@ attachInputHandlers({
   },
 });
 
+/** Check whether (tileX, tileY) is one of the 8 neighbours of (hqX, hqY). */
+function isAdjacentToHq(tileX: number, tileY: number, hqX: number, hqY: number): boolean {
+  const dx = Math.abs(tileX - hqX);
+  const dy = Math.abs(tileY - hqY);
+  return dx <= 1 && dy <= 1 && (dx + dy > 0);
+}
+
+/**
+ * Try to place the armed unit kind at (tileX, tileY), or fall back to
+ * findFreeNeighbour if the clicked tile is occupied.
+ * Returns true on success.
+ */
+function attemptMouseTrain(kind: UnitKind, tileX: number, tileY: number): boolean {
+  const hqX = bundle.hqs.blue.tileX;
+  const hqY = bundle.hqs.blue.tileY;
+
+  if (!isAdjacentToHq(tileX, tileY, hqX, hqY)) {
+    buildablesPanel.showFeedback('Must place adjacent to HQ');
+    return false;
+  }
+
+  const allUnits = [
+    ...bundle.workers,
+    ...bundle.defenders,
+    ...bundle.raiders,
+  ];
+  const hqTiles = [bundle.hqs.blue, bundle.hqs.red];
+  const occupied = buildOccupiedSet(allUnits, hqTiles);
+  const isOccupied = (tx: number, ty: number): boolean => occupied.has(`${tx},${ty}`);
+
+  // If the clicked tile is occupied, try the nearest free neighbour.
+  let spawnX = tileX;
+  let spawnY = tileY;
+  if (isOccupied(tileX, tileY)) {
+    const fallback = findFreeNeighbour(hqX, hqY, GRID_CONSTANTS.gridSize, isOccupied);
+    if (fallback === null) {
+      buildablesPanel.showFeedback('No free tile near HQ');
+      return false;
+    }
+    spawnX = fallback.tileX;
+    spawnY = fallback.tileY;
+  }
+
+  const result = trainUnit(
+    energyLedger.get(),
+    'blue',
+    kind,
+    hqX,
+    hqY,
+    GRID_CONSTANTS.gridSize,
+    (tx, ty) => {
+      // When we have a specific spawn tile, only reject if it's that exact tile occupied.
+      // We already resolved the spawn tile above — just use the occupied set.
+      return occupied.has(`${tx},${ty}`);
+    },
+  );
+
+  if (!result.ok) {
+    if (result.reason === 'insufficient-energy') {
+      buildablesPanel.showFeedback('Not enough energy');
+    } else {
+      buildablesPanel.showFeedback('No free tile near HQ');
+    }
+    return false;
+  }
+
+  // Use our resolved spawn tile (not the one from trainUnit which uses findFreeNeighbour).
+  energyLedger.set({ blue: result.newEnergy.blue, red: result.newEnergy.red });
+  hud.updateEnergy(energyLedger.get());
+
+  if (kind === 'worker') {
+    const w = buildWorker('blue', spawnX, spawnY);
+    bundle.scene.add(w.mesh);
+    bundle.workers.push(w);
+  } else if (kind === 'defender') {
+    const d = buildDefender('blue', spawnX, spawnY);
+    bundle.scene.add(d.mesh);
+    bundle.defenders.push(d);
+  } else {
+    const r = buildRaider('blue', spawnX, spawnY);
+    bundle.scene.add(r.mesh);
+    bundle.raiders.push(r);
+  }
+
+  return true;
+}
+
+function syncBuildablesPanel(): void {
+  buildablesPanel.updateAffordability(energyLedger.get().blue);
+  buildablesPanel.setArmed(trainingPanelState.armedKind);
+  if (trainingPanelState.panelOpen) {
+    buildablesPanel.show();
+  } else {
+    buildablesPanel.hide();
+  }
+}
+
 // Worker / HQ click-to-select + click-to-move wiring.
-// Priority: HQ hit → worker hit → tile hit / deselect.
+// Priority: armed-place-mode → HQ hit → worker hit → tile hit / deselect.
 canvas.addEventListener('pointerdown', (event: PointerEvent) => {
   if (event.button !== 0) return;
   // Only process in idle mode — placement mode owns its own click logic.
   if (state.mode !== 'idle') return;
 
+  // Armed place-mode takes priority over all other interactions.
+  if (trainingPanelState.armedKind !== null) {
+    const tileHit = bundle.raycastPointer(event.clientX, event.clientY);
+    if (tileHit !== null) {
+      const success = attemptMouseTrain(trainingPanelState.armedKind, tileHit.tileX, tileHit.tileY);
+      if (success) {
+        const next = handlePlacementSuccess(trainingPanelState);
+        setTrainingPanelState(next);
+        syncBuildablesPanel();
+      }
+    }
+    return;
+  }
+
   // HQ raycast — higher priority than worker (HQ is a large mesh).
   const hqHit = bundle.raycastHq(event.clientX, event.clientY);
   if (hqHit !== null) {
     if (hqHit.faction === 'blue') {
+      // Toggle panel on blue HQ click.
+      const next = handleHqClick(trainingPanelState);
+      setTrainingPanelState(next);
+      syncBuildablesPanel();
       selectHq(hqHit);
     } else {
       // Red HQ click — deselect everything.
@@ -254,9 +426,20 @@ canvas.addEventListener('pointerdown', (event: PointerEvent) => {
   }
 });
 
-// Training hotkeys — only active when blue HQ is the current selection.
+// Escape key: close buildables panel when open (in addition to placement.ts Escape handling).
+window.addEventListener('keydown', (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && trainingPanelState.panelOpen) {
+    const next = handleEscape(trainingPanelState);
+    setTrainingPanelState(next);
+    syncBuildablesPanel();
+  }
+});
+
+// Training hotkeys (Q/W/E) — dev-only: only active when ?dev=1 or window.__vylux present.
+// E2E specs use pressTrainKey() instead, which goes through attemptTrain() directly.
 window.addEventListener('keydown', (event: KeyboardEvent) => {
   if (state.mode !== 'idle') return;
+  if (!isDevMode()) return;
   const selectedHq = getSelectedHq();
   if (selectedHq === null || selectedHq.faction !== 'blue') return;
 
@@ -283,6 +466,11 @@ function animate(): void {
     energyLedger.tick(deltaSeconds);
     hud.updateEnergy(energyLedger.get());
     hud.updatePoints(pointsLedger.get());
+
+    // Keep buildables panel affordability in sync with current energy.
+    if (trainingPanelState.panelOpen) {
+      buildablesPanel.updateAffordability(energyLedger.get().blue);
+    }
 
     // Tick AI — red faction auto-plays when enabled.
     if (aiEnabled) {
