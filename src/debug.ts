@@ -67,6 +67,10 @@ export type VyluxHook = {
   // Node-control point hooks.
   getNodePointAccumulator?: (nodeIndex: number) => number;
   getPoints?: (faction: string) => number;
+  // AI hooks.
+  setAiEnabled?: (enabled: boolean) => void;
+  getAiBuildQueue?: () => import('./units-config').UnitKind[];
+  getAiState?: () => { trainCooldown: number; workerAssignTimer: number; mustering: boolean };
 };
 
 declare global {

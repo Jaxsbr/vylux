@@ -14,6 +14,7 @@ import { trainUnit, buildOccupiedSet } from './training';
 import { GRID_CONSTANTS } from './grid';
 import { tickCombat } from './combat';
 import { tickNodePoints, computeNodeHolder } from './node-points';
+import { tickAi, createAiState } from './ai';
 
 const bundle = createScene();
 const canvas = bundle.renderer.domElement;
@@ -83,6 +84,9 @@ function attemptTrain(kind: 'worker' | 'defender' | 'raider'): void {
   }
 }
 
+let aiEnabled = true;
+const aiState = createAiState();
+
 if (hook) {
   hook.setEnergy = setEnergy;
   hook.setPoints = setPoints;
@@ -96,9 +100,27 @@ if (hook) {
     const f = faction === 'red' ? 'red' : 'blue';
     return bundle.hqs[f].hp;
   };
+  hook.setAiEnabled = (enabled: boolean) => {
+    aiEnabled = enabled;
+  };
+  hook.getAiBuildQueue = () => [...aiState.buildQueue];
+  hook.getAiState = () => ({
+    trainCooldown: aiState.trainCooldown,
+    workerAssignTimer: aiState.workerAssignTimer,
+    mustering: aiState.mustering,
+  });
 }
 
-attachE2EHook(bundle, { setEnergy, setPoints, attemptTrain, pointsLedger });
+attachE2EHook(bundle, {
+  setEnergy,
+  getEnergy: () => energyLedger.get(),
+  setPoints,
+  attemptTrain,
+  pointsLedger,
+  aiState,
+  getAiEnabled: () => aiEnabled,
+  setAiEnabled: (v: boolean) => { aiEnabled = v; },
+});
 
 let state: PlacementState = INITIAL_STATE;
 
@@ -185,6 +207,50 @@ function animate(): void {
   energyLedger.tick(deltaSeconds);
   hud.updateEnergy(energyLedger.get());
   hud.updatePoints(pointsLedger.get());
+
+  // Tick AI — red faction auto-plays when enabled.
+  if (aiEnabled) {
+    const redWorkers = bundle.workers.filter((w) => w.faction === 'red');
+    const redDefenders = bundle.defenders.filter((d) => d.faction === 'red');
+    const redRaiders = bundle.raiders.filter((r) => r.faction === 'red');
+    tickAi({
+      state: aiState,
+      dt: deltaSeconds,
+      energy: energyLedger.get(),
+      redWorkers,
+      redDefenders,
+      redRaiders,
+      allWorkers: bundle.workers,
+      allDefenders: bundle.defenders,
+      allRaiders: bundle.raiders,
+      energyNodes: bundle.energyNodes,
+      redHq: bundle.hqs.red,
+      blueHq: bundle.hqs.blue,
+      onEnergyChanged: (newEnergy) => {
+        energyLedger.set({ red: newEnergy.red, blue: newEnergy.blue });
+        hud.updateEnergy(energyLedger.get());
+      },
+      onTrained: (kind, tileX, tileY) => {
+        if (kind === 'worker') {
+          const w = buildWorker('red', tileX, tileY);
+          bundle.scene.add(w.mesh);
+          bundle.workers.push(w);
+        } else if (kind === 'defender') {
+          const d = buildDefender('red', tileX, tileY);
+          bundle.scene.add(d.mesh);
+          bundle.defenders.push(d);
+        } else {
+          const r = buildRaider('red', tileX, tileY);
+          bundle.scene.add(r.mesh);
+          bundle.raiders.push(r);
+          // If already mustering, send the new raider immediately.
+          if (aiState.mustering) {
+            r.moveTo(bundle.hqs.blue.tileX, bundle.hqs.blue.tileY);
+          }
+        }
+      },
+    });
+  }
 
   // Tick all units (movement).
   for (const w of bundle.workers) {

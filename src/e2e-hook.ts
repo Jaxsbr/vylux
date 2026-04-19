@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { SceneBundle } from './scene';
 import type { FactionEnergy } from './economy';
+import { tickEnergy } from './economy';
 import type { FactionPoints } from './points';
 import type { FactionHold } from './energy-node';
 import { buildWorker } from './worker';
@@ -10,6 +11,7 @@ import type { UnitKind } from './units-config';
 import { selectHq as selectionSelectHq, clearSelection, getSelectedHq } from './selection';
 import { tickCombat, type PointsLedger } from './combat';
 import { tickNodePoints } from './node-points';
+import { tickAi, type AiState } from './ai';
 
 // E2E-only hook — installed only when the URL contains `?e2e=1`.
 // This file is imported by main.ts but the install function exits early unless
@@ -155,9 +157,13 @@ function seedScene(name: SceneName, group: THREE.Group, bundle: SceneBundle): vo
 
 export type HudSetters = {
   setEnergy: (patch: Partial<FactionEnergy>) => void;
+  getEnergy: () => FactionEnergy;
   setPoints: (patch: Partial<FactionPoints>) => void;
   attemptTrain: (kind: UnitKind) => void;
   pointsLedger: PointsLedger;
+  aiState: AiState;
+  getAiEnabled: () => boolean;
+  setAiEnabled: (v: boolean) => void;
 };
 
 export type E2EHookExtension = {
@@ -179,11 +185,20 @@ export type E2EHookExtension = {
   // Node-control point hooks.
   getNodePointAccumulator: (nodeIndex: number) => number;
   getPoints: (faction: string) => number;
+  // AI hooks.
+  setAiEnabled: (enabled: boolean) => void;
+  getAiBuildQueue: () => UnitKind[];
+  getAiState: () => { trainCooldown: number; workerAssignTimer: number; mustering: boolean };
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
   const params = new URLSearchParams(window.location.search);
   if (params.get('e2e') !== '1') return;
+
+  // Disable AI by default in E2E sessions — tests that want AI must opt in
+  // via setAiEnabled(true). This prevents AI from interfering with existing
+  // combat/worker/training specs that were written before AI existed.
+  hudSetters.setAiEnabled(false);
 
   const overlayGroup = new THREE.Group();
   overlayGroup.name = 'e2e-overlays';
@@ -288,12 +303,66 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
     },
 
     advanceTime(seconds: number): void {
-      // Simulate combat + node-point ticks in fixed steps so cooldown-based logic resolves.
+      // Simulate combat + node-point ticks (and AI when enabled) in fixed steps.
       const STEP = 0.016;
+      // Seed energy from the real ledger so pre-set values (setEnergy calls
+      // before advanceTime) are honoured.
+      let energyCache = hudSetters.getEnergy();
       let remaining = seconds;
       while (remaining > 0) {
         const dt = Math.min(STEP, remaining);
         remaining -= dt;
+
+        // Tick energy — mirrors main.ts energyLedger.tick.
+        energyCache = tickEnergy(energyCache, dt);
+
+        // Tick AI if enabled.
+        if (hudSetters.getAiEnabled()) {
+          const redWorkers = bundle.workers.filter((w) => w.faction === 'red');
+          const redDefenders = bundle.defenders.filter((d) => d.faction === 'red');
+          const redRaiders = bundle.raiders.filter((r) => r.faction === 'red');
+          tickAi({
+            state: hudSetters.aiState,
+            dt,
+            energy: energyCache,
+            redWorkers,
+            redDefenders,
+            redRaiders,
+            allWorkers: bundle.workers,
+            allDefenders: bundle.defenders,
+            allRaiders: bundle.raiders,
+            energyNodes: bundle.energyNodes,
+            redHq: bundle.hqs.red,
+            blueHq: bundle.hqs.blue,
+            onEnergyChanged: (newEnergy) => {
+              energyCache = { ...newEnergy };
+            },
+            onTrained: (kind, tileX, tileY) => {
+              if (kind === 'worker') {
+                const w = buildWorker('red', tileX, tileY);
+                bundle.scene.add(w.mesh);
+                bundle.workers.push(w);
+              } else if (kind === 'defender') {
+                const d = buildDefender('red', tileX, tileY);
+                bundle.scene.add(d.mesh);
+                bundle.defenders.push(d);
+              } else {
+                const r = buildRaider('red', tileX, tileY);
+                bundle.scene.add(r.mesh);
+                bundle.raiders.push(r);
+                if (hudSetters.aiState.mustering) {
+                  r.moveTo(bundle.hqs.blue.tileX, bundle.hqs.blue.tileY);
+                }
+              }
+            },
+          });
+        }
+
+        // Tick unit movement.
+        for (const w of bundle.workers) w.tick(dt);
+        for (const d of bundle.defenders) d.tick(dt);
+        for (const r of bundle.raiders) r.tick(dt);
+
         tickCombat({
           units: {
             workers: bundle.workers,
@@ -317,6 +386,8 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           dt,
         });
       }
+      // Sync final energy back to the real ledger so HUD reflects AI spending.
+      hudSetters.setEnergy({ red: energyCache.red, blue: energyCache.blue });
     },
 
     getNodePointAccumulator(nodeIndex: number): number {
@@ -328,6 +399,22 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
     getPoints(faction: string): number {
       const pts = hudSetters.pointsLedger.get();
       return faction === 'red' ? pts.red : pts.blue;
+    },
+
+    setAiEnabled(enabled: boolean): void {
+      hudSetters.setAiEnabled(enabled);
+    },
+
+    getAiBuildQueue(): UnitKind[] {
+      return [...hudSetters.aiState.buildQueue];
+    },
+
+    getAiState(): { trainCooldown: number; workerAssignTimer: number; mustering: boolean } {
+      return {
+        trainCooldown: hudSetters.aiState.trainCooldown,
+        workerAssignTimer: hudSetters.aiState.workerAssignTimer,
+        mustering: hudSetters.aiState.mustering,
+      };
     },
   };
 

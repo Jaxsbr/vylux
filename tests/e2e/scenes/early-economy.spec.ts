@@ -9,11 +9,14 @@ test('early-economy scene snapshot', async ({ page }) => {
       typeof window.__vylux !== 'undefined' &&
       typeof window.__vylux.setScene === 'function' &&
       typeof window.__vylux.ready === 'function' &&
-      typeof window.__vylux.advanceTime === 'function',
+      typeof window.__vylux.advanceTime === 'function' &&
+      typeof window.__vylux.setAiEnabled === 'function',
     null,
     { timeout: 15_000 },
   );
 
+  // Disable AI so the early-economy scene stays focused on manual economy setup.
+  await page.evaluate(() => window.__vylux!.setAiEnabled!(false));
   await page.evaluate(() => window.__vylux!.setScene!('early-economy'));
   await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 24, red: 17 }));
   await page.evaluate(() => window.__vylux!.setPoints!({ blue: 6, red: 4 }));
