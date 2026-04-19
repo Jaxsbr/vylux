@@ -1,7 +1,7 @@
 ---
 id: hq-spawn-point
 opened_at: 2026-04-20T19:45:27Z
-status: open
+status: done_by_engineer
 priority: P0
 ---
 
@@ -110,4 +110,22 @@ exposed by the post-layout mid-combat screenshot:
 
 ## Handoff
 
-(Empty. Engineer fills this in with a summary + commit SHA on completion.)
+**Commit:** `3a5020d`
+**Verify:** green — TypeScript clean, 327 unit tests, 81 E2E tests all passing.
+
+**What shipped:**
+
+- `src/placement.ts` — three new pure helpers: `defaultSpawnTile`, `validateSpawnTile`, `relocateSpawnTile`. Unit-tested in `src/placement.test.ts`.
+- `src/hq.ts` — `HQBundle` gains `spawnTile: {x,y}` (defaulted via `defaultSpawnTile`) and `spawnRing: THREE.Mesh`. Ring mesh added to scene in `scene.ts`; positioned at spawn tile each frame when HQ is selected.
+- `src/training.ts` — `trainUnit` no longer takes `gridSize`/`isOccupied`; always returns spawn-at-HQ-tile. Only failure mode is `insufficient-energy`. `findFreeNeighbour` kept for legacy/e2e uses. `training.test.ts` updated accordingly.
+- `src/main.ts` + `src/ai.ts` — all callers updated: units spawn at HQ tile and immediately `moveTo(spawnTile)`. Spawn-tile reposition on HQ-selected + panel-idle tile click. Onboarding cue dismissed on any blue HQ click (not just first panel open).
+- `src/e2e-hook.ts` — `onHqSelected` callback added; `selectHq` hook dismisses cue. Mid-combat seed reseeded with blue/red raiders directly adjacent to red HQ for immediate combat.
+- `tests/e2e/walled-hq-spawn.spec.ts` — proves Raider trains when HQ is surrounded by 4 defenders and walks to spawn point.
+- `tests/e2e/scenes/mid-combat.spec.ts` — reseeded for left/right layout; dismisses onboarding cue.
+- `tests/e2e/scenes/early-economy.spec.ts` — dismisses onboarding cue so screenshot stays clean.
+
+**v13 regression fixes landed:**
+1. Mid-combat seed — blue/red raiders now positioned at (14,9)/(15,9) cluster, flanking red HQ (16,9). Frame shows raiders clashing near red HQ under left/right layout.
+2. Onboarding cue dismissal — clears on any first HQ-driven action (mouse click, scripted `selectHq`, or `trainUnit`). `early-economy.png` and `mid-combat.png` regenerated without the cue; `idle-start.png` still shows it.
+
+**Screenshots regenerated:** idle-start, early-economy, mid-combat, mouse-e2e-victory, idle-loses-end, walled-hq-spawn (new). buildables-panel, proximity-zone, tooltip-buildables unchanged.
