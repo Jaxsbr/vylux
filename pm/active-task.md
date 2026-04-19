@@ -1,7 +1,7 @@
 ---
 task_id: visual-concept-match-pass
 priority: P0
-status: dispatched
+status: done_by_engineer
 dispatched_at: 2026-04-19T07:27:36Z
 dispatched_tick: CC34AE75
 mvp_link: "pm/mvp.md — acceptance item 'Visual concept-match'"
@@ -146,7 +146,7 @@ another tune pass.
 
 ### Commit
 
-To be set after commit — see below.
+`264bfe2`
 
 ### Files touched
 
