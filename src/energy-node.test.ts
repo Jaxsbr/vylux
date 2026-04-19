@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { buildEnergyNode, NODE_POSITIONS } from './energy-node';
+import { RESERVE_DEFAULT, MIN_REGEN_THRESHOLD } from './worker-task';
 
 describe('buildEnergyNode', () => {
   it('returns a group containing body and rim meshes', () => {
@@ -92,5 +93,47 @@ describe('NODE_POSITIONS', () => {
       expect(ty).toBeGreaterThanOrEqual(0);
       expect(ty).toBeLessThan(20);
     }
+  });
+});
+
+describe('node regeneration (tickRegen)', () => {
+  it('exhausted node starts regenerating after tickRegen calls', () => {
+    const node = buildEnergyNode(5, 5);
+    // Exhaust the node.
+    node.reserve = 0;
+    expect(node.exhausted).toBe(true);
+    // Advance enough time for reserve to cross MIN_REGEN_THRESHOLD.
+    const timeNeeded = MIN_REGEN_THRESHOLD / 0.4 + 1;
+    node.tickRegen(timeNeeded);
+    expect(node.reserve).toBeGreaterThanOrEqual(MIN_REGEN_THRESHOLD);
+    expect(node.exhausted).toBe(false);
+  });
+
+  it('tickRegen does not increase reserve above RESERVE_DEFAULT', () => {
+    const node = buildEnergyNode(5, 5);
+    node.reserve = 0;
+    node.tickRegen(10000);
+    expect(node.reserve).toBe(RESERVE_DEFAULT);
+  });
+
+  it('tickRegen is no-op when reserve is full', () => {
+    const node = buildEnergyNode(5, 5);
+    expect(node.reserve).toBe(RESERVE_DEFAULT);
+    node.tickRegen(100);
+    expect(node.reserve).toBe(RESERVE_DEFAULT);
+  });
+
+  it('rim returns to neutral colour after regen crosses MIN_REGEN_THRESHOLD', () => {
+    const node = buildEnergyNode(5, 5);
+    node.reserve = 0; // sets exhausted visuals
+    const rim = node.group.children.find((c) => c.name === 'node-rim') as THREE.Mesh;
+    const mat = rim.material as THREE.MeshStandardMaterial;
+    // After exhaustion, rim should be grey.
+    expect(mat.emissiveIntensity).toBeLessThan(1.0);
+    // Advance regen past threshold.
+    const timeNeeded = MIN_REGEN_THRESHOLD / 0.4 + 1;
+    node.tickRegen(timeNeeded);
+    // After crossing threshold, rim should be restored to full neutral intensity.
+    expect(mat.emissiveIntensity).toBeGreaterThanOrEqual(0.8);
   });
 });

@@ -11,6 +11,25 @@ export const HARVEST_YIELD = 8; // energy added on offload
 export const RESERVE_DEFAULT = 60; // starting reserve per node
 export const OFFLOAD_DURATION = 0.5; // seconds to animate offload
 
+// Regeneration — exhausted nodes slowly refill.
+// NODE_REGEN_RATE must be <= HARVEST_YIELD / HARVEST_DURATION / 5 to stay 5x slower than workers.
+// Worker collection rate: HARVEST_YIELD / HARVEST_DURATION = 8 / 4 = 2 reserve/sec.
+// Regen rate: 0.4 reserve/sec → exactly 5x slower (ratio = 5.0).
+export const NODE_REGEN_RATE = 0.4; // reserve per second
+// Node becomes eligible once reserve crosses this threshold (10% of RESERVE_DEFAULT).
+export const MIN_REGEN_THRESHOLD = 6; // reserve units (= 10% of 60)
+
+/**
+ * Advance a node's reserve by regeneration.
+ * Returns the new reserve value (clamped to RESERVE_DEFAULT).
+ * The node is considered re-eligible (live) once newReserve >= MIN_REGEN_THRESHOLD.
+ * Pure — does not mutate any argument.
+ */
+export function tickNodeRegen(reserve: number, dt: number): number {
+  if (reserve >= RESERVE_DEFAULT) return reserve;
+  return Math.min(RESERVE_DEFAULT, reserve + NODE_REGEN_RATE * dt);
+}
+
 export type WorkerTaskPhase =
   | 'idle'
   | 'walking-to-node'
@@ -142,8 +161,8 @@ export function tickWorkerTask(
         return { task: { ...task, phase: 'idle', nodeIndex: -1 }, moveTo: null, offloaded: false, harvestProgress: 0 };
       }
 
-      if (node.reserve <= 0) {
-        // Node exhausted before arrival — retarget.
+      if (node.reserve < MIN_REGEN_THRESHOLD) {
+        // Node exhausted/ineligible before arrival — retarget.
         const retarget = findNearestLiveUnoccupied(worker, liveNodes, null);
         if (retarget !== null) {
           const newTask = assignWorkerToNode(task, retarget.index);
@@ -174,8 +193,8 @@ export function tickWorkerTask(
     }
 
     case 'harvesting': {
-      if (node === null || node.reserve <= 0) {
-        // Node exhausted mid-harvest — retarget.
+      if (node === null || node.reserve < MIN_REGEN_THRESHOLD) {
+        // Node exhausted/ineligible mid-harvest — retarget.
         const retarget = findNearestLiveUnoccupied(worker, liveNodes, null);
         if (retarget !== null) {
           const newTask = assignWorkerToNode(task, retarget.index);
@@ -212,8 +231,8 @@ export function tickWorkerTask(
     case 'offloading': {
       const remaining = task.offloadTimer - dt;
       if (remaining <= 0) {
-        // Done offloading — go back to node (if still live and unoccupied).
-        if (node !== null && node.reserve > 0 && (node.occupiedBy === null || node.occupiedBy === worker.id)) {
+        // Done offloading — go back to node (if still live/eligible and unoccupied).
+        if (node !== null && node.reserve >= MIN_REGEN_THRESHOLD && (node.occupiedBy === null || node.occupiedBy === worker.id)) {
           const newTask: WorkerTask = { ...task, phase: 'walking-to-node', harvestProgress: 0, offloadTimer: 0 };
           return { task: newTask, moveTo: { tileX: node.tileX, tileY: node.tileY }, offloaded: false, harvestProgress: 0 };
         }
@@ -252,7 +271,7 @@ export function findNearestLiveUnoccupied(
 
   for (const node of nodes) {
     if (excludeIndex !== null && node.index === excludeIndex) continue;
-    if (node.reserve <= 0) continue;
+    if (node.reserve < MIN_REGEN_THRESHOLD) continue; // node is exhausted/below re-eligible threshold
     if (node.occupiedBy !== null && node.occupiedBy !== worker.id) continue;
     const d = tileDist(worker.tileX, worker.tileY, node.tileX, node.tileY);
     if (d < bestDist) {

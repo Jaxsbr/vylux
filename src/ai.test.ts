@@ -76,6 +76,7 @@ function makeParams(overrides: Partial<TickAiParams> = {}): TickAiParams {
     onTrained: vi.fn(),
     onEnergyChanged: vi.fn(),
     assignWorkerTask: vi.fn(),
+    getWorkerTaskPhase: vi.fn(() => 'idle' as const),
     ...overrides,
   };
 }
@@ -203,6 +204,46 @@ describe('tickAi — worker assignment', () => {
       energyNodes: [node],
     }));
     expect((w.moveTo as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it('does not reassign a worker whose task phase is not idle (e.g. harvesting)', () => {
+    const w = makeWorker(11, 11); // physically on node (idle in position)
+    const node = makeNode(11, 11);
+    const state = createAiState();
+    state.workerAssignTimer = 0;
+    const assignWorkerTask = vi.fn();
+    // Worker is harvesting — getWorkerTaskPhase returns 'harvesting'.
+    const getWorkerTaskPhase = vi.fn(() => 'harvesting' as const);
+    tickAi(makeParams({
+      state,
+      energy: { blue: 0, red: 0 },
+      redWorkers: [w],
+      allWorkers: [w],
+      energyNodes: [node],
+      assignWorkerTask,
+      getWorkerTaskPhase,
+    }));
+    // Should NOT reassign because phase is not 'idle'.
+    expect(assignWorkerTask).not.toHaveBeenCalled();
+  });
+
+  it('assigns a worker whose task phase is idle and position is idle', () => {
+    const w = makeWorker(10, 10);
+    const node = makeNode(11, 11);
+    const state = createAiState();
+    state.workerAssignTimer = 0;
+    const assignWorkerTask = vi.fn();
+    const getWorkerTaskPhase = vi.fn(() => 'idle' as const);
+    tickAi(makeParams({
+      state,
+      energy: { blue: 0, red: 0 },
+      redWorkers: [w],
+      allWorkers: [w],
+      energyNodes: [node],
+      assignWorkerTask,
+      getWorkerTaskPhase,
+    }));
+    expect(assignWorkerTask).toHaveBeenCalledWith(w, 0);
   });
 });
 

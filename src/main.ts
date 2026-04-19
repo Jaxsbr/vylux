@@ -757,6 +757,7 @@ function animate(): void {
             w.moveTo(node.tileX, node.tileY);
           }
         },
+        getWorkerTaskPhase: (w) => getWorkerTask(w).phase,
       });
     }
 
@@ -808,12 +809,15 @@ function animate(): void {
             }
             nodeBundle.setHarvestingTint(w.faction);
           } else if (prevPhase === 'harvesting') {
-            // Left harvesting state — release tint.
+            // Left harvesting state — release occupancy immediately so another worker can claim.
+            if (nodeBundle.occupiedBy === w.id) {
+              nodeBundle.occupiedBy = null;
+            }
             nodeBundle.setHarvestingTint(null);
             w.setHarvestFill(0);
           }
 
-          // Release occupancy when no longer assigned.
+          // Also release occupancy when task is fully cancelled (nodeIndex -1).
           if (result.task.nodeIndex === -1 && nodeBundle.occupiedBy === w.id) {
             nodeBundle.occupiedBy = null;
             nodeBundle.setHarvestingTint(null);
@@ -851,6 +855,12 @@ function animate(): void {
       }
     }
     // ── End worker task loop ──────────────────────────────────────────────────
+
+    // ── Node regeneration ─────────────────────────────────────────────────────
+    for (const node of bundle.energyNodes) {
+      node.tickRegen(deltaSeconds);
+    }
+    // ── End node regeneration ─────────────────────────────────────────────────
 
     // Tick all units (movement).
     for (const w of bundle.workers) {

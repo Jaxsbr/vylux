@@ -281,6 +281,12 @@ export type E2EHookExtension = {
   getNodeReserve: (nodeIndex: number) => number;
   getNodeOccupiedBy: (nodeIndex: number) => string | null;
   getNodeExhausted: (nodeIndex: number) => boolean;
+  // Faction-specific worker task hooks.
+  getRedWorkerTaskPhase: (redWorkerIndex: number) => string;
+  getRedWorkerTargetTile: (redWorkerIndex: number) => { tileX: number; tileY: number } | null;
+  assignRedWorkerToNodeByIndex: (redWorkerIndex: number, nodeIndex: number) => void;
+  // Direct node reserve override (for testing exact thresholds).
+  setNodeReserve: (nodeIndex: number, reserve: number) => void;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -511,6 +517,7 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
                 w.moveTo(node.tileX, node.tileY);
               }
             },
+            getWorkerTaskPhase: (w) => e2eGetWorkerTask(w).phase,
           });
         }
 
@@ -554,10 +561,14 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
                 if (nodeBundle.occupiedBy !== w.id) nodeBundle.occupiedBy = w.id;
                 nodeBundle.setHarvestingTint(w.faction);
               } else if (prevPhase === 'harvesting') {
-                // Left harvesting state — release tint.
+                // Left harvesting state — release occupancy immediately so another worker can claim.
+                if (nodeBundle.occupiedBy === w.id) {
+                  nodeBundle.occupiedBy = null;
+                }
                 nodeBundle.setHarvestingTint(null);
                 w.setHarvestFill(0);
               }
+              // Also release occupancy when task is fully cancelled (nodeIndex -1).
               if (result.task.nodeIndex === -1 && nodeBundle.occupiedBy === w.id) {
                 nodeBundle.occupiedBy = null;
                 nodeBundle.setHarvestingTint(null);
@@ -587,6 +598,11 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
               }
             }
           }
+        }
+
+        // Node regeneration — exhausted nodes slowly refill.
+        for (const node of bundle.energyNodes) {
+          node.tickRegen(dt);
         }
 
         // Tick unit movement.
@@ -973,6 +989,36 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
     getNodeExhausted(nodeIndex: number): boolean {
       const node = bundle.energyNodes[nodeIndex];
       return node === undefined ? false : node.exhausted;
+    },
+
+    getRedWorkerTaskPhase(redWorkerIndex: number): string {
+      const redWorkers = bundle.workers.filter((w) => w.faction === 'red');
+      const w = redWorkers[redWorkerIndex];
+      if (w === undefined) return 'idle';
+      return e2eGetWorkerTask(w).phase;
+    },
+
+    getRedWorkerTargetTile(redWorkerIndex: number): { tileX: number; tileY: number } | null {
+      const redWorkers = bundle.workers.filter((w) => w.faction === 'red');
+      const w = redWorkers[redWorkerIndex];
+      if (w === undefined) return null;
+      return { tileX: w.targetTileX, tileY: w.targetTileY };
+    },
+
+    assignRedWorkerToNodeByIndex(redWorkerIndex: number, nodeIndex: number): void {
+      const redWorkers = bundle.workers.filter((w) => w.faction === 'red');
+      const w = redWorkers[redWorkerIndex];
+      const node = bundle.energyNodes[nodeIndex];
+      if (w === undefined || node === undefined) return;
+      const task = assignWorkerToNode(e2eGetWorkerTask(w), nodeIndex);
+      e2eWorkerTasks.set(w.id, task);
+      w.moveTo(node.tileX, node.tileY);
+    },
+
+    setNodeReserve(nodeIndex: number, reserve: number): void {
+      const node = bundle.energyNodes[nodeIndex];
+      if (node === undefined) return;
+      node.reserve = reserve;
     },
   };
 

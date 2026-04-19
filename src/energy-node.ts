@@ -5,7 +5,7 @@ import {
   CAPTURE_PULSE_DURATION,
   CAPTURE_PULSE_PEAK_DELTA,
 } from './event-pulse';
-import { RESERVE_DEFAULT } from './worker-task';
+import { RESERVE_DEFAULT, tickNodeRegen, MIN_REGEN_THRESHOLD } from './worker-task';
 
 // Neutral rim: pale-cyan — reads as part of the Tron circuit palette while
 // staying clearly distinct from the faction cyan (#00e0ff) and red (#ff4a1a).
@@ -80,6 +80,12 @@ export type EnergyNodeBundle = {
    * Only visible when faction tint is active.
    */
   setHarvestFill: (progress: number) => void;
+  /**
+   * Advance node regeneration by dt seconds.
+   * No-op when node is not exhausted or already full.
+   * Snaps visuals back to neutral when reserve crosses MIN_REGEN_THRESHOLD.
+   */
+  tickRegen: (dt: number) => void;
 };
 
 const NODE_CONSTANTS = {
@@ -215,7 +221,7 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
     get occupiedBy(): string | null { return _occupiedBy; },
     set occupiedBy(v: string | null) { _occupiedBy = v; },
 
-    get exhausted(): boolean { return _reserve <= 0; },
+    get exhausted(): boolean { return _reserve < MIN_REGEN_THRESHOLD; },
 
     setHarvestingTint(faction: FactionHold): void {
       _harvestingFaction = faction;
@@ -241,6 +247,21 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
     setHarvestFill(progress: number): void {
       if (_reserve <= 0) { fillMat.opacity = 0; return; }
       fillMat.opacity = Math.max(0, Math.min(1, progress)) * 0.85 + 0.08;
+    },
+
+    tickRegen(dt: number): void {
+      if (_reserve >= RESERVE_DEFAULT) return; // full — nothing to regen
+      if (_reserve >= MIN_REGEN_THRESHOLD) return; // above re-eligible threshold — no regen needed
+      const prevReserve = _reserve;
+      const newReserve = tickNodeRegen(_reserve, dt);
+      _reserve = newReserve;
+      // Snap visuals back to neutral when reserve crosses the re-eligible threshold.
+      if (prevReserve < MIN_REGEN_THRESHOLD && _reserve >= MIN_REGEN_THRESHOLD) {
+        rimMat.color.set(NEUTRAL_RIM);
+        rimMat.emissive.set(NEUTRAL_RIM);
+        rimMat.emissiveIntensity = NODE_CONSTANTS.rimEmissiveIntensity;
+        bodyMat.emissiveIntensity = NODE_CONSTANTS.bodyEmissiveIntensity;
+      }
     },
 
     triggerCapturePulse(): void {

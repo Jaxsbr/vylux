@@ -5,10 +5,13 @@ import {
   cancelWorkerTask,
   tickWorkerTask,
   findNearestLiveUnoccupied,
+  tickNodeRegen,
   HARVEST_DURATION,
   HARVEST_YIELD,
   RESERVE_DEFAULT,
   OFFLOAD_DURATION,
+  NODE_REGEN_RATE,
+  MIN_REGEN_THRESHOLD,
   type WorkerTask,
   type NodeTarget,
   type HqTarget,
@@ -341,5 +344,74 @@ describe('constants', () => {
 
   it('OFFLOAD_DURATION > 0', () => {
     expect(OFFLOAD_DURATION).toBeGreaterThan(0);
+  });
+
+  it('NODE_REGEN_RATE is at least 5x slower than worker collection rate', () => {
+    const workerCollectionRate = HARVEST_YIELD / HARVEST_DURATION;
+    expect(NODE_REGEN_RATE).toBeLessThanOrEqual(workerCollectionRate / 5);
+  });
+
+  it('MIN_REGEN_THRESHOLD is ~10% of RESERVE_DEFAULT', () => {
+    expect(MIN_REGEN_THRESHOLD).toBeGreaterThan(0);
+    expect(MIN_REGEN_THRESHOLD).toBeLessThanOrEqual(RESERVE_DEFAULT * 0.15);
+  });
+});
+
+describe('tickNodeRegen', () => {
+  it('advances reserve over time from 0', () => {
+    const newReserve = tickNodeRegen(0, 10);
+    expect(newReserve).toBeCloseTo(NODE_REGEN_RATE * 10);
+  });
+
+  it('clamps reserve at RESERVE_DEFAULT', () => {
+    const newReserve = tickNodeRegen(RESERVE_DEFAULT - 0.1, 100);
+    expect(newReserve).toBe(RESERVE_DEFAULT);
+  });
+
+  it('does not change reserve already at RESERVE_DEFAULT', () => {
+    const newReserve = tickNodeRegen(RESERVE_DEFAULT, 10);
+    expect(newReserve).toBe(RESERVE_DEFAULT);
+  });
+
+  it('after enough time, reserve crosses MIN_REGEN_THRESHOLD', () => {
+    // Time needed: MIN_REGEN_THRESHOLD / NODE_REGEN_RATE
+    const timeNeeded = MIN_REGEN_THRESHOLD / NODE_REGEN_RATE;
+    const newReserve = tickNodeRegen(0, timeNeeded + 1);
+    expect(newReserve).toBeGreaterThanOrEqual(MIN_REGEN_THRESHOLD);
+  });
+});
+
+describe('tickWorkerTask — occupancy released when harvesting phase exits', () => {
+  it('offloading phase: node occupiedBy check — worker returns to node when unoccupied', () => {
+    const t: WorkerTask = {
+      phase: 'offloading',
+      nodeIndex: 0,
+      harvestProgress: 1,
+      offloadTimer: 0.01,
+    };
+    const w = makeWorker('w1', 3, 9);
+    // Node is now unoccupied (occupancy was released when worker left harvesting).
+    const node = makeNode(10, 10, RESERVE_DEFAULT, null);
+    const hq = makeHq(3, 9);
+    const result = tickWorkerTask(t, w, node, hq, OFFLOAD_DURATION + 0.1, [makeLiveNode(0, 10, 10)]);
+    expect(result.task.phase).toBe('walking-to-node');
+    expect(result.moveTo).toEqual({ tileX: 10, tileY: 10 });
+  });
+
+  it('walking-to-hq phase: second worker can claim node immediately', () => {
+    // Worker 1 is in walking-to-hq (occupancy should be released).
+    // Worker 2 tries to claim the same node.
+    const w2 = makeWorker('w2', 8, 8);
+    // Node occupiedBy is null (released when w1 left harvesting).
+    const node = makeNode(10, 10, RESERVE_DEFAULT, null);
+    const nodes = [makeLiveNode(0, 10, 10, RESERVE_DEFAULT, null)];
+    const hq = makeHq(3, 9);
+
+    let t2 = createWorkerTask();
+    t2 = assignWorkerToNode(t2, 0);
+    const result = tickWorkerTask(t2, w2, node, hq, 0.016, nodes);
+    // Worker 2 should proceed walking to node (not retarget).
+    expect(result.task.phase).toBe('walking-to-node');
+    expect(result.task.nodeIndex).toBe(0);
   });
 });

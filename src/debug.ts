@@ -113,6 +113,12 @@ export type VyluxHook = {
   getNodeReserve?: (nodeIndex: number) => number;
   getNodeOccupiedBy?: (nodeIndex: number) => string | null;
   getNodeExhausted?: (nodeIndex: number) => boolean;
+  // Faction-specific worker task hooks — present when ?e2e=1.
+  getRedWorkerTaskPhase?: (redWorkerIndex: number) => string;
+  getRedWorkerTargetTile?: (redWorkerIndex: number) => { tileX: number; tileY: number } | null;
+  assignRedWorkerToNodeByIndex?: (redWorkerIndex: number, nodeIndex: number) => void;
+  // Direct node reserve override — present when ?e2e=1.
+  setNodeReserve?: (nodeIndex: number, reserve: number) => void;
 };
 
 declare global {

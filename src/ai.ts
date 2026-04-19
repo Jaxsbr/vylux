@@ -69,6 +69,11 @@ export type TickAiParams = {
   onEnergyChanged: (newEnergy: FactionEnergy) => void;
   /** Assign a red worker to the nearest live node via the task system. */
   assignWorkerTask: (w: WorkerBundle, nodeIndex: number) => void;
+  /**
+   * Return the current task phase for a worker, or 'idle' if not yet tracked.
+   * Used to avoid re-assigning workers that are already running a task loop.
+   */
+  getWorkerTaskPhase: (w: WorkerBundle) => import('./worker-task').WorkerTaskPhase;
 };
 
 function tileDist(ax: number, ay: number, bx: number, by: number): number {
@@ -88,7 +93,7 @@ export function tickAi(params: TickAiParams): void {
     energy, redWorkers, redDefenders, redRaiders,
     allWorkers,
     energyNodes, redHq, blueHq,
-    onTrained, onEnergyChanged, assignWorkerTask,
+    onTrained, onEnergyChanged, assignWorkerTask, getWorkerTaskPhase,
   } = params;
 
   // --- Cooldown advance ---
@@ -140,7 +145,10 @@ export function tickAi(params: TickAiParams): void {
       .filter((n) => n.reserve > 0);
 
     for (const w of redWorkers) {
+      // Only assign workers that are truly idle (both physically stopped and no active task).
       if (!isIdle(w)) continue;
+      const phase = getWorkerTaskPhase(w);
+      if (phase !== 'idle') continue;
       if (liveNodes.length === 0) break;
       // Find nearest live unoccupied node.
       const best = findNearestLiveUnoccupied(w, liveNodes, null);

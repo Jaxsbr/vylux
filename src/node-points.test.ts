@@ -19,6 +19,7 @@ function makeNode(tileX: number, tileY: number): EnergyNodeBundle {
     get exhausted() { return false; },
     setHarvestingTint: () => undefined,
     setHarvestFill: () => undefined,
+    tickRegen: () => undefined,
   };
 }
 
