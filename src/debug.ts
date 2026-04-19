@@ -2,6 +2,7 @@ import type { SceneBundle } from './scene';
 import { INITIAL_STATE, type FactionId, type PlacementState } from './placement';
 import type { FactionEnergy } from './economy';
 import type { FactionPoints } from './points';
+import type { FactionHold } from './energy-node';
 import * as THREE from 'three';
 
 export type PlacedMeshDebug = {
@@ -49,6 +50,8 @@ export type VyluxHook = {
   // HUD setters — always present once main.ts wires them up.
   setEnergy?: (patch: Partial<FactionEnergy>) => void;
   setPoints?: (patch: Partial<FactionPoints>) => void;
+  // Node hold setter — drives faction-hold tinting on energy nodes.
+  setNodeHolds?: (holds: Record<number, FactionHold>) => void;
 };
 
 declare global {

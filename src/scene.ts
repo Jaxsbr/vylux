@@ -12,6 +12,7 @@ import {
   type PlacementState,
 } from './placement';
 import { buildHQ, type HQBundle } from './hq';
+import { buildEnergyNode, NODE_POSITIONS, type EnergyNodeBundle } from './energy-node';
 
 export const SCENE_CONSTANTS = {
   backgroundColor: '#0a0a0a',
@@ -72,6 +73,7 @@ export type SceneBundle = {
   ghost: GhostBundle;
   placed: PlacedBundle;
   hqs: { blue: HQBundle; red: HQBundle };
+  energyNodes: EnergyNodeBundle[];
   backgroundColor: string;
   cameraRotation: { yawDeg: number; pitchDeg: number };
   lightCounts: { ambient: number; directional: number };
@@ -163,6 +165,14 @@ export function createScene(): SceneBundle {
   const redHQ = buildHQ('red', hqRedTile, hqRedTile);
   scene.add(blueHQ.group, redHQ.group);
   const hqs = { blue: blueHQ, red: redHQ };
+
+  // Pre-placed energy nodes — 4 hex platforms at fixed grid positions.
+  // Placed here (not in e2e-hook) so they appear in both real game and e2e scenes.
+  const energyNodes: EnergyNodeBundle[] = NODE_POSITIONS.map(([tx, ty]) => {
+    const node = buildEnergyNode(tx, ty);
+    scene.add(node.group);
+    return node;
+  });
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
@@ -308,6 +318,7 @@ export function createScene(): SceneBundle {
     ghost,
     placed,
     hqs,
+    energyNodes,
     backgroundColor,
     cameraRotation: { yawDeg: cameraYawDeg, pitchDeg: -cameraElevationDeg },
     lightCounts: { ambient: 1, directional: 1 },

@@ -3,6 +3,7 @@ import { tileToWorld } from './grid';
 import type { SceneBundle } from './scene';
 import type { FactionEnergy } from './economy';
 import type { FactionPoints } from './points';
+import type { FactionHold } from './energy-node';
 
 // E2E-only hook — installed only when the URL contains `?e2e=1`.
 // This file is imported by main.ts but the install function exits early unless
@@ -13,12 +14,11 @@ import type { FactionPoints } from './points';
 // placeholder Three.js meshes directly into a dedicated `e2e-overlays` group
 // on the scene so the main reconcile loop never sees them.
 //
-// HQs are NOT seeded here — they are pre-placed by createScene() using the
-// real HQ mesh class and are always present in the scene.
+// HQs and energy nodes are NOT seeded here — they are pre-placed by
+// createScene() and are always present in the scene.
 
 const BLUE_HEX = 0x00e5ff;
 const RED_HEX = 0xff5a1f;
-const NODE_HEX = 0x00ff88;
 const BODY_COLOR = '#0d1117';
 const PLACED_Y = 0.5;
 
@@ -54,18 +54,6 @@ function makeBox(
   return mesh;
 }
 
-function makeSphere(radius: number, colorHex: number, y: number): THREE.Mesh {
-  const geometry = new THREE.SphereGeometry(radius, 8, 8);
-  const material = new THREE.MeshStandardMaterial({
-    color: hexColor(colorHex),
-    emissive: colorHex,
-    emissiveIntensity: 0.8,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.y = y;
-  return mesh;
-}
-
 function placeAt(mesh: THREE.Mesh, tileX: number, tileY: number): void {
   const world = tileToWorld(tileX, tileY);
   mesh.position.set(world.x, mesh.position.y, world.z);
@@ -86,23 +74,9 @@ function clearGroup(group: THREE.Group): void {
   }
 }
 
-function seedIdleStart(group: THREE.Group): void {
-  // HQs are already in the scene from createScene() — do not add duplicates here.
-  // Only add energy node placeholders; workers/raiders are later tasks.
-
-  // Four energy nodes scattered across the grid.
-  const nodePositions: [number, number][] = [
-    [5, 5],
-    [14, 5],
-    [5, 14],
-    [14, 14],
-  ];
-  for (const [tx, ty] of nodePositions) {
-    const node = makeSphere(0.3, NODE_HEX, 0.3);
-    node.name = 'e2e-energy-node';
-    placeAt(node, tx, ty);
-    group.add(node);
-  }
+function seedIdleStart(_group: THREE.Group): void {
+  // HQs and energy nodes are already in the scene from createScene().
+  // Nothing extra to seed for idle-start.
 }
 
 function seedEarlyEconomy(group: THREE.Group): void {
@@ -200,6 +174,7 @@ export type E2EHookExtension = {
   ready: () => Promise<void>;
   setEnergy: (patch: Partial<FactionEnergy>) => void;
   setPoints: (patch: Partial<FactionPoints>) => void;
+  setNodeHolds: (holds: Record<number, FactionHold>) => void;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -223,6 +198,15 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
     },
     setEnergy: hudSetters.setEnergy,
     setPoints: hudSetters.setPoints,
+    setNodeHolds(holds: Record<number, FactionHold>): void {
+      for (const [indexStr, faction] of Object.entries(holds)) {
+        const idx = Number(indexStr);
+        const node = bundle.energyNodes[idx];
+        if (node !== undefined) {
+          node.setFactionHold(faction);
+        }
+      }
+    },
   };
 
   // Merge into window.__vylux if it already exists (from debug.ts), or create
