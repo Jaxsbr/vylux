@@ -50,7 +50,7 @@ function makeRaider(tileX: number, tileY: number, hp = 40): RaiderBundle {
 }
 
 function makeNode(tileX: number, tileY: number): EnergyNodeBundle {
-  return { tileX, tileY } as EnergyNodeBundle;
+  return { tileX, tileY, reserve: 60, occupiedBy: null, get exhausted() { return false; } } as unknown as EnergyNodeBundle;
 }
 
 function makeHq(tileX: number, tileY: number): HQBundle {
@@ -75,6 +75,7 @@ function makeParams(overrides: Partial<TickAiParams> = {}): TickAiParams {
     blueHq,
     onTrained: vi.fn(),
     onEnergyChanged: vi.fn(),
+    assignWorkerTask: vi.fn(),
     ...overrides,
   };
 }
@@ -147,22 +148,24 @@ describe('tickAi — training', () => {
 });
 
 describe('tickAi — worker assignment', () => {
-  it('assigns idle red worker to nearest unheld node', () => {
+  it('assigns idle red worker to nearest live unoccupied node via assignWorkerTask', () => {
     const w = makeWorker(10, 10);
     const nodeNear = makeNode(11, 11);
     const nodeFar = makeNode(0, 0);
     const state = createAiState();
     // Force the worker assign timer to fire immediately.
     state.workerAssignTimer = 0;
+    const assignWorkerTask = vi.fn();
     tickAi(makeParams({
       state,
       energy: { blue: 0, red: 0 },
       redWorkers: [w],
       allWorkers: [w],
       energyNodes: [nodeFar, nodeNear],
+      assignWorkerTask,
     }));
-    // Worker should have been sent to nodeNear (index 1, dist ~1.41) not nodeFar (dist ~14.1)
-    expect((w.moveTo as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(11, 11);
+    // Worker should have been assigned to nodeNear (index 1, dist ~1.41) not nodeFar (dist ~14.1)
+    expect(assignWorkerTask).toHaveBeenCalledWith(w, 1);
   });
 
   it('does not assign busy worker', () => {
@@ -173,14 +176,16 @@ describe('tickAi — worker assignment', () => {
     const node = makeNode(11, 11);
     const state = createAiState();
     state.workerAssignTimer = 0;
+    const assignWorkerTask = vi.fn();
     tickAi(makeParams({
       state,
       energy: { blue: 0, red: 0 },
       redWorkers: [w],
       allWorkers: [w],
       energyNodes: [node],
+      assignWorkerTask,
     }));
-    expect((w.moveTo as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(assignWorkerTask).not.toHaveBeenCalled();
   });
 
   it('does not reassign before interval elapses', () => {

@@ -1,8 +1,10 @@
 // Per-faction energy ledger.
 // Pure helper + a mutable instance. No imports from scene.ts or input.ts.
 
-export const BASE_INCOME = 1; // energy per second, always trickles
-export const NODE_INCOME = 2; // bonus energy/sec per held node
+export const BASE_INCOME = 1; // energy per second, always trickles (keep non-zero to prevent soft-lock)
+export const NODE_INCOME = 0; // passive node income disabled — income now routes through worker harvest loop
+// Visual-only pulse rate for on-node workers (2/s ≈ 0.5s per tick), separate from income.
+export const VISUAL_PULSE_RATE = 2;
 export const NODE_POINT_RATE = 1; // points/sec per held energy node
 
 export type FactionEnergy = { blue: number; red: number };

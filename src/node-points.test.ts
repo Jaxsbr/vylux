@@ -14,6 +14,11 @@ function makeNode(tileX: number, tileY: number): EnergyNodeBundle {
     triggerCapturePulse: () => undefined,
     tickCapturePulse: () => undefined,
     get capturePulseElapsed() { return -1; },
+    reserve: 60,
+    occupiedBy: null,
+    get exhausted() { return false; },
+    setHarvestingTint: () => undefined,
+    setHarvestFill: () => undefined,
   };
 }
 

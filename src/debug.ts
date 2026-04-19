@@ -106,6 +106,13 @@ export type VyluxHook = {
   getNodeCapturePulseElapsed?: (nodeIndex: number) => number;
   getPointFlashClass?: (faction: string) => boolean;
   killUnit?: (query: { kind: string; faction: string; index: number }) => void;
+  // Worker task hooks — present when ?e2e=1.
+  getWorkerTaskPhase?: (index: number) => string;
+  getWorkerHarvestFill?: (index: number) => number;
+  assignWorkerToNodeByIndex?: (workerIndex: number, nodeIndex: number) => void;
+  getNodeReserve?: (nodeIndex: number) => number;
+  getNodeOccupiedBy?: (nodeIndex: number) => string | null;
+  getNodeExhausted?: (nodeIndex: number) => boolean;
 };
 
 declare global {

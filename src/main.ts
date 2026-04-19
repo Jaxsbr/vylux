@@ -3,12 +3,12 @@ import { attachDebugHook } from './debug';
 import { attachE2EHook } from './e2e-hook';
 import { attachInputHandlers } from './input';
 import { INITIAL_STATE, type PlacementState, isInProximityZone, relocateSpawnTile } from './placement';
-import { createEnergyLedger, tickEnergyWithNodes, NODE_INCOME } from './economy';
+import { createEnergyLedger, tickEnergyWithNodes, VISUAL_PULSE_RATE } from './economy';
 import type { NodeWorkerCount } from './economy';
 import { createPointsLedger } from './points';
 import { createHud } from './hud';
 import { selectWorker, selectHq, getSelected, getSelectedHq, clearSelection } from './selection';
-import { buildWorker } from './worker';
+import { buildWorker, type WorkerBundle } from './worker';
 import { buildDefender } from './defender';
 import { buildRaider } from './raider';
 import { trainUnit, buildOccupiedSet } from './training';
@@ -38,6 +38,15 @@ import {
   handlePlacementSuccess,
   type TrainingPanelState,
 } from './training-panel-state';
+import {
+  createWorkerTask,
+  assignWorkerToNode,
+  cancelWorkerTask,
+  tickWorkerTask,
+  findNearestLiveUnoccupied,
+  HARVEST_YIELD,
+  type WorkerTask,
+} from './worker-task';
 
 const bundle = createScene();
 const canvas = bundle.renderer.domElement;
@@ -50,6 +59,86 @@ const hook = attachDebugHook(bundle);
 const energyLedger = createEnergyLedger();
 const pointsLedger = createPointsLedger();
 const hud = createHud();
+
+// Worker task state — keyed by worker id (string).
+// Stores the current task for every worker in bundle.workers.
+const workerTasks = new Map<string, WorkerTask>();
+
+// HUD energy flash — brief DOM style flash on the blue/red energy value.
+const ENERGY_FLASH_MS = 180;
+let energyFlashStyleInjected = false;
+
+function injectEnergyFlashStyle(): void {
+  if (energyFlashStyleInjected) return;
+  energyFlashStyleInjected = true;
+  const style = document.createElement('style');
+  style.id = 'vylux-energy-flash-style';
+  style.textContent = `
+@keyframes vylux-energy-flash-anim {
+  0%   { background: rgba(255,255,255,0.30); }
+  100% { background: transparent; }
+}
+.vylux-energy-flash {
+  animation: vylux-energy-flash-anim ${ENERGY_FLASH_MS}ms ease-out forwards;
+  border-radius: 2px;
+}`;
+  document.head.appendChild(style);
+}
+injectEnergyFlashStyle();
+
+function flashEnergyHud(faction: 'blue' | 'red'): void {
+  const id = faction === 'blue' ? 'vylux-hud-energy-blue' : 'vylux-hud-energy-red';
+  let el = document.getElementById(id);
+  if (el === null) {
+    // Lazily tag the value element — walk through HUD.
+    const hud = document.getElementById('vylux-hud');
+    if (hud === null) return;
+    // Find the value element by color: blue is #00e0ff, red is #ff4a1a.
+    // Simplest: query by color style (energy values have font-size 18px).
+    const targets = hud.querySelectorAll<HTMLElement>('[style*="font-size: 18px"]');
+    let idx = 0;
+    targets.forEach((t) => {
+      const color = t.style.color;
+      if (color === 'rgb(0, 224, 255)' || color === '#00e0ff') {
+        t.id = 'vylux-hud-energy-blue';
+        if (faction === 'blue') el = t;
+      } else if (color === 'rgb(255, 74, 26)' || color === '#ff4a1a') {
+        if (idx === 0) {
+          t.id = 'vylux-hud-energy-red-0';
+          idx++;
+        } else {
+          t.id = 'vylux-hud-energy-red';
+          if (faction === 'red') el = t;
+        }
+      }
+    });
+  }
+  if (el === null) return;
+  el.classList.remove('vylux-energy-flash');
+  void el.offsetWidth;
+  el.classList.add('vylux-energy-flash');
+}
+
+/** Get or create a task for a worker. */
+function getWorkerTask(w: WorkerBundle): WorkerTask {
+  const existing = workerTasks.get(w.id);
+  if (existing !== undefined) return existing;
+  const fresh = createWorkerTask();
+  workerTasks.set(w.id, fresh);
+  return fresh;
+}
+
+/** Helper: build the list of live nodes with index for retargeting. */
+function buildLiveNodeList(): Array<{ index: number; tileX: number; tileY: number; reserve: number; occupiedBy: string | null }> {
+  return bundle.energyNodes.map((n, i) => ({
+    index: i,
+    tileX: n.tileX,
+    tileY: n.tileY,
+    reserve: n.reserve,
+    occupiedBy: n.occupiedBy,
+  }));
+}
+
 
 let trainingPanelState: TrainingPanelState = INITIAL_TRAINING_PANEL_STATE;
 
@@ -174,12 +263,18 @@ function resetMatch(): void {
   energyLedger.set({ blue: 0, red: 0 });
   hud.updateEnergy(energyLedger.get());
 
-  // 4. Reset node accumulators.
+  // 4. Reset node accumulators + exhaustion state.
   for (const node of bundle.energyNodes) {
     node.pointAccumulator = 0;
     node.lastHolder = null;
+    node.reserve = 60; // RESERVE_DEFAULT — reset to full
+    node.occupiedBy = null;
+    node.setHarvestingTint(null);
     node.setFactionHold(null);
   }
+
+  // 4b. Clear all worker tasks.
+  workerTasks.clear();
 
   // 5. Reset AI state.
   const freshAi = createAiState();
@@ -486,7 +581,47 @@ canvas.addEventListener('pointerdown', (event: PointerEvent) => {
 
   const current = getSelected();
   if (current !== null && tileHit !== null) {
-    current.moveTo(tileHit.tileX, tileHit.tileY);
+    // Check if this tile is a live energy node — if so, assign the worker to it.
+    const nodeAtTile = bundle.energyNodes.find(
+      (n) => n.tileX === tileHit.tileX && n.tileY === tileHit.tileY,
+    );
+    if (nodeAtTile !== undefined && !nodeAtTile.exhausted) {
+      // Live node clicked — assign worker to harvest it.
+      const nodeIdx = bundle.energyNodes.indexOf(nodeAtTile);
+      if (nodeAtTile.occupiedBy !== null && nodeAtTile.occupiedBy !== current.id) {
+        // Node occupied by another worker — retarget to nearest unoccupied.
+        const liveNodes = buildLiveNodeList();
+        const retarget = findNearestLiveUnoccupied(current, liveNodes, nodeIdx);
+        if (retarget !== null) {
+          const task = assignWorkerToNode(getWorkerTask(current), retarget.index);
+          workerTasks.set(current.id, task);
+          current.moveTo(retarget.tileX, retarget.tileY);
+          buildablesPanel.showFeedback('Node occupied — rerouted');
+        } else {
+          buildablesPanel.showFeedback('All nodes occupied');
+        }
+      } else {
+        const task = assignWorkerToNode(getWorkerTask(current), nodeIdx);
+        workerTasks.set(current.id, task);
+        current.moveTo(nodeAtTile.tileX, nodeAtTile.tileY);
+      }
+    } else {
+      // Empty tile (or exhausted node) — direct move, cancel task.
+      const oldTask = getWorkerTask(current);
+      if (oldTask.phase !== 'idle') {
+        // Release node occupancy if held.
+        if (oldTask.nodeIndex >= 0) {
+          const heldNode = bundle.energyNodes[oldTask.nodeIndex];
+          if (heldNode !== undefined && heldNode.occupiedBy === current.id) {
+            heldNode.occupiedBy = null;
+            heldNode.setHarvestingTint(null);
+            current.setHarvestFill(0);
+          }
+        }
+        workerTasks.set(current.id, cancelWorkerTask(oldTask));
+      }
+      current.moveTo(tileHit.tileX, tileHit.tileY);
+    }
   } else if (tileHit !== null) {
     // Clicked empty tile with no selection — deselect (already null, no-op).
   } else {
@@ -522,7 +657,7 @@ window.addEventListener('keydown', (event: KeyboardEvent) => {
   }
 });
 
-// Per-worker harvest accumulator — tracks fractional NODE_INCOME progress.
+// Per-worker harvest accumulator — tracks fractional VISUAL_PULSE_RATE progress.
 // Key is the worker object reference identity (using Map). When accumulator
 // crosses 1.0 a pulse is triggered and the accumulator wraps.
 const workerHarvestAcc = new WeakMap<object, number>();
@@ -614,8 +749,108 @@ function animate(): void {
             }
           }
         },
+        assignWorkerTask: (w, nodeIndex) => {
+          const task = assignWorkerToNode(getWorkerTask(w), nodeIndex);
+          workerTasks.set(w.id, task);
+          const node = bundle.energyNodes[nodeIndex];
+          if (node !== undefined) {
+            w.moveTo(node.tileX, node.tileY);
+          }
+        },
       });
     }
+
+    // ── Worker task loop ──────────────────────────────────────────────────────
+    // Tick each worker's task state machine before movement ticks so that
+    // moveTo commands issued by the task take effect this frame.
+    {
+      const liveNodeList = buildLiveNodeList();
+      for (const w of bundle.workers) {
+        const task = getWorkerTask(w);
+        const prevPhase: string = task.phase;
+        if (prevPhase === 'idle') continue;
+
+        const nodeIdx = task.nodeIndex;
+        const nodeBundle = nodeIdx >= 0 ? bundle.energyNodes[nodeIdx] : undefined;
+        const nodeTarget = nodeBundle !== undefined ? {
+          tileX: nodeBundle.tileX,
+          tileY: nodeBundle.tileY,
+          reserve: nodeBundle.reserve,
+          occupiedBy: nodeBundle.occupiedBy,
+        } : null;
+        const hqTarget = w.faction === 'blue'
+          ? { tileX: bundle.hqs.blue.tileX, tileY: bundle.hqs.blue.tileY }
+          : { tileX: bundle.hqs.red.tileX, tileY: bundle.hqs.red.tileY };
+
+        const result = tickWorkerTask(
+          task,
+          { tileX: w.tileX, tileY: w.tileY, targetTileX: w.targetTileX, targetTileY: w.targetTileY, id: w.id },
+          nodeTarget,
+          hqTarget,
+          deltaSeconds,
+          liveNodeList,
+        );
+
+        // Update task state.
+        workerTasks.set(w.id, result.task);
+
+        // Apply moveTo command from the task.
+        if (result.moveTo !== null) {
+          w.moveTo(result.moveTo.tileX, result.moveTo.tileY);
+        }
+
+        // Update node occupancy and visual tint.
+        if (nodeBundle !== undefined) {
+          if (result.task.phase === 'harvesting') {
+            // Claim occupancy.
+            if (nodeBundle.occupiedBy !== w.id) {
+              nodeBundle.occupiedBy = w.id;
+            }
+            nodeBundle.setHarvestingTint(w.faction);
+          } else if (prevPhase === 'harvesting') {
+            // Left harvesting state — release tint.
+            nodeBundle.setHarvestingTint(null);
+            w.setHarvestFill(0);
+          }
+
+          // Release occupancy when no longer assigned.
+          if (result.task.nodeIndex === -1 && nodeBundle.occupiedBy === w.id) {
+            nodeBundle.occupiedBy = null;
+            nodeBundle.setHarvestingTint(null);
+            w.setHarvestFill(0);
+          }
+        }
+
+        // Update harvest fill animation.
+        if (result.task.phase === 'harvesting') {
+          w.setHarvestFill(result.harvestProgress);
+        } else if (prevPhase === 'harvesting') {
+          w.setHarvestFill(0);
+        }
+
+        // Offload: add energy and flash HUD.
+        if (result.offloaded) {
+          const faction = w.faction;
+          const current = energyLedger.get();
+          energyLedger.set({
+            [faction]: current[faction] + HARVEST_YIELD,
+          } as Partial<typeof current>);
+          hud.updateEnergy(energyLedger.get());
+          flashEnergyHud(faction);
+          // Drain node reserve.
+          if (nodeBundle !== undefined) {
+            nodeBundle.reserve -= HARVEST_YIELD;
+            if (nodeBundle.exhausted) {
+              // Node just exhausted — release occupancy.
+              nodeBundle.occupiedBy = null;
+              nodeBundle.setHarvestingTint(null);
+              w.setHarvestFill(0);
+            }
+          }
+        }
+      }
+    }
+    // ── End worker task loop ──────────────────────────────────────────────────
 
     // Tick all units (movement).
     for (const w of bundle.workers) {
@@ -678,7 +913,7 @@ function animate(): void {
       );
       if (onNode) {
         const prev = workerHarvestAcc.get(w) ?? 0;
-        const next = prev + NODE_INCOME * deltaSeconds;
+        const next = prev + VISUAL_PULSE_RATE * deltaSeconds;
         if (next >= 1) {
           w.triggerHarvestPulse();
           workerHarvestAcc.set(w, next - Math.floor(next));

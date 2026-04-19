@@ -5,12 +5,15 @@ import {
   CAPTURE_PULSE_DURATION,
   CAPTURE_PULSE_PEAK_DELTA,
 } from './event-pulse';
+import { RESERVE_DEFAULT } from './worker-task';
 
 // Neutral rim: pale-cyan — reads as part of the Tron circuit palette while
 // staying clearly distinct from the faction cyan (#00e0ff) and red (#ff4a1a).
 const NEUTRAL_RIM = 0x9ceaf4;
 const BLUE_RIM = 0x00e0ff;
 const RED_RIM = 0xff4a1a;
+// Exhausted: dim grey — clearly dead, no tint, no glow.
+const EXHAUSTED_RIM = 0x2a2e33;
 
 // Body: near-charcoal with very low emissive so bloom leaves only a faint aura.
 const BODY_COLOR = 0x0d1117;
@@ -31,7 +34,9 @@ export type FactionHold = 'blue' | 'red' | null;
 export type EnergyNodeBundle = {
   /** The group placed into the scene. */
   group: THREE.Group;
-  /** Shift rim emissive to faction colour or reset to neutral. */
+  /** Shift rim emissive to faction colour or reset to neutral.
+   *  Only applies when node is NOT in harvesting mode (for backward compat
+   *  with node-points scoring, which still tracks holder). */
   setFactionHold: (faction: FactionHold) => void;
   tileX: number;
   tileY: number;
@@ -51,6 +56,30 @@ export type EnergyNodeBundle = {
    * Read-only: seconds elapsed since capture pulse fired, or -1 when not active.
    */
   readonly capturePulseElapsed: number;
+
+  // ── Worker task fields ──────────────────────────────────────────────────────
+  /**
+   * Finite reserve. Decremented by HARVEST_YIELD on each offload.
+   * When <= 0 the node is exhausted.
+   */
+  reserve: number;
+  /**
+   * Worker ID currently harvesting this node, or null when free.
+   * Used to enforce one-worker-per-node.
+   */
+  occupiedBy: string | null;
+  /** Whether the node is exhausted (reserve <= 0). */
+  readonly exhausted: boolean;
+  /**
+   * Set the visual tint while a worker is actively harvesting (phase === 'harvesting').
+   * Pass null to clear back to neutral (worker left or node exhausted).
+   */
+  setHarvestingTint: (faction: FactionHold) => void;
+  /**
+   * Update harvest fill ring opacity to show fill progress (0–1).
+   * Only visible when faction tint is active.
+   */
+  setHarvestFill: (progress: number) => void;
 };
 
 const NODE_CONSTANTS = {
@@ -67,6 +96,13 @@ const NODE_CONSTANTS = {
   rimY: 0.09, // top of body + half rim height
   bodyEmissiveIntensity: 0.15,
   rimEmissiveIntensity: 1.0,
+  // Exhausted: body and rim are dimmed significantly.
+  exhaustedBodyEmissive: 0.03,
+  exhaustedRimEmissive: 0.12,
+  // Harvest fill ring — sits above the rim to show worker fill progress.
+  fillRingInner: 0.12,
+  fillRingOuter: 0.38,
+  fillRingY: 0.14,
 } as const;
 
 export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle {
@@ -108,16 +144,45 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
   rim.position.y = NODE_CONSTANTS.rimY;
   rim.name = 'node-rim';
 
-  group.add(body, rim);
+  // Harvest fill ring — a horizontal ring that fills up as the worker harvests.
+  // Starts invisible; opacity is set by setHarvestFill().
+  const fillGeo = new THREE.RingGeometry(
+    NODE_CONSTANTS.fillRingInner,
+    NODE_CONSTANTS.fillRingOuter,
+    24,
+  );
+  const fillMat = new THREE.MeshStandardMaterial({
+    color: NEUTRAL_RIM,
+    emissive: NEUTRAL_RIM,
+    emissiveIntensity: 1.8,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0,
+  });
+  const fillRing = new THREE.Mesh(fillGeo, fillMat);
+  fillRing.rotation.x = -Math.PI / 2;
+  fillRing.position.y = NODE_CONSTANTS.fillRingY;
+  fillRing.name = 'node-fill-ring';
+
+  group.add(body, rim, fillRing);
 
   const world = tileToWorld(tileX, tileY);
   group.position.set(world.x, world.y, world.z);
 
+  let _reserve = RESERVE_DEFAULT;
+  let _occupiedBy: string | null = null;
+  let _harvestingFaction: FactionHold = null;
+
   const setFactionHold = (faction: FactionHold): void => {
+    // If a worker is actively harvesting, don't let the legacy setFactionHold
+    // override the harvest tint. Only update when not harvesting.
+    if (_harvestingFaction !== null) return;
+    if (_reserve <= 0) return; // exhausted — stays dead
     const rimColor =
       faction === 'blue' ? BLUE_RIM : faction === 'red' ? RED_RIM : NEUTRAL_RIM;
     rimMat.color.set(rimColor);
     rimMat.emissive.set(rimColor);
+    rimMat.emissiveIntensity = NODE_CONSTANTS.rimEmissiveIntensity;
   };
 
   let capturePulseElapsedInternal = -1;
@@ -130,6 +195,53 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
     pointAccumulator: 0,
     lastHolder: null,
     get capturePulseElapsed(): number { return capturePulseElapsedInternal; },
+
+    get reserve(): number { return _reserve; },
+    set reserve(v: number) {
+      _reserve = v;
+      // If exhausted, update visuals immediately.
+      if (_reserve <= 0) {
+        _reserve = 0;
+        _harvestingFaction = null;
+        _occupiedBy = null;
+        rimMat.color.set(EXHAUSTED_RIM);
+        rimMat.emissive.set(EXHAUSTED_RIM);
+        rimMat.emissiveIntensity = NODE_CONSTANTS.exhaustedRimEmissive;
+        bodyMat.emissiveIntensity = NODE_CONSTANTS.exhaustedBodyEmissive;
+        fillMat.opacity = 0;
+      }
+    },
+
+    get occupiedBy(): string | null { return _occupiedBy; },
+    set occupiedBy(v: string | null) { _occupiedBy = v; },
+
+    get exhausted(): boolean { return _reserve <= 0; },
+
+    setHarvestingTint(faction: FactionHold): void {
+      _harvestingFaction = faction;
+      if (_reserve <= 0) return; // exhausted — ignore
+      if (faction === null) {
+        // Worker left — fade back to neutral.
+        rimMat.color.set(NEUTRAL_RIM);
+        rimMat.emissive.set(NEUTRAL_RIM);
+        rimMat.emissiveIntensity = NODE_CONSTANTS.rimEmissiveIntensity;
+        fillMat.color.set(NEUTRAL_RIM);
+        fillMat.emissive.set(NEUTRAL_RIM);
+        fillMat.opacity = 0;
+      } else {
+        const col = faction === 'blue' ? BLUE_RIM : RED_RIM;
+        rimMat.color.set(col);
+        rimMat.emissive.set(col);
+        rimMat.emissiveIntensity = NODE_CONSTANTS.rimEmissiveIntensity;
+        fillMat.color.set(col);
+        fillMat.emissive.set(col);
+      }
+    },
+
+    setHarvestFill(progress: number): void {
+      if (_reserve <= 0) { fillMat.opacity = 0; return; }
+      fillMat.opacity = Math.max(0, Math.min(1, progress)) * 0.85 + 0.08;
+    },
 
     triggerCapturePulse(): void {
       capturePulseElapsedInternal = 0;

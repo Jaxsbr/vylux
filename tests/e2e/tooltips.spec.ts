@@ -152,9 +152,9 @@ test.describe('tooltips — buildables panel + energy nodes', () => {
     const text = await tooltip.textContent();
     expect(text).toContain('ENERGY NODE');
     expect(text).toMatch(/worker/i);
-    // Income value from economy.ts NODE_INCOME constant (not hardcoded).
+    // Harvest yield from worker-task.ts HARVEST_YIELD constant (not hardcoded).
     const desc = await page.locator('#vylux-node-tooltip-desc').textContent();
-    expect(desc).toMatch(/\+\d+\/s/);
+    expect(desc).toMatch(/\+\d+.*trip/i);
   });
 
   test('hideNodeTooltip hook hides the tooltip', async ({ page }) => {

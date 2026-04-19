@@ -59,7 +59,7 @@ test.describe('worker behaviour legibility', () => {
     const onNodeTile = await page.evaluate(() => window.__vylux!.getWorkerTile!(0));
     expect(onNodeTile).toEqual({ tileX: 5, tileY: 5 });
 
-    // Advance until a pulse fires. NODE_INCOME=2 so a tick fires every 0.5s.
+    // Advance until a pulse fires. VISUAL_PULSE_RATE=2 so a tick fires every 0.5s.
     // Advance in small steps sampling intensity each time over ~0.6s.
     const onNodeSamples: number[] = [];
     for (let i = 0; i < 12; i++) {
@@ -122,7 +122,7 @@ test.describe('worker behaviour legibility', () => {
     await page.evaluate(() => window.__vylux!.ready!());
 
     // Advance just past the first pulse trigger (~0.5s), then step until pulse is active.
-    // NODE_INCOME=2 → pulse fires every ~0.5s. Capture at the attack peak (~30ms in).
+    // VISUAL_PULSE_RATE=2 → pulse fires every ~0.5s. Capture at the attack peak (~30ms in).
     // Advance 0.5s to trigger the pulse.
     await page.evaluate(() => window.__vylux!.advanceTime!(0.5));
 

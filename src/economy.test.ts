@@ -113,7 +113,7 @@ describe('tickEnergyWithNodes', () => {
     expect(next.red).toBeCloseTo(BASE_INCOME);
   });
 
-  it('adds NODE_INCOME per worker on node for the relevant faction', () => {
+  it('applies NODE_INCOME per worker on node (currently 0 — income routes through harvest loop)', () => {
     const next = tickEnergyWithNodes({ blue: 0, red: 0 }, { blue: 2, red: 1 }, 1);
     expect(next.blue).toBeCloseTo(BASE_INCOME + NODE_INCOME * 2);
     expect(next.red).toBeCloseTo(BASE_INCOME + NODE_INCOME * 1);

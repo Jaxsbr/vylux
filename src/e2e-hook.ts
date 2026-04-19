@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import type { SceneBundle } from './scene';
 import type { FactionEnergy } from './economy';
-import { tickEnergyWithNodes, NODE_INCOME } from './economy';
+import { tickEnergyWithNodes, VISUAL_PULSE_RATE } from './economy';
 import type { NodeWorkerCount } from './economy';
 import type { FactionPoints } from './points';
 import type { FactionHold } from './energy-node';
 import { buildWorker } from './worker';
+import type { WorkerBundle } from './worker';
 import { UNIT_STATS } from './units-config';
 import { buildDefender } from './defender';
 import { buildRaider } from './raider';
@@ -17,6 +18,13 @@ import { tickNodePoints, computeNodeHolder } from './node-points';
 import { tickAi, type AiState } from './ai';
 import { evaluateMatch } from './match';
 import { showMatchOverlay, isOverlayVisible } from './overlay';
+import {
+  createWorkerTask,
+  assignWorkerToNode,
+  tickWorkerTask,
+  HARVEST_YIELD,
+  type WorkerTask,
+} from './worker-task';
 
 // E2E-only hook — installed only when the URL contains `?e2e=1`.
 // This file is imported by main.ts but the install function exits early unless
@@ -266,6 +274,13 @@ export type E2EHookExtension = {
   getNodeCapturePulseElapsed: (nodeIndex: number) => number;
   getPointFlashClass: (faction: string) => boolean;
   killUnit: (query: { kind: string; faction: string; index: number }) => void;
+  // Worker task hooks.
+  getWorkerTaskPhase: (index: number) => string;
+  getWorkerHarvestFill: (index: number) => number;
+  assignWorkerToNodeByIndex: (workerIndex: number, nodeIndex: number) => void;
+  getNodeReserve: (nodeIndex: number) => number;
+  getNodeOccupiedBy: (nodeIndex: number) => string | null;
+  getNodeExhausted: (nodeIndex: number) => boolean;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -279,6 +294,27 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
 
   // Per-worker harvest accumulator for pulse triggering in advanceTime.
   const e2eWorkerHarvestAcc = new WeakMap<object, number>();
+
+  // Worker task map for e2e sessions.
+  const e2eWorkerTasks = new Map<string, WorkerTask>();
+
+  function e2eGetWorkerTask(w: WorkerBundle): WorkerTask {
+    const existing = e2eWorkerTasks.get(w.id);
+    if (existing !== undefined) return existing;
+    const fresh = createWorkerTask();
+    e2eWorkerTasks.set(w.id, fresh);
+    return fresh;
+  }
+
+  function e2eBuildLiveNodeList(): Array<{ index: number; tileX: number; tileY: number; reserve: number; occupiedBy: string | null }> {
+    return bundle.energyNodes.map((n, i) => ({
+      index: i,
+      tileX: n.tileX,
+      tileY: n.tileY,
+      reserve: n.reserve,
+      occupiedBy: n.occupiedBy,
+    }));
+  }
 
   const overlayGroup = new THREE.Group();
   overlayGroup.name = 'e2e-overlays';
@@ -467,7 +503,90 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
                 }
               }
             },
+            assignWorkerTask: (w, nodeIndex) => {
+              const task = assignWorkerToNode(e2eGetWorkerTask(w), nodeIndex);
+              e2eWorkerTasks.set(w.id, task);
+              const node = bundle.energyNodes[nodeIndex];
+              if (node !== undefined) {
+                w.moveTo(node.tileX, node.tileY);
+              }
+            },
           });
+        }
+
+        // ── Worker task loop (mirrors main.ts) ────────────────────────────────
+        {
+          const liveNodeList = e2eBuildLiveNodeList();
+          for (const w of bundle.workers) {
+            const task = e2eGetWorkerTask(w);
+            const prevPhase: string = task.phase;
+            if (prevPhase === 'idle') continue;
+
+            const nodeIdx = task.nodeIndex;
+            const nodeBundle = nodeIdx >= 0 ? bundle.energyNodes[nodeIdx] : undefined;
+            const nodeTarget = nodeBundle !== undefined ? {
+              tileX: nodeBundle.tileX,
+              tileY: nodeBundle.tileY,
+              reserve: nodeBundle.reserve,
+              occupiedBy: nodeBundle.occupiedBy,
+            } : null;
+            const hqTarget = w.faction === 'blue'
+              ? { tileX: bundle.hqs.blue.tileX, tileY: bundle.hqs.blue.tileY }
+              : { tileX: bundle.hqs.red.tileX, tileY: bundle.hqs.red.tileY };
+
+            const result = tickWorkerTask(
+              task,
+              { tileX: w.tileX, tileY: w.tileY, targetTileX: w.targetTileX, targetTileY: w.targetTileY, id: w.id },
+              nodeTarget,
+              hqTarget,
+              dt,
+              liveNodeList,
+            );
+
+            e2eWorkerTasks.set(w.id, result.task);
+
+            if (result.moveTo !== null) {
+              w.moveTo(result.moveTo.tileX, result.moveTo.tileY);
+            }
+
+            if (nodeBundle !== undefined) {
+              if (result.task.phase === 'harvesting') {
+                if (nodeBundle.occupiedBy !== w.id) nodeBundle.occupiedBy = w.id;
+                nodeBundle.setHarvestingTint(w.faction);
+              } else if (prevPhase === 'harvesting') {
+                // Left harvesting state — release tint.
+                nodeBundle.setHarvestingTint(null);
+                w.setHarvestFill(0);
+              }
+              if (result.task.nodeIndex === -1 && nodeBundle.occupiedBy === w.id) {
+                nodeBundle.occupiedBy = null;
+                nodeBundle.setHarvestingTint(null);
+                w.setHarvestFill(0);
+              }
+            }
+
+            if (result.task.phase === 'harvesting') {
+              w.setHarvestFill(result.harvestProgress);
+            } else if (prevPhase === 'harvesting') {
+              w.setHarvestFill(0);
+            }
+
+            if (result.offloaded) {
+              const faction = w.faction;
+              energyCache = {
+                ...energyCache,
+                [faction]: energyCache[faction] + HARVEST_YIELD,
+              };
+              if (nodeBundle !== undefined) {
+                nodeBundle.reserve -= HARVEST_YIELD;
+                if (nodeBundle.exhausted) {
+                  nodeBundle.occupiedBy = null;
+                  nodeBundle.setHarvestingTint(null);
+                  w.setHarvestFill(0);
+                }
+              }
+            }
+          }
         }
 
         // Tick unit movement.
@@ -519,7 +638,7 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           );
           if (onNode) {
             const prev = e2eWorkerHarvestAcc.get(w) ?? 0;
-            const next = prev + NODE_INCOME * dt;
+            const next = prev + VISUAL_PULSE_RATE * dt;
             if (next >= 1) {
               w.triggerHarvestPulse();
               e2eWorkerHarvestAcc.set(w, next - Math.floor(next));
@@ -817,6 +936,43 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           u.hpBar.update(0, u.maxHp);
         }
       }
+    },
+
+    // Worker task hooks.
+    getWorkerTaskPhase(index: number): string {
+      const w = bundle.workers[index];
+      if (w === undefined) return 'idle';
+      return e2eGetWorkerTask(w).phase;
+    },
+
+    getWorkerHarvestFill(index: number): number {
+      const w = bundle.workers[index];
+      if (w === undefined) return 0;
+      return w.harvestFillProgress;
+    },
+
+    assignWorkerToNodeByIndex(workerIndex: number, nodeIndex: number): void {
+      const w = bundle.workers[workerIndex];
+      const node = bundle.energyNodes[nodeIndex];
+      if (w === undefined || node === undefined) return;
+      const task = assignWorkerToNode(e2eGetWorkerTask(w), nodeIndex);
+      e2eWorkerTasks.set(w.id, task);
+      w.moveTo(node.tileX, node.tileY);
+    },
+
+    getNodeReserve(nodeIndex: number): number {
+      const node = bundle.energyNodes[nodeIndex];
+      return node === undefined ? 0 : node.reserve;
+    },
+
+    getNodeOccupiedBy(nodeIndex: number): string | null {
+      const node = bundle.energyNodes[nodeIndex];
+      return node === undefined ? null : node.occupiedBy;
+    },
+
+    getNodeExhausted(nodeIndex: number): boolean {
+      const node = bundle.energyNodes[nodeIndex];
+      return node === undefined ? false : node.exhausted;
     },
   };
 

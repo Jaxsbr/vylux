@@ -16,6 +16,7 @@ import { UNIT_COSTS, UNIT_STATS, type UnitKind } from './units-config';
 import { trainUnit } from './training';
 import { GRID_CONSTANTS } from './grid';
 import { advanceRaiders, type AdvanceTarget } from './advance';
+import { findNearestLiveUnoccupied } from './worker-task';
 
 export const AI_TRAIN_COOLDOWN = 0.5;
 export const AI_WORKER_ASSIGN_INTERVAL = 1.0;
@@ -66,6 +67,8 @@ export type TickAiParams = {
   onTrained: (kind: UnitKind, tileX: number, tileY: number) => void;
   /** Apply the new energy value after training. */
   onEnergyChanged: (newEnergy: FactionEnergy) => void;
+  /** Assign a red worker to the nearest live node via the task system. */
+  assignWorkerTask: (w: WorkerBundle, nodeIndex: number) => void;
 };
 
 function tileDist(ax: number, ay: number, bx: number, by: number): number {
@@ -75,6 +78,7 @@ function tileDist(ax: number, ay: number, bx: number, by: number): number {
 }
 
 function isIdle(w: WorkerBundle): boolean {
+  // Workers with a target different from their current tile are still moving.
   return w.tileX === w.targetTileX && w.tileY === w.targetTileY;
 }
 
@@ -84,7 +88,7 @@ export function tickAi(params: TickAiParams): void {
     energy, redWorkers, redDefenders, redRaiders,
     allWorkers,
     energyNodes, redHq, blueHq,
-    onTrained, onEnergyChanged,
+    onTrained, onEnergyChanged, assignWorkerTask,
   } = params;
 
   // --- Cooldown advance ---
@@ -124,37 +128,24 @@ export function tickAi(params: TickAiParams): void {
   if (state.workerAssignTimer <= 0) {
     state.workerAssignTimer = AI_WORKER_ASSIGN_INTERVAL;
 
-    // Collect node tiles currently held by red.
-    const redHeldNodeKeys = new Set<string>();
-    for (const node of energyNodes) {
-      for (const w of redWorkers) {
-        if (w.tileX === node.tileX && w.tileY === node.tileY) {
-          redHeldNodeKeys.add(`${node.tileX},${node.tileY}`);
-          break;
-        }
-      }
-    }
-
-    // Unheld nodes (not occupied by a red worker).
-    const unheldNodes = energyNodes.filter(
-      (n) => !redHeldNodeKeys.has(`${n.tileX},${n.tileY}`),
-    );
+    // Build live node list for task assignment.
+    const liveNodes = energyNodes
+      .map((n, i) => ({
+        index: i,
+        tileX: n.tileX,
+        tileY: n.tileY,
+        reserve: n.reserve,
+        occupiedBy: n.occupiedBy,
+      }))
+      .filter((n) => n.reserve > 0);
 
     for (const w of redWorkers) {
       if (!isIdle(w)) continue;
-      if (unheldNodes.length === 0) break;
-      // Nearest unheld node, ties broken by index.
-      let best: EnergyNodeBundle | null = null;
-      let bestDist = Infinity;
-      for (const node of unheldNodes) {
-        const d = tileDist(w.tileX, w.tileY, node.tileX, node.tileY);
-        if (d < bestDist) {
-          bestDist = d;
-          best = node;
-        }
-      }
+      if (liveNodes.length === 0) break;
+      // Find nearest live unoccupied node.
+      const best = findNearestLiveUnoccupied(w, liveNodes, null);
       if (best !== null) {
-        w.moveTo(best.tileX, best.tileY);
+        assignWorkerTask(w, best.index);
       }
     }
   }

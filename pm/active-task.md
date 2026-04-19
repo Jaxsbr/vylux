@@ -1,131 +1,141 @@
 ---
-id: hq-spawn-point
-opened_at: 2026-04-20T19:45:27Z
+id: worker-task-loop
+opened_at: 2026-04-20T20:03:25Z
 status: done_by_engineer
 priority: P0
 ---
 
-# HQ spawn point — repositionable; unblocks Raider training when HQ is walled
+# Worker task loop — walk → harvest → return → offload; one-per-node; exhaustible; neutral node visuals
 
 ## Outcome
 
-Each HQ has a designated **spawn point** (a single tile near the HQ).
-Selecting the HQ makes the spawn point visible. Training any unit
-(Worker / Defender / Raider) spawns the unit **at the HQ** and it
-immediately **moves to the spawn point** using the existing
-straight-line tile-hop mover. This replaces the current rule where a
-unit requires an adjacent free tile at spawn time — which blocks Raider
-training whenever the HQ is surrounded by buildings. Clicking the HQ
-then clicking a valid tile (inside the HQ's 7×7 proximity zone, free of
-other units/buildings, not the HQ tile itself) **relocates** the spawn
-point, and the next trained unit uses the new one. The spawn point is
-per-faction; the player controls only the blue one, and the AI has its
-own (default fine — no AI rewrite).
+The player (or the AI) assigns a worker to a live energy node. The
+worker walks to the node, sits on it, and **harvests into a visible
+local buffer over a short window** (animated fill — the player can
+*watch* the worker harvest). When the buffer is full, the worker
+walks back to its faction HQ, **offloads** into the faction energy
+pool (HUD energy number flashes on offload), and then returns to the
+same node to do it again. If the node is exhausted by the time the
+worker returns, the worker auto-seeks the nearest live node.
 
-Alongside the spawn-point work, fix the two rubric-v13 regressions
-exposed by the post-layout mid-combat screenshot:
+Energy nodes are **exhaustible** (finite reserve). Nodes read as
+**neutral / unclaimed** at idle — white-core hex with a faint
+neutral glow — and only tint toward blue / red while a faction worker
+is actively harvesting them. An exhausted node reads as visibly dead
+(dim, no tint, no glow pulse). At most **one worker per node**;
+second worker pathing to an occupied node re-targets to the nearest
+live unoccupied node (prefer re-target over wait).
 
-1. **mid-combat scene seed** — after the left/right HQ layout change,
-   the scripted `tests/e2e/scenes/mid-combat.spec.ts` no longer stages
-   "raiders clashing near an enemy HQ". Re-seed so the captured frame
-   shows at least one blue raider + one red raider within striking
-   range of the red HQ (or workers), with HP bars and/or attack beams
-   visibly mid-exchange. This is scene-seed tuning, not combat balance.
-2. **Onboarding cue dismissal** — the "CLICK YOUR HQ TO BEGIN" prompt
-   currently persists into early-economy and mid-combat screenshots
-   even though the match is clearly underway. Fix the dismissal so the
-   cue clears the first time a meaningful HQ-driven action happens —
-   whether that's a real mouse click on the HQ, a scripted
-   `selectHq()` via the test hook, or a trained unit being spawned.
-   The cue must still appear on fresh idle-start.
+This replaces the "stand on tile → passive tick" passive economy
+with a visible, strategisable task loop. The economy source is still
+node → energy; it's just routed through the worker's round-trip.
 
 ## Acceptance
 
-- **Spawn-point data model** — each HQ carries a `spawnTile: {x, y}`
-  field, initialised to a sensible default tile inside the HQ's
-  proximity zone (e.g. one tile "in front of" the HQ toward the centre
-  of the map, so blue's default spawn is a tile to the right of blue
-  HQ and red's is a tile to the left of red HQ).
-- **Visible indicator** — when the HQ is selected, the spawn tile is
-  highlighted (e.g. cyan ring, or an edge-lit outline consistent with
-  existing tile highlights). Deselecting the HQ hides it.
-- **Train path** — training a Worker / Defender / Raider spawns the
-  unit on the HQ tile (or as close as possible), then the unit
-  immediately issues a move order to the spawn tile using the existing
-  mover. No unit training ever fails because "adjacent tile is
-  occupied" — the only remaining failure mode is "insufficient energy".
-- **Walled-HQ regression** — add a Playwright scene / spec that
-  scripts blue HQ fully surrounded by four defenders and proves a
-  blue Raider can still be trained and walks out to the spawn point.
-- **Reposition interaction** — with the HQ selected, clicking a valid
-  tile inside the HQ's proximity zone (and not the HQ itself, not a
-  unit, not an energy node) relocates the spawn point. Clicking an
-  invalid tile surfaces brief HUD feedback and does NOT relocate.
-  Clicking a buildable in the panel still arms place-mode as before
-  (spawn-repositioning only triggers when the panel is *not* armed).
-- **Unit + e2e coverage** — spawn-tile default, spawn-tile
-  repositioning, train-from-walled-HQ, and the mover-to-spawn-tile
-  behaviour each covered by unit or Playwright tests.
-- **Mid-combat scene seed fix** — updated
-  `tests/e2e/scenes/mid-combat.spec.ts` regenerates
-  `pm/screenshots/mid-combat.png` showing raiders clashing near the
-  red HQ (or red workers) under the left/right layout. Re-scoring
-  that scene under rubric v2 must return composition ≥ 7 and
-  silhouette ≥ 7.
-- **Onboarding cue dismissal fix** — the overlay clears on any first
-  HQ-driven action (click, scripted `selectHq`, or first successful
-  `trainUnit`), not only on an explicit DOM click. Regenerated
-  `pm/screenshots/early-economy.png` and `pm/screenshots/mid-combat.png`
-  do NOT contain the onboarding cue. Regenerated
-  `pm/screenshots/idle-start.png` DOES still contain it.
-- `mouse-e2e-victory` and `idle-loses-end` remain green under the new
-  spawn-point flow.
+- **Worker task state** — each worker carries a task enum at minimum:
+  `idle | walking-to-node | harvesting | walking-to-hq | offloading`.
+  Transitions are driven by the tick loop; visible in tests.
+- **Assignment** — the player assigns a blue worker to a node by
+  selecting the worker and clicking a live, unoccupied node. The AI
+  uses the same underlying assignment API (wire through `ai.ts`).
+  Existing click-to-move on empty tiles still works for workers that
+  aren't currently on a task — so moving a worker manually cancels
+  its task.
+- **Harvest buffer animation** — during the `harvesting` phase the
+  worker shows a visible fill / pulse that reads as "filling up" over
+  the configurable `HARVEST_DURATION` seconds (tune so 3–5s feels
+  right). On buffer full, the worker triggers an event feedback pulse
+  consistent with the existing event-feedback-pulses work, then
+  transitions to `walking-to-hq`.
+- **Offload** — on reaching the HQ tile (or any tile in the HQ's
+  proximity zone — engineer's call, pick what looks best), the worker
+  increments the faction's energy pool by `HARVEST_YIELD` (tune so
+  one full round-trip yields a number that makes the loop feel worth
+  it; start around 5–10). HUD energy number flashes on offload.
+- **Exhaustible nodes** — each node carries a `reserve: number`
+  initialised to a sensible constant (e.g. 50–80 units). Each
+  successful offload drains the reserve by `HARVEST_YIELD`. When
+  `reserve <= 0` the node enters `exhausted` state: visibly dim,
+  unpickable as a harvest target, no glow pulse.
+- **Neutral node visuals** — node meshes at idle read as white-core
+  with a faint neutral glow (no blue or red tint). Only tint toward
+  the harvesting worker's faction colour while a worker is in the
+  `harvesting` state on that node. On worker leaving / node being
+  exhausted, tint fades back to neutral (or dead for exhausted).
+- **One worker per node** — each node carries an
+  `occupiedBy: workerId | null` field. `assignWorkerToNode` refuses to
+  path a second worker onto an occupied node; instead it auto-targets
+  the nearest live unoccupied node (or leaves the worker idle with a
+  brief HUD feedback message if there are none).
+- **Auto-reassign on exhaustion** — a worker whose node exhausts
+  mid-task (either because its own harvest drained it or another
+  worker drained it from elsewhere) walks to the nearest live
+  unoccupied node. If none exist, it stops near the exhausted node
+  and goes idle.
+- **AI wiring** — red AI workers use the new task model and look
+  identical behaviourally to blue workers. No AI rewrite beyond
+  swapping its assignment calls to the new API. `idle-loses-tuning`
+  must remain green — the AI still outproduces a player who does
+  nothing.
+- **Unit + e2e coverage** — task state machine (walking / harvesting /
+  walking-to-hq / offloading), exhaustion, one-per-node refusal with
+  re-target, auto-reassign on exhaustion, energy-pool offload, neutral
+  vs harvesting node tint. Add a Playwright scene that captures a
+  mid-harvest frame showing a worker with a visible fill buffer on a
+  blue-tinted node.
+- **Follow-up cue fix (from v14 scoring)** — `early-economy` scene
+  still shows the onboarding cue despite the previous task's claim
+  that it was fixed. Extend the cue-dismissal hook so the scripted
+  seed used by `tests/e2e/scenes/early-economy.spec.ts` dismisses the
+  cue (or update that scene to call the existing dismissal hook
+  before screenshotting). Regenerated `early-economy.png` must NOT
+  contain the onboarding cue. `idle-start.png` must still contain it.
+- **Regenerate screenshots** — all committed `pm/screenshots/*.png`
+  regenerated, including a new `harvest-loop.png` (or similar) showing
+  a worker mid-harvest with the fill buffer visible. Existing regs
+  (`mouse-e2e-victory`, `idle-loses-end`, `walled-hq-spawn`) stay
+  green.
 
 ## Constraints
 
-- Mouse-only input. Do NOT add a keyboard shortcut for relocating the
-  spawn point.
-- Do NOT change the proximity-zone size (7×7, radius 3) or the layout
-  (blue left / red right, 3-tile inset). Those are load-bearing from
-  the previous task.
-- Do NOT touch the worker task loop, node exhaustion, node neutral
-  visuals, or worker animation model in this task — that's the next
-  task (`worker-task-loop`). Workers still tick passively on nodes for
-  now.
-- Do NOT alter combat numbers, AI build order, or economy constants
-  beyond what's strictly needed to keep `idle-loses-tuning` green
-  after the spawn-point change. If AI Raider behaviour drifts because
-  red's spawn tile differs from where its raiders used to appear, tune
-  only the minimum needed.
-- No new pathfinding. Reuse the existing straight-line tile-hop mover.
-  If the spawn tile is blocked at train time, unit walks as close as
-  it can (consistent with current blocked-tile handling) — do NOT
-  introduce A*.
-- Keep existing `placement.ts` helpers (`proximityZoneTiles`,
-  `isInProximityZone`) as-is. Add new helpers for spawn-tile
-  validation; don't refactor the placement module wholesale.
-- Keep the existing buildables panel structure in `src/hud.ts` /
-  `src/training.ts` untouched apart from the minimal wiring needed to
-  distinguish "panel armed" vs "panel idle" click handling on the HQ.
+- Mouse-only input. Do NOT add a keyboard shortcut for assigning a
+  worker to a node.
+- Do NOT introduce A*. Keep straight-line tile-hop movement. The
+  existing mover is fine even with longer round-trips; if it surfaces
+  a bug under the round-trip pattern, fix the bug but do not rewrite.
+- Do NOT rewrite the combat system, points, AI build-order shape, or
+  placement / proximity / spawn-point systems. This task is strictly
+  the worker economy loop + node model + their visuals.
+- Do NOT change `GRID_SIZE`, `WIN_POINTS`, faction colours, or the
+  left/right HQ layout. You may tune `BASE_INCOME`, `NODE_INCOME`
+  (likely set to 0 or near-zero now that harvest is the income
+  source), `HARVEST_YIELD`, `HARVEST_DURATION`, and node `reserve`
+  defaults to keep `idle-loses-tuning` green. Log the new constants
+  in `pm/mvp.md`'s constants table when done.
+- Keep existing `placement.ts` helpers as-is; add a new module for
+  worker task state (`src/worker-task.ts` or similar) rather than
+  bloating `worker.ts`.
+- Keep the existing buildables panel and HUD layout untouched apart
+  from whatever is needed for the offload flash and the HUD feedback
+  for "no live nodes" / "node occupied" messages.
+- This is the biggest reopen-3 task. Ship in clean, committable
+  chunks internally if you want; final commit to local `main` only
+  when the full acceptance list is green.
 
 ## Handoff
 
-**Commit:** `3a5020d`
-**Verify:** green — TypeScript clean, 327 unit tests, 81 E2E tests all passing.
+Commit SHA: (see below — filled after commit)
 
-**What shipped:**
+Shipped the full worker task loop. New module `src/worker-task.ts` owns the pure state machine (`idle | walking-to-node | harvesting | walking-to-hq | offloading`) with `tickWorkerTask`, `assignWorkerToNode`, `cancelWorkerTask`, and `findNearestLiveUnoccupied`. Constants: `HARVEST_DURATION=4.0s`, `HARVEST_YIELD=8`, `RESERVE_DEFAULT=60`, `OFFLOAD_DURATION=0.5s`. `NODE_INCOME` set to 0 in `economy.ts`; passive income replaced by harvest round-trips. `VISUAL_PULSE_RATE=2` added for the on-node pulse animation (unchanged visually). Energy nodes got `reserve`, `occupiedBy`, `exhausted`, `setHarvestingTint`, `setHarvestFill` — neutral (white-core) at idle, faction-tint only during active harvest, dim when exhausted. Workers got `id`, `setHarvestFill`, `harvestFillProgress` plus a fill-ring mesh. AI wired to `assignWorkerTask` callback. E2E hook extended with 6 new helpers; `VyluxHook` in `debug.ts` updated. `worker-task-loop.spec.ts` added (9 tests) and registered in `playwright.config.ts`. Follow-up cue fix: `early-economy` spec calls `dismissOnboardingCue` before screenshotting. All 355 unit tests + 90 e2e tests green.
 
-- `src/placement.ts` — three new pure helpers: `defaultSpawnTile`, `validateSpawnTile`, `relocateSpawnTile`. Unit-tested in `src/placement.test.ts`.
-- `src/hq.ts` — `HQBundle` gains `spawnTile: {x,y}` (defaulted via `defaultSpawnTile`) and `spawnRing: THREE.Mesh`. Ring mesh added to scene in `scene.ts`; positioned at spawn tile each frame when HQ is selected.
-- `src/training.ts` — `trainUnit` no longer takes `gridSize`/`isOccupied`; always returns spawn-at-HQ-tile. Only failure mode is `insufficient-energy`. `findFreeNeighbour` kept for legacy/e2e uses. `training.test.ts` updated accordingly.
-- `src/main.ts` + `src/ai.ts` — all callers updated: units spawn at HQ tile and immediately `moveTo(spawnTile)`. Spawn-tile reposition on HQ-selected + panel-idle tile click. Onboarding cue dismissed on any blue HQ click (not just first panel open).
-- `src/e2e-hook.ts` — `onHqSelected` callback added; `selectHq` hook dismisses cue. Mid-combat seed reseeded with blue/red raiders directly adjacent to red HQ for immediate combat.
-- `tests/e2e/walled-hq-spawn.spec.ts` — proves Raider trains when HQ is surrounded by 4 defenders and walks to spawn point.
-- `tests/e2e/scenes/mid-combat.spec.ts` — reseeded for left/right layout; dismisses onboarding cue.
-- `tests/e2e/scenes/early-economy.spec.ts` — dismisses onboarding cue so screenshot stays clean.
-
-**v13 regression fixes landed:**
-1. Mid-combat seed — blue/red raiders now positioned at (14,9)/(15,9) cluster, flanking red HQ (16,9). Frame shows raiders clashing near red HQ under left/right layout.
-2. Onboarding cue dismissal — clears on any first HQ-driven action (mouse click, scripted `selectHq`, or `trainUnit`). `early-economy.png` and `mid-combat.png` regenerated without the cue; `idle-start.png` still shows it.
-
-**Screenshots regenerated:** idle-start, early-economy, mid-combat, mouse-e2e-victory, idle-loses-end, walled-hq-spawn (new). buildables-panel, proximity-zone, tooltip-buildables unchanged.
+Screenshots regenerated:
+- `pm/screenshots/harvest-loop.png` (NEW — worker mid-harvest, fill buffer visible on blue-tinted node)
+- `pm/screenshots/early-economy.png` (no onboarding cue)
+- `pm/screenshots/idle-start.png`
+- `pm/screenshots/idle-loses-end.png`
+- `pm/screenshots/mouse-e2e-victory.png`
+- `pm/screenshots/mid-combat.png`
+- `pm/screenshots/walled-hq-spawn.png`
+- `pm/screenshots/buildables-panel.png`
+- `pm/screenshots/tooltip-buildables.png`
+- `pm/screenshots/proximity-zone.png`

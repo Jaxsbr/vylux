@@ -17,6 +17,12 @@ import {
   DEATH_PULSE_PEAK_DELTA,
 } from './event-pulse';
 
+// Monotonically-increasing ID counter for worker identity in task system.
+let _nextWorkerId = 1;
+function nextWorkerId(): string {
+  return `w${_nextWorkerId++}`;
+}
+
 // Convert a floating-point tile coordinate to world position without integer assertion.
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
   const { tileSize, worldExtent } = GRID_CONSTANTS;
@@ -62,6 +68,8 @@ export type WorkerBundle = {
   /** The Three.js group for this worker. Add to scene. */
   mesh: THREE.Group;
   faction: FactionId;
+  /** Unique identity string used by the worker task system. */
+  id: string;
   /** Current integer tile position. */
   tileX: number;
   tileY: number;
@@ -134,6 +142,17 @@ export type WorkerBundle = {
    * Read-only: true while death pulse is running.
    */
   readonly deathPulseActive: boolean;
+
+  /**
+   * Set the harvest buffer fill progress (0–1). Drives a visible ring on
+   * the worker mesh that reads as "filling up" during the harvesting phase.
+   * Pass 0 to hide the fill ring.
+   */
+  setHarvestFill: (progress: number) => void;
+  /**
+   * Read-only: current harvest fill progress (0–1).
+   */
+  readonly harvestFillProgress: number;
 };
 
 function clampTile(v: number): number {
@@ -143,6 +162,7 @@ function clampTile(v: number): number {
 type DiamondMeshResult = {
   group: THREE.Group;
   accentMat: THREE.MeshStandardMaterial;
+  fillRingMat: THREE.MeshStandardMaterial;
 };
 
 function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
@@ -213,12 +233,32 @@ function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
   accentRing.position.y = WORKER_CONSTANTS.accentRingY;
   accentRing.name = 'worker-accent-ring';
 
-  group.add(upper, lower, upperEdges, lowerEdges, accentRing);
+  // Harvest buffer fill ring — floats above the accent ring.
+  // Grows in emissive intensity as harvest fills up.
+  const fillRingGeo = new THREE.RingGeometry(
+    WORKER_CONSTANTS.accentRingOuter + 0.04,
+    WORKER_CONSTANTS.accentRingOuter + 0.16,
+    20,
+  );
+  const fillRingMat = new THREE.MeshStandardMaterial({
+    color: emissiveHex,
+    emissive: emissiveHex,
+    emissiveIntensity: 0,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0,
+  });
+  const fillRing = new THREE.Mesh(fillRingGeo, fillRingMat);
+  fillRing.rotation.x = -Math.PI / 2;
+  fillRing.position.y = WORKER_CONSTANTS.accentRingY + 0.03;
+  fillRing.name = 'worker-fill-ring';
+
+  group.add(upper, lower, upperEdges, lowerEdges, accentRing, fillRing);
   // Center the diamond so its equator is at Y=0 relative to group origin.
   // The group origin will be placed at the tile's world Y.
   group.position.y = WORKER_CONSTANTS.bodyY;
 
-  return { group, accentMat };
+  return { group, accentMat, fillRingMat };
 }
 
 function buildSelectionRing(emissiveHex: number): THREE.Mesh {
@@ -243,7 +283,7 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   const group = new THREE.Group();
   group.name = `worker-${faction}`;
 
-  const { group: diamond, accentMat } = buildDiamondMesh(emissive);
+  const { group: diamond, accentMat, fillRingMat } = buildDiamondMesh(emissive);
   const selectionRing = buildSelectionRing(emissive);
 
   const hpBar = buildHpBar(faction, 0.7);
@@ -269,11 +309,16 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   let deathPulseElapsedInternal = -1;
   let deathPulseActiveInternal = false;
 
+  // Harvest fill progress (0–1).
+  let harvestFillProgressInternal = 0;
+
   const maxHp = UNIT_STATS.worker.maxHp;
+  const workerId = nextWorkerId();
 
   const bundle: WorkerBundle = {
     mesh: group,
     faction,
+    id: workerId,
     tileX,
     tileY,
     targetTileX: tileX,
@@ -286,6 +331,19 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
     get accentEmissiveIntensity(): number { return accentMat.emissiveIntensity; },
     get placementPulseElapsed(): number { return placementPulseElapsedInternal; },
     get deathPulseActive(): boolean { return deathPulseActiveInternal; },
+    get harvestFillProgress(): number { return harvestFillProgressInternal; },
+
+    setHarvestFill(progress: number): void {
+      harvestFillProgressInternal = Math.max(0, Math.min(1, progress));
+      if (harvestFillProgressInternal < 0.01) {
+        fillRingMat.opacity = 0;
+        fillRingMat.emissiveIntensity = 0;
+      } else {
+        // Pulse the fill ring opacity + emissive with progress.
+        fillRingMat.opacity = 0.15 + harvestFillProgressInternal * 0.75;
+        fillRingMat.emissiveIntensity = 0.5 + harvestFillProgressInternal * 2.5;
+      }
+    },
 
     takeDamage(amount: number): { died: boolean; damageDealt: number } {
       const before = bundle.hp;
