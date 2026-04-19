@@ -68,4 +68,4 @@ No new meshes. No new modules. No new tasks — just tuning.
 - **Screenshots regenerated**: `pm/screenshots/{idle-start,early-economy,mid-combat}.png` committed.
 - **Visual caveat**: Blue HQ glow at top of diamond sits behind the Points HUD panel (DOM on top of canvas) — no geometric clip, but the glow halo radiates through/around the panel. HUD positions left unchanged per constraints; mid-combat still sparse (no real unit silhouettes beyond box meshes).
 
-Commit SHA: (filled after commit)
+Commit SHA: c2180bb
