@@ -124,7 +124,7 @@ node → energy; it's just routed through the worker's round-trip.
 
 ## Handoff
 
-Commit SHA: (see below — filled after commit)
+Commit SHA: f5cf6cc
 
 Shipped the full worker task loop. New module `src/worker-task.ts` owns the pure state machine (`idle | walking-to-node | harvesting | walking-to-hq | offloading`) with `tickWorkerTask`, `assignWorkerToNode`, `cancelWorkerTask`, and `findNearestLiveUnoccupied`. Constants: `HARVEST_DURATION=4.0s`, `HARVEST_YIELD=8`, `RESERVE_DEFAULT=60`, `OFFLOAD_DURATION=0.5s`. `NODE_INCOME` set to 0 in `economy.ts`; passive income replaced by harvest round-trips. `VISUAL_PULSE_RATE=2` added for the on-node pulse animation (unchanged visually). Energy nodes got `reserve`, `occupiedBy`, `exhausted`, `setHarvestingTint`, `setHarvestFill` — neutral (white-core) at idle, faction-tint only during active harvest, dim when exhausted. Workers got `id`, `setHarvestFill`, `harvestFillProgress` plus a fill-ring mesh. AI wired to `assignWorkerTask` callback. E2E hook extended with 6 new helpers; `VyluxHook` in `debug.ts` updated. `worker-task-loop.spec.ts` added (9 tests) and registered in `playwright.config.ts`. Follow-up cue fix: `early-economy` spec calls `dismissOnboardingCue` before screenshotting. All 355 unit tests + 90 e2e tests green.
 
