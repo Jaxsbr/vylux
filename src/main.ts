@@ -15,6 +15,8 @@ import { GRID_CONSTANTS } from './grid';
 import { tickCombat } from './combat';
 import { tickNodePoints, computeNodeHolder } from './node-points';
 import { tickAi, createAiState } from './ai';
+import { evaluateMatch, type MatchOutcome } from './match';
+import { showMatchOverlay, hideMatchOverlay, isOverlayVisible } from './overlay';
 
 const bundle = createScene();
 const canvas = bundle.renderer.domElement;
@@ -84,8 +86,67 @@ function attemptTrain(kind: 'worker' | 'defender' | 'raider'): void {
   }
 }
 
+let matchActive = true;
+let matchOutcome: MatchOutcome | null = null;
+
 let aiEnabled = true;
 const aiState = createAiState();
+
+function resetMatch(): void {
+  // 1. Remove all current unit meshes from scene.
+  for (const w of bundle.workers) bundle.scene.remove(w.mesh);
+  for (const d of bundle.defenders) bundle.scene.remove(d.mesh);
+  for (const r of bundle.raiders) bundle.scene.remove(r.mesh);
+  bundle.workers.length = 0;
+  bundle.defenders.length = 0;
+  bundle.raiders.length = 0;
+
+  // 2. Reset HQ HP and damage accumulators.
+  bundle.hqs.blue.hp = bundle.hqs.blue.maxHp;
+  bundle.hqs.blue.hpBar.update(bundle.hqs.blue.hp, bundle.hqs.blue.maxHp);
+  bundle.hqs.blue.damageAccumulator = 0;
+  bundle.hqs.red.hp = bundle.hqs.red.maxHp;
+  bundle.hqs.red.hpBar.update(bundle.hqs.red.hp, bundle.hqs.red.maxHp);
+  bundle.hqs.red.damageAccumulator = 0;
+
+  // 3. Reset points and energy.
+  pointsLedger.set({ blue: 0, red: 0 });
+  hud.updatePoints(pointsLedger.get());
+  energyLedger.set({ blue: 0, red: 0 });
+  hud.updateEnergy(energyLedger.get());
+
+  // 4. Reset node accumulators.
+  for (const node of bundle.energyNodes) {
+    node.pointAccumulator = 0;
+    node.lastHolder = null;
+    node.setFactionHold(null);
+  }
+
+  // 5. Reset AI state.
+  const freshAi = createAiState();
+  aiState.buildQueue = freshAi.buildQueue;
+  aiState.trainCooldown = freshAi.trainCooldown;
+  aiState.workerAssignTimer = freshAi.workerAssignTimer;
+  aiState.mustering = freshAi.mustering;
+  aiEnabled = true;
+
+  // 6. Rebuild starter workers.
+  const starters: Array<['blue' | 'red', number, number]> = [
+    ['blue', 1, 0],
+    ['blue', 0, 1],
+    ['red', 18, 19],
+    ['red', 19, 18],
+  ];
+  for (const [faction, tx, ty] of starters) {
+    const w = buildWorker(faction, tx, ty);
+    bundle.scene.add(w.mesh);
+    bundle.workers.push(w);
+  }
+
+  // 7. Match state.
+  matchOutcome = null;
+  matchActive = true;
+}
 
 if (hook) {
   hook.setEnergy = setEnergy;
@@ -109,6 +170,11 @@ if (hook) {
     workerAssignTimer: aiState.workerAssignTimer,
     mustering: aiState.mustering,
   });
+  hook.getMatchState = () => ({ outcome: matchOutcome, active: matchActive });
+  hook.playAgain = () => {
+    resetMatch();
+    hideMatchOverlay();
+  };
 }
 
 attachE2EHook(bundle, {
@@ -120,6 +186,15 @@ attachE2EHook(bundle, {
   aiState,
   getAiEnabled: () => aiEnabled,
   setAiEnabled: (v: boolean) => { aiEnabled = v; },
+  getMatchState: () => ({ outcome: matchOutcome, active: matchActive }),
+  playAgain: () => {
+    resetMatch();
+    hideMatchOverlay();
+  },
+  onMatchEnd: (outcome) => {
+    matchActive = false;
+    matchOutcome = outcome;
+  },
 });
 
 let state: PlacementState = INITIAL_STATE;
@@ -204,97 +279,110 @@ function animate(): void {
   const deltaSeconds = Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
 
-  energyLedger.tick(deltaSeconds);
-  hud.updateEnergy(energyLedger.get());
-  hud.updatePoints(pointsLedger.get());
+  if (matchActive) {
+    energyLedger.tick(deltaSeconds);
+    hud.updateEnergy(energyLedger.get());
+    hud.updatePoints(pointsLedger.get());
 
-  // Tick AI — red faction auto-plays when enabled.
-  if (aiEnabled) {
-    const redWorkers = bundle.workers.filter((w) => w.faction === 'red');
-    const redDefenders = bundle.defenders.filter((d) => d.faction === 'red');
-    const redRaiders = bundle.raiders.filter((r) => r.faction === 'red');
-    tickAi({
-      state: aiState,
-      dt: deltaSeconds,
-      energy: energyLedger.get(),
-      redWorkers,
-      redDefenders,
-      redRaiders,
-      allWorkers: bundle.workers,
-      allDefenders: bundle.defenders,
-      allRaiders: bundle.raiders,
-      energyNodes: bundle.energyNodes,
-      redHq: bundle.hqs.red,
-      blueHq: bundle.hqs.blue,
-      onEnergyChanged: (newEnergy) => {
-        energyLedger.set({ red: newEnergy.red, blue: newEnergy.blue });
-        hud.updateEnergy(energyLedger.get());
-      },
-      onTrained: (kind, tileX, tileY) => {
-        if (kind === 'worker') {
-          const w = buildWorker('red', tileX, tileY);
-          bundle.scene.add(w.mesh);
-          bundle.workers.push(w);
-        } else if (kind === 'defender') {
-          const d = buildDefender('red', tileX, tileY);
-          bundle.scene.add(d.mesh);
-          bundle.defenders.push(d);
-        } else {
-          const r = buildRaider('red', tileX, tileY);
-          bundle.scene.add(r.mesh);
-          bundle.raiders.push(r);
-          // If already mustering, send the new raider immediately.
-          if (aiState.mustering) {
-            r.moveTo(bundle.hqs.blue.tileX, bundle.hqs.blue.tileY);
+    // Tick AI — red faction auto-plays when enabled.
+    if (aiEnabled) {
+      const redWorkers = bundle.workers.filter((w) => w.faction === 'red');
+      const redDefenders = bundle.defenders.filter((d) => d.faction === 'red');
+      const redRaiders = bundle.raiders.filter((r) => r.faction === 'red');
+      tickAi({
+        state: aiState,
+        dt: deltaSeconds,
+        energy: energyLedger.get(),
+        redWorkers,
+        redDefenders,
+        redRaiders,
+        allWorkers: bundle.workers,
+        allDefenders: bundle.defenders,
+        allRaiders: bundle.raiders,
+        energyNodes: bundle.energyNodes,
+        redHq: bundle.hqs.red,
+        blueHq: bundle.hqs.blue,
+        onEnergyChanged: (newEnergy) => {
+          energyLedger.set({ red: newEnergy.red, blue: newEnergy.blue });
+          hud.updateEnergy(energyLedger.get());
+        },
+        onTrained: (kind, tileX, tileY) => {
+          if (kind === 'worker') {
+            const w = buildWorker('red', tileX, tileY);
+            bundle.scene.add(w.mesh);
+            bundle.workers.push(w);
+          } else if (kind === 'defender') {
+            const d = buildDefender('red', tileX, tileY);
+            bundle.scene.add(d.mesh);
+            bundle.defenders.push(d);
+          } else {
+            const r = buildRaider('red', tileX, tileY);
+            bundle.scene.add(r.mesh);
+            bundle.raiders.push(r);
+            // If already mustering, send the new raider immediately.
+            if (aiState.mustering) {
+              r.moveTo(bundle.hqs.blue.tileX, bundle.hqs.blue.tileY);
+            }
           }
-        }
+        },
+      });
+    }
+
+    // Tick all units (movement).
+    for (const w of bundle.workers) {
+      w.tick(deltaSeconds);
+    }
+    for (const d of bundle.defenders) {
+      d.tick(deltaSeconds);
+    }
+    for (const r of bundle.raiders) {
+      r.tick(deltaSeconds);
+    }
+
+    // Tick combat — resolves attacks, deaths, and scoring.
+    tickCombat({
+      units: {
+        workers: bundle.workers,
+        defenders: bundle.defenders,
+        raiders: bundle.raiders,
       },
+      hqs: bundle.hqs,
+      pointsLedger,
+      dt: deltaSeconds,
+      scene: bundle.scene,
     });
-  }
 
-  // Tick all units (movement).
-  for (const w of bundle.workers) {
-    w.tick(deltaSeconds);
-  }
-  for (const d of bundle.defenders) {
-    d.tick(deltaSeconds);
-  }
-  for (const r of bundle.raiders) {
-    r.tick(deltaSeconds);
-  }
+    // Tick node-control points — accrues 1 pt/sec per held node.
+    const allUnitsForNodes = [
+      ...bundle.workers,
+      ...bundle.defenders,
+      ...bundle.raiders,
+    ];
+    tickNodePoints({
+      nodes: bundle.energyNodes,
+      units: allUnitsForNodes,
+      pointsLedger,
+      dt: deltaSeconds,
+    });
 
-  // Tick combat — resolves attacks, deaths, and scoring.
-  tickCombat({
-    units: {
-      workers: bundle.workers,
-      defenders: bundle.defenders,
-      raiders: bundle.raiders,
-    },
-    hqs: bundle.hqs,
-    pointsLedger,
-    dt: deltaSeconds,
-    scene: bundle.scene,
-  });
+    // Update node glow from live unit positions.
+    for (const node of bundle.energyNodes) {
+      node.setFactionHold(computeNodeHolder(node, allUnitsForNodes));
+    }
 
-  // Tick node-control points — accrues 1 pt/sec per held node.
-  const allUnitsForNodes = [
-    ...bundle.workers,
-    ...bundle.defenders,
-    ...bundle.raiders,
-  ];
-  tickNodePoints({
-    nodes: bundle.energyNodes,
-    units: allUnitsForNodes,
-    pointsLedger,
-    dt: deltaSeconds,
-  });
+    hud.updatePoints(pointsLedger.get());
 
-  // Update node glow from live unit positions.
-  for (const node of bundle.energyNodes) {
-    node.setFactionHold(computeNodeHolder(node, allUnitsForNodes));
+    // Evaluate match end condition.
+    const outcome = evaluateMatch({ pointsLedger, hqs: bundle.hqs });
+    if (outcome !== null && !isOverlayVisible()) {
+      matchActive = false;
+      matchOutcome = outcome;
+      showMatchOverlay(outcome, pointsLedger.get(), () => {
+        resetMatch();
+        hideMatchOverlay();
+      });
+    }
   }
-
-  hud.updatePoints(pointsLedger.get());
 
   // Billboard HP bars toward camera each frame.
   const cam = bundle.camera;

@@ -61,7 +61,7 @@ export type VyluxHook = {
   pressTrainKey?: (key: string) => void;
   getUnitCount?: (query: { faction: string; kind: string }) => number;
   // Combat test hooks.
-  setUnitHp?: (query: { faction: string; kind: string; index: number; hp: number }) => void;
+  setUnitHp?: (query: { faction: string; kind: string; index?: number; hp: number }) => void;
   getHqHp?: (faction: string) => number;
   advanceTime?: (seconds: number) => void;
   // Node-control point hooks.
@@ -71,6 +71,9 @@ export type VyluxHook = {
   setAiEnabled?: (enabled: boolean) => void;
   getAiBuildQueue?: () => import('./units-config').UnitKind[];
   getAiState?: () => { trainCooldown: number; workerAssignTimer: number; mustering: boolean };
+  // Match hooks.
+  getMatchState?: () => { outcome: import('./match').MatchOutcome | null; active: boolean };
+  playAgain?: () => void;
 };
 
 declare global {

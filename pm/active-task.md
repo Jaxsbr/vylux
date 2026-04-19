@@ -1,146 +1,134 @@
 ---
-id: ai-opponent
-opened_at: 2026-04-19T05:26:51Z
+id: win-lose-screen
+opened_at: 2026-04-19T05:52:43Z
 priority: P0
-status: done_by_engineer
+status: open
 ---
 
-# AI opponent — red faction autoplays on a simple timer build order
+# Win / lose screen — VICTORY / DEFEAT overlay + in-place reset
 
 ## Outcome
-Red is no longer inert. From match start, red **trains units on a timer-
-based build order**, **assigns idle workers to the nearest energy node**,
-and **sends raiders at the blue HQ** once it has accumulated ≥ 3. Blue
-still plays manually. When this ships, `mid-combat` should look like an
-actual two-sided skirmish rather than a frozen tableau that needs hook
-pokes — red raiders arrive at blue HQ under their own steam.
+Matches now end. When either faction's points cross `WIN_POINTS = 500`
+**or** either HQ's HP hits 0, a full-screen overlay appears: `VICTORY` in
+cyan if blue wins, `DEFEAT` in red-orange if red wins. A single
+`PLAY AGAIN` button resets the match in-place — no page reload, no
+lingering stale state — dropping the player back into a fresh `idle-start`
+equivalent (HQs full HP, 4 starter workers per faction, points and energy
+zeroed, AI re-enabled from the default, units/beams cleared).
 
-This ticks the MVP `AI opponent` checklist item. Win/lose resolution stays
-separate (`win-lose-screen`). Keep the AI dumb: **no ML, no reactive
-targeting, no state machine beyond a small step table**.
+This ticks the final MVP checklist item `Win / lose screen`, which — with
+the visual-target axis already satisfied — makes the MVP **complete**.
 
 ## Acceptance
-- New module `src/ai.ts`. Pure where possible, side-effectful via the same
-  interfaces the player already uses (`trainUnit`, move-worker-to-tile,
-  set unit destination). Expose:
-    - `tickAi({ state, dt })` — called each frame from `src/main.ts`. `state`
-      bundles: red `energyLedger`, red `pointsLedger`, red workers/defenders/
-      raiders arrays, enemy (blue) workers + HQ position, energy nodes,
-      occupied-set helper.
-    - Internal shape: a **build-order queue** (`'worker' | 'defender' |
-      'raider'`) plus a small worker-assignment pass and a raider-muster
-      pass. Nothing richer.
-- Build order (hardcoded; extract to `AI_BUILD_ORDER` constant for test
-  visibility):
-    ```
-    worker, worker, defender, worker, raider, defender, raider, raider, raider, raider, (then loop: defender, raider, raider)
-    ```
-    - The AI pops the **front** of the queue whenever red can afford that
-      unit; otherwise it waits (no skipping ahead).
-    - Training uses the existing `trainUnit(...)` path so costs, spawn
-      neighbour selection, and faction colouring all reuse the proven
-      flow. Do **not** duplicate training logic.
-    - Enforce a small `AI_TRAIN_COOLDOWN = 0.5 s` so red can't empty its
-      queue the instant it has enough energy — prevents ugly frame-1
-      spawn piles.
-- Worker assignment:
-    - Every `AI_WORKER_ASSIGN_INTERVAL = 1.0 s`, for each idle red worker
-      (no active move target), pick the **nearest energy node that is not
-      already held by red** and send it there. Use existing worker-move
-      logic. Ties broken by node index for determinism.
-    - "Idle" = no destination or arrived at destination last tick.
-- Raider muster + attack:
-    - Count living red raiders. Once `count ≥ AI_RAIDER_MUSTER = 3`, send
-      **all living red raiders** at the blue HQ tile — they walk there via
-      the existing move-to-tile path; combat takes over when they enter
-      defender/HQ range.
-    - Once mustered, new raiders trained afterwards also get sent to the
-      blue HQ immediately.
-    - No path-finding; straight-line tile hops is enough. Raiders walking
-      into a defender auto-attack per the combat rules already shipped.
-- Defender behaviour:
-    - Park near red HQ. On spawn, if not within 2 tiles of red HQ, assign
-      a move target to a random free tile within range 2 of red HQ.
-      Otherwise idle. No patrolling.
+- New module `src/match.ts`. Pure match-state owner. Expose:
+    - `evaluateMatch({ pointsLedger, hqs }): 'blue-wins' | 'red-wins' | null`
+      — pure check; `null` while match continues.
+    - Uses existing `WIN_POINTS` constant (500). Do not duplicate; import
+      from wherever it lives (likely `src/mvp-config.ts` or equivalent —
+      check first, add the constant there if it doesn't yet exist in a
+      shared config).
+    - `resetMatch(world)` — tears down current units, beams, node
+      accumulators, points, HQ HP, HQ damage accumulators, AI state; then
+      rebuilds the initial scene by calling the same helper `createScene`
+      (or equivalent bootstrap) uses. Return value: the new world bundle
+      references so `main.ts` can rebind.
+- New module `src/overlay.ts` (DOM-based, echoes the existing HUD style):
+    - Full-screen fixed overlay, `pointer-events: auto` on a centred
+      panel but `pointer-events: none` on the backdrop so stray clicks
+      don't leak through.
+    - Charcoal semi-transparent backdrop (`rgba(0,0,0,0.55)`).
+    - Centred panel: monospace font, neon outlined box matching HUD
+      chrome. Large heading (`VICTORY` cyan / `DEFEAT` red-orange),
+      subtitle showing final score (`BLUE 517  RED 362`), and a single
+      button `PLAY AGAIN` styled like HUD buttons (outlined, neon
+      accented).
+    - Expose: `showMatchOverlay(outcome: 'blue-wins'|'red-wins', score)
+      ` and `hideMatchOverlay()`.
+    - Button `onclick` calls back into `main.ts` which invokes
+      `resetMatch` then `hideMatchOverlay`.
 - `src/main.ts` integration:
-    - Call `tickAi(...)` each frame. Gate on a boolean `AI_ENABLED` that
-      reads `window.__vylux.setAiEnabled(bool)` — default **true**, but
-      tests and scenes can disable it deterministically.
+    - Each frame, after existing ticks, call `evaluateMatch`. If non-null
+      AND no overlay is currently shown:
+        - Pause per-frame gameplay ticks (`tickCombat`, `tickAi`,
+          `tickNodePoints`, economy trickle) — guard with a
+          `matchActive: boolean` flag. Rendering and HP-bar billboarding
+          continue so the frozen tableau still looks alive.
+        - Call `showMatchOverlay(outcome, { blue, red })`.
+    - `PLAY AGAIN` handler → `resetMatch(world)` → `matchActive = true` →
+      `hideMatchOverlay()`.
+- HQ-death trigger:
+    - If an HQ's HP reaches 0 during a `tickCombat` frame, `evaluateMatch`
+      should report the opposite faction as winner (blue HQ dies → red
+      wins, vice versa).
+    - Do **not** auto-destroy the HQ mesh — combat already keeps it
+      rendered at 0 HP per the existing spec. Overlay is the signal.
 - Test-only hook additions:
-    - `window.__vylux.setAiEnabled(bool)` — default `true`, so manual
-      screenshots without AI chaos still work.
-    - `window.__vylux.getAiBuildQueue()` — peek the remaining queue for
-      specs.
-    - `window.__vylux.getAiState()` — `{ trainCooldown, workerAssignTimer,
-      mustering: boolean }` so tests can assert progression without
-      relying on visuals.
-- Unit tests (`src/ai.test.ts`, pure — no Three.js):
-    - With 20 energy → AI pops `'worker'` from the queue and calls train.
-    - With 0 energy → AI does not train (queue unchanged).
-    - Cooldown prevents back-to-back training in same frame.
-    - Worker-assign picks the nearest unheld node.
-    - Raider muster fires exactly once at 3 raiders, not at 2.
-    - After muster, all raiders have blue HQ as destination.
-    - `AI_ENABLED = false` short-circuits every pass.
-- Playwright coverage: new spec `tests/e2e/ai-opponent.spec.ts`:
-    - Load with AI enabled.
-    - `advanceTime(15.0)` (may need to raise the existing ceiling if
-      there is one — bump it to at least 30 s).
-    - Assert red has trained at least one worker, one defender, one
-      raider. Assert at least one red unit has a destination beyond
-      adjacent to red HQ (i.e. has been dispatched).
+    - `window.__vylux.getMatchState()` — returns
+      `{ outcome: 'blue-wins'|'red-wins'|null, active: boolean }`.
+    - `window.__vylux.playAgain()` — programmatic click of the button
+      (bypasses DOM) for deterministic e2e.
+- Unit tests (`src/match.test.ts`, pure — no DOM, no Three.js):
+    - Blue at WIN_POINTS → outcome `'blue-wins'`.
+    - Red at WIN_POINTS → `'red-wins'`.
+    - Blue HQ hp=0 → `'red-wins'`. Red HQ hp=0 → `'blue-wins'`.
+    - Both below threshold AND both HQs > 0 → `null`.
+    - **Tie-break**: if both conditions trigger same frame, the side with
+      strictly more points wins. If points tied, whoever reached
+      WIN_POINTS this frame (track via previous ledger snapshot) wins.
+      If truly simultaneous, blue wins (deterministic tiebreaker —
+      document in comment above the branch).
+- Playwright coverage: new spec `tests/e2e/win-lose.spec.ts`:
+    - Test 1 — blue-wins-points: `setPoints('blue', 500)`, advance one
+      frame, assert `getMatchState().outcome === 'blue-wins'` and
+      overlay visible in DOM with text `VICTORY`.
+    - Test 2 — red-wins-hq: `setUnitHp({ kind: 'hq', faction: 'blue',
+      hp: 0 })`, advance, assert `'red-wins'` and `DEFEAT` text.
+    - Test 3 — play-again resets: trigger blue win, call `playAgain()`,
+      assert overlay gone, `getPoints('blue') === 0`,
+      `getHqHp('blue') === 500`, red workers + HQ back to starter
+      count, and `advanceTime(0.2)` does not re-trigger the overlay
+      (meaning state is genuinely reset, not stale).
 - Scene spec updates:
-    - `mid-combat` — **remove** the hook-driven hand-placement of units.
-      Instead: disable nothing, let the AI run, and `advanceTime(12.0)`.
-      Red should organically produce raiders + defenders and push toward
-      blue. Add a safety floor: if after 12 s there are < 2 red units
-      alive, fall back to the old hand-seed path so the screenshot still
-      renders a combat tableau. Comment the fallback.
-    - `idle-start` — call `setAiEnabled(false)` **before** the render so
-      the peaceful start stays peaceful.
-    - `early-economy` — keep `setAiEnabled(false)` and keep the manual
-      setup so the scene stays focused on economy.
-- Regenerate `pm/screenshots/{idle-start,early-economy,mid-combat}.png`
-  via `npm run scenes` and commit. `mid-combat.png` must show red raiders
-  that walked there (not just seeded), or at worst the fallback tableau.
+    - No changes to the three existing scenes. This task does **not**
+      add a win-lose screenshot scene — the overlay is covered by the
+      Playwright spec above, not by rubric scoring. If it's trivial to
+      capture `victory.png` as a 4th scene for future bragging rights,
+      feel free, but do not add it to `rubric.md`'s scenes list and do
+      not expand rubric scoring scope.
+- Regenerate the existing three screenshots via `npm run scenes` in case
+  anything shifted, and commit.
 - Verify passes (lint + type + unit + all Playwright projects). Commit to
   local `main`.
 
 ## Constraints
 - Do **not** touch `pm/mvp.md`, `pm/persona.md`, `pm/rubric.md`, or
   `pm/backlog.yaml` — PM-owned.
-- Do not implement: win/lose screen, victory conditions, surrender,
-  difficulty tiers, A* pathfinding, threat assessment, fog of war,
-  reactive targeting, retreat logic, formation movement.
-- Do not introduce a new ECS or state-management framework. Keep the
-  arrays-on-scene pattern. The AI is a plain function called per frame.
-- Keep total new LOC under ~300. If you're writing more, you're
-  over-engineering; pause and simplify.
-- Reuse existing training/move paths. Do NOT shortcut into unit-spawn
-  internals.
+- Do not implement: difficulty settings, statistics screen, replay,
+  multi-round series, leaderboards, animations on the overlay beyond a
+  subtle fade-in (optional; skip if non-trivial).
+- Overlay must be DOM, not canvas-rendered. Match HUD chrome style.
+- Reset must be in-place. No `window.location.reload()`. No URL param
+  changes.
+- Keep new LOC under ~250.
 - No `git push`.
 
 ## Handoff
 
-**Commit:** `bede06c`
-**Verify:** lint + type + 218 unit tests + 35 Playwright tests all green.
+status: done_by_engineer
+
+Commit: (see below — filled after commit)
 
 ### What shipped
 
-`src/ai.ts` — pure `tickAi()` step table: hardcoded build-order queue (`AI_BUILD_ORDER`), worker node assignment every 1.0s, raider muster at ≥3, defender + pre-muster-raider parking near red HQ (parks at non-spawn tiles to keep HQ neighbors free for training). Key fix: defenders and idle pre-muster raiders auto-park 2 tiles from HQ so they don't permanently block the 3 valid spawn neighbors of (19,19).
+- `src/match.ts` — pure `evaluateMatch` + `WIN_POINTS=500`. No Three.js.
+- `src/overlay.ts` — DOM overlay with VICTORY/DEFEAT heading, score subtitle, PLAY AGAIN button. Backdrop pointer-events:none, panel auto.
+- `src/main.ts` — `matchActive` flag gates all gameplay ticks; `evaluateMatch` called each frame; `resetMatch()` tears down units/beams/energy/points/nodes/AI and rebuilds 4 starter workers; overlay wired with play-again callback.
+- `src/e2e-hook.ts` — `setUnitHp` extended for `kind:'hq'`; `getMatchState`/`playAgain` added; `evaluateMatch` called inside `advanceTime` loop so e2e tests see match state synchronously; `onMatchEnd` callback lets main.ts update its local `matchActive`/`matchOutcome`.
+- `src/debug.ts` — `VyluxHook` type extended with `getMatchState`/`playAgain`.
+- `playwright.config.ts` — `win-lose.spec.ts` added to `dev` project testMatch.
+- `src/match.test.ts` — 10 pure unit tests (all pass).
+- `tests/e2e/win-lose.spec.ts` — 3 e2e tests: blue-wins-points, red-wins-hq, play-again-resets.
+- Screenshots regenerated via `npm run scenes`.
 
-`src/ai.test.ts` — 15 pure unit tests covering all acceptance criteria.
-
-`src/main.ts` — calls `tickAi` each frame gated on `aiEnabled` (default true). Exposes `setAiEnabled`, `getAiBuildQueue`, `getAiState` on `window.__vylux`.
-
-`src/e2e-hook.ts` — `advanceTime` extended to tick AI + energy + unit movement. AI defaults to disabled in E2E sessions (existing tests unaffected). Added `setAiEnabled`, `getAiBuildQueue`, `getAiState` to hook.
-
-Scene specs updated: `idle-start` and `early-economy` call `setAiEnabled(false)`. `mid-combat` lets AI run for 12s with a safety fallback to the old hand-seed if <2 red units survive.
-
-New `tests/e2e/ai-opponent.spec.ts` passes.
-
-### Screenshots regenerated
-
-- `pm/screenshots/early-economy.png` — minor change (AI disabled, same scene)
-- `pm/screenshots/mid-combat.png` — AI-produced red units visible (raiders dispatched)
-- `pm/screenshots/idle-start.png` — unchanged (peaceful start, AI disabled)
+### Verify
+`npx tsc --noEmit && npm run test && npm run test:e2e` — 228 unit tests + 38 e2e tests, all green.

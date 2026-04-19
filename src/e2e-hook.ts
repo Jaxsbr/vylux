@@ -12,6 +12,8 @@ import { selectHq as selectionSelectHq, clearSelection, getSelectedHq } from './
 import { tickCombat, type PointsLedger } from './combat';
 import { tickNodePoints } from './node-points';
 import { tickAi, type AiState } from './ai';
+import { evaluateMatch } from './match';
+import { showMatchOverlay, isOverlayVisible } from './overlay';
 
 // E2E-only hook — installed only when the URL contains `?e2e=1`.
 // This file is imported by main.ts but the install function exits early unless
@@ -164,6 +166,10 @@ export type HudSetters = {
   aiState: AiState;
   getAiEnabled: () => boolean;
   setAiEnabled: (v: boolean) => void;
+  getMatchState: () => { outcome: import('./match').MatchOutcome | null; active: boolean };
+  playAgain: () => void;
+  /** Called by e2e advanceTime when evaluateMatch returns non-null. */
+  onMatchEnd: (outcome: import('./match').MatchOutcome, score: { blue: number; red: number }) => void;
 };
 
 export type E2EHookExtension = {
@@ -189,6 +195,9 @@ export type E2EHookExtension = {
   setAiEnabled: (enabled: boolean) => void;
   getAiBuildQueue: () => UnitKind[];
   getAiState: () => { trainCooldown: number; workerAssignTimer: number; mustering: boolean };
+  // Match hooks.
+  getMatchState: () => { outcome: import('./match').MatchOutcome | null; active: boolean };
+  playAgain: () => void;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -280,8 +289,14 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
       return 0;
     },
 
-    setUnitHp(query: { faction: string; kind: string; index: number; hp: number }): void {
+    setUnitHp(query: { faction: string; kind: string; index?: number; hp: number }): void {
       const faction = query.faction === 'red' ? 'red' : 'blue';
+      if (query.kind === 'hq') {
+        const hq = bundle.hqs[faction];
+        hq.hp = Math.max(0, query.hp);
+        hq.hpBar.update(hq.hp, hq.maxHp);
+        return;
+      }
       let arr: Array<{ faction: string; hp: number; maxHp: number; hpBar: { update: (hp: number, max: number) => void; group: { visible: boolean } } }> = [];
       if (query.kind === 'worker') {
         arr = bundle.workers.filter((u) => u.faction === faction);
@@ -290,7 +305,7 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
       } else if (query.kind === 'raider') {
         arr = bundle.raiders.filter((u) => u.faction === faction);
       }
-      const unit = arr[query.index];
+      const unit = arr[query.index ?? 0];
       if (unit === undefined) return;
       unit.hp = Math.max(0, query.hp);
       unit.hpBar.update(unit.hp, unit.maxHp);
@@ -385,6 +400,17 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           pointsLedger: hudSetters.pointsLedger,
           dt,
         });
+
+        // Evaluate match end — mirrors main.ts animate loop.
+        const outcome = evaluateMatch({
+          pointsLedger: hudSetters.pointsLedger,
+          hqs: bundle.hqs,
+        });
+        if (outcome !== null && !isOverlayVisible()) {
+          const score = hudSetters.pointsLedger.get();
+          hudSetters.onMatchEnd(outcome, score);
+          showMatchOverlay(outcome, score, hudSetters.playAgain);
+        }
       }
       // Sync final energy back to the real ledger so HUD reflects AI spending.
       hudSetters.setEnergy({ red: energyCache.red, blue: energyCache.blue });
@@ -415,6 +441,14 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
         workerAssignTimer: hudSetters.aiState.workerAssignTimer,
         mustering: hudSetters.aiState.mustering,
       };
+    },
+
+    getMatchState(): { outcome: import('./match').MatchOutcome | null; active: boolean } {
+      return hudSetters.getMatchState();
+    },
+
+    playAgain(): void {
+      hudSetters.playAgain();
     },
   };
 
