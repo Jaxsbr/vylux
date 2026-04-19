@@ -36,7 +36,13 @@ const RAIDER_CONSTANTS = {
   spikeRadiusBottom: 0.08,
   spikeHeight: 0.32,
   spikeY: 0.55 + 0.16,
-  emissiveIntensity: 1.2,
+  // Body emissive near-zero: dark blade silhouette; edges + spike tip carry faction.
+  bodyEmissiveIntensity: 0.05,
+  // Spike tip accent — small glowing cap at the very top; bright bloom source.
+  tipRadius: 0.045,
+  tipHeight: 0.06,
+  tipY: 0.55 + 0.32 + 0.03,
+  accentEmissiveIntensity: 2.0,
 } as const;
 
 export type RaiderBundle = {
@@ -65,10 +71,11 @@ function clampTile(v: number): number {
 function buildRaiderMesh(emissiveHex: number): THREE.Group {
   const group = new THREE.Group();
 
+  // Body is near-black with whisper emissive — dark blade silhouette; edges + tip carry faction.
   const mat = new THREE.MeshStandardMaterial({
     color: BODY_COLOR,
     emissive: emissiveHex,
-    emissiveIntensity: RAIDER_CONSTANTS.emissiveIntensity,
+    emissiveIntensity: RAIDER_CONSTANTS.bodyEmissiveIntensity,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
@@ -110,7 +117,18 @@ function buildRaiderMesh(emissiveHex: number): THREE.Group {
   spikeEdges.position.y = RAIDER_CONSTANTS.spikeY;
   spikeEdges.name = 'raider-spike-trim';
 
-  group.add(blade, bladeEdges, spike, spikeEdges);
+  // Glowing spike-tip accent — small bright cap at the very point; primary bloom source.
+  const tipGeo = new THREE.SphereGeometry(RAIDER_CONSTANTS.tipRadius, 6, 6);
+  const tipMat = new THREE.MeshStandardMaterial({
+    color: emissiveHex,
+    emissive: emissiveHex,
+    emissiveIntensity: RAIDER_CONSTANTS.accentEmissiveIntensity,
+  });
+  const tip = new THREE.Mesh(tipGeo, tipMat);
+  tip.position.y = RAIDER_CONSTANTS.tipY;
+  tip.name = 'raider-tip-accent';
+
+  group.add(blade, bladeEdges, spike, spikeEdges, tip);
   return group;
 }
 

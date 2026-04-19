@@ -66,7 +66,7 @@ describe('buildHQ', () => {
     }
   });
 
-  it('emissive intensity is >= 1.0 so bloom can pick it up', () => {
+  it('tier body emissive intensity is near-zero (dark silhouette)', () => {
     const hq = buildHQ('blue', 0, 0);
     const tierGroups = hq.group.children.filter(
       (c) => c instanceof THREE.Group && c.name !== 'hp-bar',
@@ -74,8 +74,22 @@ describe('buildHQ', () => {
     for (const tier of tierGroups) {
       const mesh = tier.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
       const mat = mesh.material as THREE.MeshStandardMaterial;
-      expect(mat.emissiveIntensity).toBeGreaterThanOrEqual(1.0);
+      // Body must NOT be full-emissive — must read as a dark silhouette.
+      expect(mat.emissiveIntensity).toBeLessThan(0.2);
     }
+  });
+
+  it('accent cap mesh has high emissive intensity so bloom can halo it', () => {
+    const hq = buildHQ('blue', 0, 0);
+    let accentFound = false;
+    hq.group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.name === 'hq-accent-cap') {
+        const mat = obj.material as THREE.MeshStandardMaterial;
+        expect(mat.emissiveIntensity).toBeGreaterThanOrEqual(1.5);
+        accentFound = true;
+      }
+    });
+    expect(accentFound).toBe(true);
   });
 
   it('HQ bundle has a selectionRing that starts invisible', () => {

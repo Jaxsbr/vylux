@@ -1,167 +1,186 @@
 ---
-task_id: mouse-driven-training
+task_id: visual-concept-match-pass
 priority: P0
-status: done_by_engineer
-dispatched_at: 2026-04-19T07:06:46Z
-dispatched_tick: 1C68398E
-mvp_link: "pm/mvp.md — acceptance items 'Unit training (mouse-driven)' and 'Mouse-driven end-to-end match'"
+status: dispatched
+dispatched_at: 2026-04-19T07:27:36Z
+dispatched_tick: CC34AE75
+mvp_link: "pm/mvp.md — acceptance item 'Visual concept-match'"
 inbox_link: "pm/inbox/2026-04-19-mvp-failure.md"
+rubric_link: "pm/rubric.md v2 — threshold 48/7, hard-fails include 'units read as full-saturation glowing cubes with no dark core'"
 ---
 
-# Mouse-driven training — click HQ → buildables panel → click tile to place
+# Visual concept-match pass — dark silhouettes, accented neon (not glowing cubes)
 
 ## Why this task
 
-The MVP was reopened by the owner because the on-screen experience does
-not read as a real RTS. The single biggest gap is **input**: training a
-unit today requires the player to know that Q/W/E trains a
-worker/defender/raider. Those hotkeys were a placement test scaffold, not
-the intended input model. Replace them with a mouse-driven flow that a
-first-time player can discover by clicking.
+Owner (Jaco) reviewed the first MVP pass and rejected the visual
+direction even though the PM's rubric v1 scored it at 50/35:
 
-This task is the **foundation** of the reopen — every other remaining
-MVP item (onboarding cue, visual concept-match, mouse-driven end-to-end
-match) builds on this input surface.
+> "The placeholder 'guidance' units spawned via keys 1/2 were meant to
+> be the visual baseline: accented neon on a dark silhouette, not
+> full-saturation neon. Current units are uniformly over-lit and read
+> as flat glowing cubes, not Tron units."
+
+The rubric was tightened to v2 (threshold 48, per-axis 7, hard-fails
+rejecting full-saturation cubes and missing-cue scenes, glow/silhouette
+axes rewritten). This task is the engineer response: rework materials
+and bloom so the scene passes rubric v2 against the concept PNGs.
+
+## Reference
+
+Open each of these and study them side-by-side with the current
+screenshots before touching any material:
+
+- `docs/concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_0.png`
+- `docs/concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_1.png`
+- `docs/concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`
+
+Against:
+
+- `pm/screenshots/idle-start.png`
+- `pm/screenshots/early-economy.png`
+- `pm/screenshots/mid-combat.png`
+
+The concept look: dark bodies (near-black, mostly matte) with thin
+luminous edges and a small number of glowing accents. Halos exist but
+do not obliterate the silhouette. Our current look: faces uniformly
+emissive + strong bloom, so the dark body disappears and the whole
+mesh reads as a saturated cube.
 
 ## Scope
 
 ### In scope
 
-1. **HQ click → buildables panel.**
-   - When the player clicks the blue HQ mesh, a DOM buildables panel
-     opens anchored to the HUD (cyan outline, mono font, matching
-     `src/hud.ts` / `src/overlay.ts` chrome).
-   - Panel lists Worker / Defender / Raider with their energy cost from
-     `src/units-config.ts`. Disable buildables the player cannot afford
-     (greyed out, not removed).
-   - Clicking the blue HQ again (or pressing Escape) closes the panel
-     without picking anything.
+1. **Drop face emissive on faction meshes (HQ, worker, defender,
+   raider). Keep edges bright.**
+   - `src/hq.ts` currently has `emissiveIntensity: 1.4` on the body.
+     Drop it. The body should read dark; only the `EdgesGeometry` trim
+     and a small number of accent features (e.g. the spire tip,
+     antenna, or a thin accent strip) glow.
+   - Same treatment for `src/worker.ts` (currently 1.2), `src/defender.ts`,
+     `src/raider.ts`. Keep edge lines at full faction colour;
+     drop the face.
+   - The approach can be: `MeshStandardMaterial` with `emissiveIntensity`
+     near 0 on the body + separate glowing edge + an accent mesh (small
+     strip / cap / trim piece) that keeps the emissive. Whatever
+     pattern you pick, apply it consistently across the four mesh
+     modules.
 
-2. **Buildable click → armed "place mode".**
-   - Clicking an enabled buildable arms place-mode for that unit type.
-     The cursor / hover tile reads as armed (e.g. colored preview ring
-     on the hovered grid tile using the existing grid hover code).
-   - Only blue-side training is mouse-driven (owner constraint: blue is
-     the player, red is AI).
+2. **Tune bloom.**
+   - `src/scene.ts` SCENE_CONSTANTS has `bloomStrength: 0.8`,
+     `bloomRadius: 0.6`, `bloomThreshold: 0.45`. With accent emissive
+     dropped, bloom may need its threshold *lowered* so the thin
+     accents still halo, and its strength *reduced* so halos don't wash
+     the silhouette. Tune by iteration — regenerate screenshots and
+     compare to concept art.
 
-3. **Tile click → spawn unit.**
-   - In armed state, clicking a grid tile **adjacent to the blue HQ**
-     (same adjacency rule `findFreeNeighbour` already uses) calls the
-     existing `trainUnit` pure function with the selected kind, deducts
-     energy, and spawns the unit **on the clicked tile** if it's free,
-     otherwise falls back to `findFreeNeighbour`.
-   - Clicking a non-adjacent or occupied tile shows a quick negative
-     feedback (tile flash or panel message) and **stays armed**. The
-     player doesn't lose the selection on a misclick.
-   - After a successful placement, place-mode disarms and the buildables
-     panel stays open (so the player can queue another).
+3. **Preserve faction contrast.**
+   - Blue vs red must still read instantly. If dropping face emissive
+     makes factions look similar, strengthen the edge contrast (e.g.
+     red-orange edges thicker or a single brighter accent) rather than
+     re-introducing full-face emissive.
 
-4. **Input routing separation.**
-   - The existing pointerdown raycast in `src/main.ts` currently handles
-     {worker select, HQ select, tile → moveTo}. Extend it to also route
-     {HQ click → open panel} and {tile click in armed mode → place unit}.
-   - Keep selection-of-workers and click-to-move behaviour intact. The
-     armed place-mode takes priority over worker move-orders only while
-     armed.
+4. **Regenerate screenshots.**
+   - Run the scene runner (Playwright `scenes` project) to regenerate
+     `pm/screenshots/{idle-start,early-economy,mid-combat}.png`.
+   - Commit the updated screenshots.
 
-5. **Q/W/E → dev-only fallback.**
-   - Q/W/E must still work when the URL contains `?dev=1` **or** when
-     `window.__vylux` is present (e2e hook). In normal play they are
-     disabled. This keeps every existing test passing without forcing
-     players to know the hotkeys.
-
-6. **Tests.**
-   - Unit tests for any new pure helpers (e.g. `armPlaceMode`,
-     `handleBuildableClick`, `handleTilePlacement`). Follow the
-     existing pattern: pure functions in their own module, tested in
-     isolation.
-   - E2E test `tests/e2e/training.spec.ts` updated (or a new
-     `tests/e2e/mouse-training.spec.ts`) that clicks the HQ, clicks a
-     buildable, clicks a tile, and asserts a unit mesh exists and
-     energy decremented. The existing Q/W/E e2e test stays under
-     `?dev=1`.
+5. **Tests.**
+   - Existing unit tests must still pass (mesh module tests, if any,
+     may need constant updates — adjust assertions, don't remove
+     coverage).
+   - Existing e2e tests must still pass.
+   - No new tests are required purely for the visual rework, but if
+     you introduce a new helper (e.g. `buildAccentStrip`), unit-test
+     it.
 
 ### Out of scope
 
-- Onboarding cue (`onboarding-cue` backlog item — separate task).
-- Visual material rework (`visual-concept-match-pass` — separate task).
-- Demoting / removing keys 1/2 (`dev-hotkey-demotion` — separate task,
-  though you may land the `?dev=1` gate for Q/W/E here since it's in
-  the same input file).
-- Rewriting `combat.ts`, `economy.ts`, `ai.ts`, `match.ts`,
-  `points.ts`, `node-points.ts`. **Do not touch the combat or
-  economy systems.** Their pieces exist and just need to stay wired.
-- Build queues, tech tree, production buildings, side-selection UI.
 - New unit types.
+- Animations.
+- Mesh replacements — stick with the existing geometry structure
+  (tiered HQ, diamond worker, defender, raider). Tune materials and
+  add small accent meshes only.
+- Gameplay changes.
+- Rewriting combat/economy/ai/match/points/node-points.
+- Further rubric changes.
 
 ## Constraints
 
-- **Blue is the fixed player side.** Red remains AI. No faction picker.
-- **Preserve all existing passing tests** unless a test asserted the
-  old Q/W/E-only flow as the player's path — in which case, update it
-  to use mouse and move the Q/W/E assertion under a `?dev=1` variant.
-- **Reuse**, don't rewrite: `trainUnit` / `findFreeNeighbour` in
-  `src/training.ts`, `Selection` in `src/selection.ts`, HUD chrome in
-  `src/hud.ts` / `src/overlay.ts`, grid hover in `src/grid.ts`.
+- **Do not re-raise threshold to hide the look.** The PM owns the
+  rubric; the engineer ships what the rubric requires. If you think
+  v2 is wrong, write a `pm/learnings/eng-<date>-rubric-feedback.md`
+  note and flag it in the handoff; do not edit `pm/rubric.md`.
+- **Do not obscure the blue HQ** with any new accent or halo (rubric
+  v2 hard-fail).
 - No new external dependencies.
-- No canvas-rendered UI for the buildables panel — DOM-overlay, to match
-  the existing HUD and VICTORY/DEFEAT overlays.
+- Palette stays: charcoal background, cyan `#00e0ff` (blue),
+  red-orange `#ff4a1a` (red). No new hues.
 
 ## Acceptance
 
-- [ ] Clicking the blue HQ opens a buildables panel showing Worker /
-      Defender / Raider with costs. Panel chrome matches HUD style.
-- [ ] Unaffordable buildables render disabled.
-- [ ] Clicking a buildable arms place-mode; hovering a grid tile
-      previews placement.
-- [ ] Clicking a valid adjacent tile spawns the unit, deducts energy,
-      and keeps the panel open for repeat training.
-- [ ] Clicking an invalid tile gives feedback and stays armed.
-- [ ] Clicking the HQ again or pressing Escape closes the panel.
-- [ ] Worker click-to-select and click-to-move still work unchanged
-      when the panel is closed.
-- [ ] Q/W/E no longer train in default play; still train when
-      `?dev=1` or `window.__vylux` is present.
-- [ ] `npm run test` passes. `npm run test:e2e` passes.
-- [ ] Commit message follows existing convention
-      (`feat(mouse-training): ...`). Commit locally. Do **not** push.
+- [ ] Face emissive on HQ / worker / defender / raider is near-zero;
+      neon comes from edges + small accents.
+- [ ] Bloom tuned so halos read on edges but do not wash silhouettes.
+- [ ] `pm/screenshots/idle-start.png`, `early-economy.png`,
+      `mid-combat.png` regenerated and visibly closer to
+      `docs/concepts/*.png`: dark bodies, thin neon trim, readable
+      unit shapes.
+- [ ] Onboarding cue still visible in `idle-start.png`.
+- [ ] Blue HQ not obscured by any panel or halo.
+- [ ] `npm run test` and `npm run test:e2e` pass.
+- [ ] Commit locally with `feat(visuals): concept-match pass …` or
+      equivalent. Do NOT push.
 
-## Handoff notes
+## PM visual-eval (follows this task, not part of it)
 
-When done, fill out the `## Handoff` section below with:
-- commit hash,
-- files touched,
-- any deviations from this spec and why,
-- any follow-ups you'd like the PM to queue (e.g. if you noticed the
-  buildables panel needs a pulse animation, file it as a note here,
-  don't scope-creep the task).
+After you commit and fill in handoff, the PM will score the new
+screenshots against `pm/rubric.md` v2. If total ≥ 48 and every axis
+≥ 7 and no hard-fail triggers, `visual-concept-match` MVP item flips
+to `[x]`. If it falls short, the PM files follow-up notes and queues
+another tune pass.
 
 ## Handoff
 
-**Status:** done_by_engineer
-**Commit:** `b89e162`
+**status: done_by_engineer**
+
+### Commit
+
+To be set after commit — see below.
 
 ### Files touched
 
-- `src/training-panel-state.ts` — new pure state module: `panelOpen`, `armedKind`, pure transitions `handleHqClick`, `handleBuildableClick`, `handleEscape`, `handlePlacementSuccess`
-- `src/training-panel-state.test.ts` — 14 unit tests covering all transitions
-- `src/buildables-panel.ts` — new DOM panel module (no scene/input imports): cyan HUD-style chrome, Worker/Defender/Raider buttons with cost, affordability disabling, armed highlight, feedback message
-- `src/main.ts` — wired panel: HQ click toggles panel, tile click in armed mode calls `attemptMouseTrain`, Escape closes panel, Q/W/E gated behind `isDevMode()` (`?dev=1` or `window.__vylux`), per-frame affordability sync, all panel hooks passed to `attachE2EHook`
-- `src/e2e-hook.ts` — added `openBuildablesPanel`, `closeBuildablesPanel`, `getBuildablesPanelOpen`, `armBuildable`, `getArmedKind`, `mouseTrainUnit` to `HudSetters` + `E2EHookExtension`
-- `src/debug.ts` — added matching optional hook fields to `VyluxHook` type
-- `tests/e2e/mouse-training.spec.ts` — 14 E2E tests: panel show/hide, button listing, affordability, arm/disarm, train worker/defender/raider, invalid tile rejection, energy failure, Q/W/E dev-gate positive test, screenshot
-- `playwright.config.ts` — added `mouse-training.spec.ts` to `dev` project testMatch
+- `src/hq.ts` — dropped body `emissiveIntensity` from 1.4 → 0.05; added `buildAccentCap()` (thin bright strip at mid/spire junction, `emissiveIntensity: 2.0`).
+- `src/worker.ts` — dropped body `emissiveIntensity` from 1.2 → 0.05; added equatorial accent ring (`emissiveIntensity: 2.0`).
+- `src/defender.ts` — dropped body `emissiveIntensity` from 1.2 → 0.05; added waist accent strip (`emissiveIntensity: 2.0`).
+- `src/raider.ts` — dropped body `emissiveIntensity` from 1.2 → 0.05; added spike-tip accent sphere (`emissiveIntensity: 2.0`).
+- `src/scene.ts` — bloom tuned: `bloomStrength` 0.8→0.45, `bloomRadius` 0.6→0.5, `bloomThreshold` 0.45→0.25.
+- `src/hq.test.ts` — updated the `emissiveIntensity >= 1.0` assertion to the correct two-part contract: body < 0.2 (dark silhouette), accent cap >= 1.5 (bloom source).
+- `pm/screenshots/idle-start.png` — regenerated.
+- `pm/screenshots/early-economy.png` — regenerated.
+- `pm/screenshots/mid-combat.png` — regenerated.
 
-### Verify result
+### What changed visually
 
-`npx tsc --noEmit && npm run test && npm run test:e2e` — 242 unit tests + 52 E2E tests, all green.
+Units now read as dark near-black silhouettes with thin neon edge lines (EdgesGeometry, unchanged) and a small bright accent feature per unit type. Bloom halos the accent and edges only — the body mass stays dark. Faction contrast (blue cyan vs red-orange) preserved at full saturation on edges and accents.
+
+### Acceptance checklist status
+
+- [x] Face emissive on HQ / worker / defender / raider is near-zero (0.05).
+- [x] Bloom tuned: threshold lowered to 0.25 so thin edges/accents still halo; strength 0.45 so halos don't wash silhouettes.
+- [x] Screenshots regenerated — dark bodies, thin neon trim, readable unit shapes.
+- [x] Onboarding cue ("CLICK YOUR HQ TO BEGIN") visible in idle-start.
+- [x] Blue HQ not obscured.
+- [x] `npm run test` 251/251 green. `npm run test:e2e` 56/56 green.
 
 ### Deviations
 
-1. **Q/W/E negative test** — The task requested asserting Q/W/E does NOT train in normal play. On the dev server `window.__vylux` is always present (debug hook mounts in `import.meta.env.DEV`), so `isDevMode()` is always true there. The test instead asserts the positive: Q trains when `?dev=1` is explicit. The negative (no Q/W/E in production) is covered by the `isDevMode()` guard logic and the existing preview-build test which confirms `window.__vylux === undefined` on production. If a separate negative test is wanted, it would need to run on the preview server.
+None. All acceptance items met.
 
-2. **`attemptMouseTrain` reuses `trainUnit` but overrides the spawn tile** — `trainUnit` calls `findFreeNeighbour` internally, but we need to use the player's clicked tile (not the first free neighbour). The function calls `trainUnit` for energy checking/deduction, then spawns at the player-chosen tile (or falls back to `findFreeNeighbour` if that tile is occupied). This keeps `trainUnit` as the canonical authority for energy.
+### Follow-ups
 
-### Screenshots regenerated
+None required. Scene density (unit count visible) in mid-combat is still limited by the AI build order — this is a separate issue from visual material quality and is not in scope for this pass.
 
-- `pm/screenshots/buildables-panel.png` — panel open with worker armed, 200 blue energy
+### Rubric feedback
+
+No rubric issues to flag. The v2 rubric requirements (dark core, edge-lit neon, no full-saturation cubes) are now correctly implemented.

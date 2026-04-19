@@ -37,12 +37,13 @@ export const SCENE_CONSTANTS = {
   // (preserved for debug/Playwright), but `emissiveIntensity: 0` means the
   // body does not glow — faction identity reads only from the trim.
   buildingBodyColor: '#0d1117',
-  // Bloom target: HQ tier edges readable at distance, faction halo present but
-  // not washing the silhouette. threshold=0.45 passes HQ emissive (~1.4×faction
-  // colour) while blocking dim grid dividers (0.4 intensity on grey 0x555555).
-  bloomStrength: 0.8,
-  bloomRadius: 0.6,
-  bloomThreshold: 0.45,
+  // Bloom target: accent accents (emissiveIntensity ~2.0) halo brightly; dark body
+  // faces (emissiveIntensity ~0.05) stay below threshold and don't wash the silhouette.
+  // threshold=0.25 catches the accent strip/cap/tip (bright) while still suppressing
+  // the dim body faces. strength reduced to 0.45 so halos are soft, not obliterating.
+  bloomStrength: 0.45,
+  bloomRadius: 0.5,
+  bloomThreshold: 0.25,
   // HQ tile positions — GRID_SIZE = 20 so corner tiles are 0 and 19.
   hqBlueTile: 0,
   hqRedTile: 19,

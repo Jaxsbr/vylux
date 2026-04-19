@@ -32,7 +32,13 @@ const DEF_CONSTANTS = {
   capRadius: 0.22,
   capHeight: 0.12,
   capY: 0.28,
-  emissiveIntensity: 1.2,
+  // Body emissive near-zero: dark silhouette; edges + accent strip carry faction identity.
+  bodyEmissiveIntensity: 0.05,
+  // Thin accent strip around the body mid-height — the bright bloom anchor.
+  accentStripRadius: 0.40,
+  accentStripHeight: 0.03,
+  accentStripY: 0.14,
+  accentEmissiveIntensity: 2.0,
 } as const;
 
 export type DefenderBundle = {
@@ -68,10 +74,11 @@ function buildDefenderMesh(emissiveHex: number): THREE.Group {
     DEF_CONSTANTS.height,
     DEF_CONSTANTS.radialSegments,
   );
+  // Body is near-black with whisper emissive — dark silhouette; edges + accent carry faction.
   const mat = new THREE.MeshStandardMaterial({
     color: BODY_COLOR,
     emissive: emissiveHex,
-    emissiveIntensity: DEF_CONSTANTS.emissiveIntensity,
+    emissiveIntensity: DEF_CONSTANTS.bodyEmissiveIntensity,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
@@ -105,7 +112,26 @@ function buildDefenderMesh(emissiveHex: number): THREE.Group {
   capEdges.position.y = DEF_CONSTANTS.capY + DEF_CONSTANTS.capHeight / 2;
   capEdges.name = 'defender-cap-trim';
 
-  group.add(body, bodyEdges, cap, capEdges);
+  // Accent strip around the body equator — thin bright ring; primary bloom source.
+  const accentGeo = new THREE.CylinderGeometry(
+    DEF_CONSTANTS.accentStripRadius,
+    DEF_CONSTANTS.accentStripRadius,
+    DEF_CONSTANTS.accentStripHeight,
+    DEF_CONSTANTS.radialSegments,
+  );
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: emissiveHex,
+    emissive: emissiveHex,
+    emissiveIntensity: DEF_CONSTANTS.accentEmissiveIntensity,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
+  });
+  const accentStrip = new THREE.Mesh(accentGeo, accentMat);
+  accentStrip.position.y = DEF_CONSTANTS.accentStripY;
+  accentStrip.name = 'defender-accent-strip';
+
+  group.add(body, bodyEdges, cap, capEdges, accentStrip);
   return group;
 }
 

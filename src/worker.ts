@@ -36,7 +36,13 @@ const WORKER_CONSTANTS = {
   // Stacked: lower half flipped to create the bottom point.
   // Total height ~ 0.44, sits at Y=0.22 so base is ~0 and apex is ~0.44.
   bodyY: 0.22,
-  emissiveIntensity: 1.2,
+  // Body emissive near-zero: dark silhouette reads through; edges + accent carry faction.
+  bodyEmissiveIntensity: 0.05,
+  // Thin equatorial ring accent — bright bloom anchor in faction colour.
+  accentRingInner: 0.25,
+  accentRingOuter: 0.30,
+  accentRingY: 0.22,
+  accentEmissiveIntensity: 2.0,
 } as const;
 
 export type WorkerBundle = {
@@ -91,10 +97,11 @@ function buildDiamondMesh(emissiveHex: number): THREE.Group {
     WORKER_CONSTANTS.diamondRadialSegments,
   );
 
+  // Body is near-black with whisper emissive — dark silhouette; edges + accent carry faction.
   const mat = new THREE.MeshStandardMaterial({
     color: BODY_COLOR,
     emissive: emissiveHex,
-    emissiveIntensity: WORKER_CONSTANTS.emissiveIntensity,
+    emissiveIntensity: WORKER_CONSTANTS.bodyEmissiveIntensity,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
@@ -123,7 +130,24 @@ function buildDiamondMesh(emissiveHex: number): THREE.Group {
   lowerEdges.position.y = -WORKER_CONSTANTS.diamondHeight / 2;
   lowerEdges.name = 'worker-trim-lower';
 
-  group.add(upper, lower, upperEdges, lowerEdges);
+  // Equatorial accent ring — thin bright disc at the widest point; primary bloom source.
+  const accentGeo = new THREE.RingGeometry(
+    WORKER_CONSTANTS.accentRingInner,
+    WORKER_CONSTANTS.accentRingOuter,
+    16,
+  );
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: emissiveHex,
+    emissive: emissiveHex,
+    emissiveIntensity: WORKER_CONSTANTS.accentEmissiveIntensity,
+    side: THREE.DoubleSide,
+  });
+  const accentRing = new THREE.Mesh(accentGeo, accentMat);
+  accentRing.rotation.x = -Math.PI / 2;
+  accentRing.position.y = WORKER_CONSTANTS.accentRingY;
+  accentRing.name = 'worker-accent-ring';
+
+  group.add(upper, lower, upperEdges, lowerEdges, accentRing);
   // Center the diamond so its equator is at Y=0 relative to group origin.
   // The group origin will be placed at the tile's world Y.
   group.position.y = WORKER_CONSTANTS.bodyY;

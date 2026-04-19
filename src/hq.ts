@@ -32,11 +32,18 @@ const HQ_CONSTANTS = {
   antennaW: 0.06,
   antennaH: 0.45,
   antennaY: 1.475,
-  // Emissive intensity on the body — high enough for UnrealBloomPass to halo it.
-  emissiveIntensity: 1.4,
+  // Body emissive intensity is near-zero so the dark silhouette reads through.
+  // Faction identity comes from EdgesGeometry trim lines + the accent cap below.
+  bodyEmissiveIntensity: 0.05,
+  // Accent cap sits atop the mid-tier: a thin luminous strip that gives bloom
+  // a bright anchor without washing the body.
+  accentCapW: 0.64,
+  accentCapH: 0.04,
+  accentCapY: 0.72,
+  accentEmissiveIntensity: 2.0,
 } as const;
 
-/** Build one tier of the HQ: a box mesh with an emissive body + neon EdgesGeometry trim. */
+/** Build one tier of the HQ: a dark box body with neon EdgesGeometry trim. */
 function buildTier(
   width: number,
   height: number,
@@ -46,10 +53,12 @@ function buildTier(
   const group = new THREE.Group();
 
   const geo = new THREE.BoxGeometry(width, height, width);
+  // Body is near-black with a whisper emissive (faction colour stored for debug/Playwright,
+  // but intensity near-zero so it reads as a dark silhouette, not a glowing cube).
   const mat = new THREE.MeshStandardMaterial({
     color: BODY_COLOR,
     emissive: emissiveHex,
-    emissiveIntensity: HQ_CONSTANTS.emissiveIntensity,
+    emissiveIntensity: HQ_CONSTANTS.bodyEmissiveIntensity,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
@@ -66,6 +75,30 @@ function buildTier(
 
   group.add(mesh, edges);
   return group;
+}
+
+/**
+ * Thin luminous accent cap strip that sits atop the mid-tier.
+ * Provides a bright bloom anchor in faction colour without washing the body silhouette.
+ */
+function buildAccentCap(emissiveHex: number): THREE.Mesh {
+  const geo = new THREE.BoxGeometry(
+    HQ_CONSTANTS.accentCapW,
+    HQ_CONSTANTS.accentCapH,
+    HQ_CONSTANTS.accentCapW,
+  );
+  const mat = new THREE.MeshStandardMaterial({
+    color: emissiveHex,
+    emissive: emissiveHex,
+    emissiveIntensity: HQ_CONSTANTS.accentEmissiveIntensity,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
+  });
+  const cap = new THREE.Mesh(geo, mat);
+  cap.position.y = HQ_CONSTANTS.accentCapY;
+  cap.name = 'hq-accent-cap';
+  return cap;
 }
 
 export type HQBundle = {
@@ -117,6 +150,8 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
   group.add(buildTier(HQ_CONSTANTS.midW, HQ_CONSTANTS.midH, HQ_CONSTANTS.midY, emissive));
   group.add(buildTier(HQ_CONSTANTS.spireW, HQ_CONSTANTS.spireH, HQ_CONSTANTS.spireY, emissive));
   group.add(buildTier(HQ_CONSTANTS.antennaW, HQ_CONSTANTS.antennaH, HQ_CONSTANTS.antennaY, emissive));
+  // Accent cap: thin bright strip between mid and spire tiers — the primary bloom source.
+  group.add(buildAccentCap(emissive));
 
   const selectionRing = buildHQSelectionRing(emissive);
   group.add(selectionRing);
