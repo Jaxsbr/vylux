@@ -80,11 +80,12 @@ function makeParams(overrides: Partial<TickAiParams> = {}): TickAiParams {
 }
 
 describe('AI_BUILD_ORDER', () => {
-  it('starts with worker, worker, defender, worker, raider sequence', () => {
+  // idle-loses-tuning: raider moved to index 1 so red gets aggression early.
+  it('starts with worker, raider, worker, raider, raider sequence', () => {
     expect(AI_BUILD_ORDER[0]).toBe('worker');
-    expect(AI_BUILD_ORDER[1]).toBe('worker');
-    expect(AI_BUILD_ORDER[2]).toBe('defender');
-    expect(AI_BUILD_ORDER[3]).toBe('worker');
+    expect(AI_BUILD_ORDER[1]).toBe('raider');
+    expect(AI_BUILD_ORDER[2]).toBe('worker');
+    expect(AI_BUILD_ORDER[3]).toBe('raider');
     expect(AI_BUILD_ORDER[4]).toBe('raider');
   });
 });
@@ -103,8 +104,8 @@ describe('tickAi — training', () => {
     expect(onTrained).toHaveBeenCalledOnce();
     expect(onTrained.mock.calls[0][0]).toBe('worker');
     expect(onEnergyChanged).toHaveBeenCalledOnce();
-    // Queue popped front (worker).
-    expect(state.buildQueue[0]).toBe('worker'); // second worker is now front
+    // Queue popped front (worker). Next item is raider (idle-loses-tuning build order).
+    expect(state.buildQueue[0]).toBe('raider');
     expect(state.trainCooldown).toBeCloseTo(AI_TRAIN_COOLDOWN);
   });
 
@@ -201,17 +202,16 @@ describe('tickAi — worker assignment', () => {
 });
 
 describe('tickAi — raider muster', () => {
-  it('does not muster at 2 raiders', () => {
-    const raiders = [makeRaider(18, 18), makeRaider(17, 18)];
+  // idle-loses-tuning: AI_RAIDER_MUSTER lowered to 1, so muster fires immediately.
+  it('muster fires at 1 raider (AI_RAIDER_MUSTER=1)', () => {
+    const raiders = [makeRaider(18, 18)];
     const state = createAiState();
-    tickAi(makeParams({ state, energy: { blue: 0, red: 0 }, redRaiders: raiders, allRaiders: raiders }));
-    expect(state.mustering).toBe(false);
-    for (const r of raiders) {
-      expect((r.moveTo as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    }
+    const blueHq = makeHq(0, 0);
+    tickAi(makeParams({ state, energy: { blue: 0, red: 0 }, redRaiders: raiders, allRaiders: raiders, blueHq }));
+    expect(state.mustering).toBe(true);
   });
 
-  it('muster fires at exactly 3 raiders', () => {
+  it('muster fires at 3 raiders (also valid since AI_RAIDER_MUSTER=1)', () => {
     const raiders = [makeRaider(18, 18), makeRaider(17, 18), makeRaider(18, 17)];
     const state = createAiState();
     const blueHq = makeHq(0, 0);
@@ -230,17 +230,18 @@ describe('tickAi — raider muster', () => {
     }
   });
 
-  it('dead raiders are excluded from muster count', () => {
+  it('dead raiders are excluded from muster count — 1 alive still musters (AI_RAIDER_MUSTER=1)', () => {
     const raiders = [makeRaider(18, 18, 0), makeRaider(17, 18, 0), makeRaider(18, 17)];
     const state = createAiState();
-    tickAi(makeParams({ state, energy: { blue: 0, red: 0 }, redRaiders: raiders, allRaiders: raiders }));
-    // Only 1 alive, should not muster.
-    expect(state.mustering).toBe(false);
+    const blueHq = makeHq(0, 0);
+    tickAi(makeParams({ state, energy: { blue: 0, red: 0 }, redRaiders: raiders, allRaiders: raiders, blueHq }));
+    // 1 alive raider → muster fires since AI_RAIDER_MUSTER=1.
+    expect(state.mustering).toBe(true);
   });
 });
 
 describe('tickAi constants', () => {
   it('AI_TRAIN_COOLDOWN is 0.5', () => expect(AI_TRAIN_COOLDOWN).toBe(0.5));
   it('AI_WORKER_ASSIGN_INTERVAL is 1.0', () => expect(AI_WORKER_ASSIGN_INTERVAL).toBe(1.0));
-  it('AI_RAIDER_MUSTER is 3', () => expect(AI_RAIDER_MUSTER).toBe(3));
+  it('AI_RAIDER_MUSTER is 1', () => expect(AI_RAIDER_MUSTER).toBe(1));
 });

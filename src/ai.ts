@@ -19,12 +19,13 @@ import { advanceRaiders, type AdvanceTarget } from './advance';
 
 export const AI_TRAIN_COOLDOWN = 0.5;
 export const AI_WORKER_ASSIGN_INTERVAL = 1.0;
-export const AI_RAIDER_MUSTER = 3;
+export const AI_RAIDER_MUSTER = 1; // idle-loses-tuning: advance on first raider, not after 3
 
 // Build order: pop front when affordable; loop the tail after exhaustion.
+// idle-loses-tuning: raider moved to index 1 so red sends a raider at ~120s base-income.
 const BUILD_ORDER_INITIAL: UnitKind[] = [
-  'worker', 'worker', 'defender', 'worker', 'raider',
-  'defender', 'raider', 'raider', 'raider', 'raider',
+  'worker', 'raider', 'worker', 'raider', 'raider',
+  'defender', 'raider', 'raider',
 ];
 const BUILD_ORDER_LOOP: UnitKind[] = ['defender', 'raider', 'raider'];
 
