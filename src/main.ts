@@ -292,6 +292,7 @@ attachInputHandlers({
   target: window,
   canvas,
   raycastPointer: bundle.raycastPointer,
+  isDevMode,
   getState: () => state,
   setState: (next) => {
     state = next;

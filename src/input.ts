@@ -10,13 +10,19 @@ export type KeydownHandlerOptions = {
   getState: () => PlacementState;
   setState: (next: PlacementState) => void;
   canvas: HTMLCanvasElement;
+  isDevMode?: () => boolean;
 };
+
+const DEV_ONLY_KEYS = new Set(['1', '2']);
 
 export function createKeydownHandler(
   options: KeydownHandlerOptions,
 ): (event: KeyboardEvent) => void {
-  const { getState, setState, canvas } = options;
+  const { getState, setState, canvas, isDevMode } = options;
   return (event: KeyboardEvent): void => {
+    if (DEV_ONLY_KEYS.has(event.key) && isDevMode !== undefined && !isDevMode()) {
+      return;
+    }
     const current = getState();
     const next = handleKey(current, event.key);
     if (next === current) {
@@ -86,9 +92,9 @@ export type InputHandlers = {
 };
 
 export function attachInputHandlers(options: AttachInputHandlersOptions): InputHandlers {
-  const { target, canvas, raycastPointer, getState, setState } = options;
+  const { target, canvas, raycastPointer, getState, setState, isDevMode } = options;
 
-  const keydownHandler = createKeydownHandler({ getState, setState, canvas });
+  const keydownHandler = createKeydownHandler({ getState, setState, canvas, isDevMode });
   const keydownListener = keydownHandler as EventListener;
   target.addEventListener('keydown', keydownListener);
 

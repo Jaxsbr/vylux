@@ -95,6 +95,42 @@ describe('createKeydownHandler', () => {
     expect(canvas.style.cursor).toBe('default');
   });
 
+  it('"1" and "2" are no-ops when isDevMode returns false', () => {
+    const holder = stateHolder(INITIAL_STATE);
+    const canvas = makeCanvas();
+    const handler = createKeydownHandler({ ...holder, canvas, isDevMode: () => false });
+    handler({ key: '1' } as KeyboardEvent);
+    handler({ key: '2' } as KeyboardEvent);
+    expect(holder.setCount()).toBe(0);
+    expect(holder.getState()).toBe(INITIAL_STATE);
+    expect(canvas.style.cursor).toBe('default');
+  });
+
+  it('"1" and "2" are active when isDevMode returns true', () => {
+    const holder = stateHolder(INITIAL_STATE);
+    const canvas = makeCanvas();
+    const handler = createKeydownHandler({ ...holder, canvas, isDevMode: () => true });
+    handler({ key: '1' } as KeyboardEvent);
+    expect(holder.getState().mode).toBe('placement');
+    expect(holder.getState().selectedUnitType).toBe('blue');
+    expect(canvas.style.cursor).toBe('none');
+  });
+
+  it('"Escape" is never gated — works regardless of isDevMode', () => {
+    const holder = stateHolder({
+      mode: 'placement',
+      selectedUnitType: 'blue',
+      hoveredTile: null,
+      placedUnits: [],
+    });
+    const canvas = makeCanvas();
+    canvas.style.cursor = 'none';
+    const handler = createKeydownHandler({ ...holder, canvas, isDevMode: () => false });
+    handler({ key: 'Escape' } as KeyboardEvent);
+    expect(holder.getState().mode).toBe('idle');
+    expect(canvas.style.cursor).toBe('default');
+  });
+
   it('same-faction repeat in placement is a no-op (no setState call)', () => {
     const holder = stateHolder({
       mode: 'placement',
