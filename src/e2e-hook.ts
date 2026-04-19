@@ -9,6 +9,7 @@ import { buildRaider } from './raider';
 import type { UnitKind } from './units-config';
 import { selectHq as selectionSelectHq, clearSelection, getSelectedHq } from './selection';
 import { tickCombat, type PointsLedger } from './combat';
+import { tickNodePoints } from './node-points';
 
 // E2E-only hook — installed only when the URL contains `?e2e=1`.
 // This file is imported by main.ts but the install function exits early unless
@@ -175,6 +176,9 @@ export type E2EHookExtension = {
   setUnitHp: (query: { faction: string; kind: string; index: number; hp: number }) => void;
   getHqHp: (faction: string) => number;
   advanceTime: (seconds: number) => void;
+  // Node-control point hooks.
+  getNodePointAccumulator: (nodeIndex: number) => number;
+  getPoints: (faction: string) => number;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -284,7 +288,7 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
     },
 
     advanceTime(seconds: number): void {
-      // Simulate combat ticks in fixed steps so cooldown-based logic resolves.
+      // Simulate combat + node-point ticks in fixed steps so cooldown-based logic resolves.
       const STEP = 0.016;
       let remaining = seconds;
       while (remaining > 0) {
@@ -301,7 +305,29 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           dt,
           scene: bundle.scene,
         });
+        const allUnits = [
+          ...bundle.workers,
+          ...bundle.defenders,
+          ...bundle.raiders,
+        ];
+        tickNodePoints({
+          nodes: bundle.energyNodes,
+          units: allUnits,
+          pointsLedger: hudSetters.pointsLedger,
+          dt,
+        });
       }
+    },
+
+    getNodePointAccumulator(nodeIndex: number): number {
+      const node = bundle.energyNodes[nodeIndex];
+      if (node === undefined) return 0;
+      return node.pointAccumulator;
+    },
+
+    getPoints(faction: string): number {
+      const pts = hudSetters.pointsLedger.get();
+      return faction === 'red' ? pts.red : pts.blue;
     },
   };
 

@@ -2,6 +2,8 @@
 // Pure helper + a mutable instance. No imports from scene.ts or input.ts.
 
 export const BASE_INCOME = 1; // energy per second, always trickles
+export const NODE_INCOME = 2; // bonus energy/sec per held node (future wiring)
+export const NODE_POINT_RATE = 1; // points/sec per held energy node
 
 export type FactionEnergy = { blue: number; red: number };
 

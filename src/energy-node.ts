@@ -30,6 +30,10 @@ export type EnergyNodeBundle = {
   setFactionHold: (faction: FactionHold) => void;
   tileX: number;
   tileY: number;
+  /** Fractional point accumulator for node-control scoring. Resets on holder change. */
+  pointAccumulator: number;
+  /** Last known holder — used to detect holder changes and reset the accumulator. */
+  lastHolder: FactionHold;
 };
 
 const NODE_CONSTANTS = {
@@ -99,5 +103,5 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
     rimMat.emissive.set(rimColor);
   };
 
-  return { group, setFactionHold, tileX, tileY };
+  return { group, setFactionHold, tileX, tileY, pointAccumulator: 0, lastHolder: null };
 }

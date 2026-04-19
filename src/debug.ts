@@ -64,6 +64,9 @@ export type VyluxHook = {
   setUnitHp?: (query: { faction: string; kind: string; index: number; hp: number }) => void;
   getHqHp?: (faction: string) => number;
   advanceTime?: (seconds: number) => void;
+  // Node-control point hooks.
+  getNodePointAccumulator?: (nodeIndex: number) => number;
+  getPoints?: (faction: string) => number;
 };
 
 declare global {

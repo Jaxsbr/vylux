@@ -13,6 +13,7 @@ import { buildRaider } from './raider';
 import { trainUnit, buildOccupiedSet } from './training';
 import { GRID_CONSTANTS } from './grid';
 import { tickCombat } from './combat';
+import { tickNodePoints, computeNodeHolder } from './node-points';
 
 const bundle = createScene();
 const canvas = bundle.renderer.domElement;
@@ -208,6 +209,25 @@ function animate(): void {
     dt: deltaSeconds,
     scene: bundle.scene,
   });
+
+  // Tick node-control points — accrues 1 pt/sec per held node.
+  const allUnitsForNodes = [
+    ...bundle.workers,
+    ...bundle.defenders,
+    ...bundle.raiders,
+  ];
+  tickNodePoints({
+    nodes: bundle.energyNodes,
+    units: allUnitsForNodes,
+    pointsLedger,
+    dt: deltaSeconds,
+  });
+
+  // Update node glow from live unit positions.
+  for (const node of bundle.energyNodes) {
+    node.setFactionHold(computeNodeHolder(node, allUnitsForNodes));
+  }
+
   hud.updatePoints(pointsLedger.get());
 
   // Billboard HP bars toward camera each frame.
