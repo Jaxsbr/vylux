@@ -49,6 +49,7 @@ export type VyluxHook = {
   ready?: () => Promise<void>;
   // HUD setters — always present once main.ts wires them up.
   setEnergy?: (patch: Partial<FactionEnergy>) => void;
+  getEnergy?: () => FactionEnergy;
   setPoints?: (patch: Partial<FactionPoints>) => void;
   // Node hold setter — drives faction-hold tinting on energy nodes.
   setNodeHolds?: (holds: Record<number, FactionHold>) => void;
@@ -84,6 +85,11 @@ export type VyluxHook = {
   // Onboarding cue hooks — present when ?e2e=1.
   getOnboardingCueVisible?: () => boolean;
   dismissOnboardingCue?: () => void;
+  // Worker selection / move-order hooks — present when ?e2e=1.
+  selectWorkerByIndex?: (index: number) => void;
+  getWorkerSelectionRingVisible?: (index: number) => boolean;
+  giveWorkerMoveOrder?: (index: number, tileX: number, tileY: number) => void;
+  getWorkerTargetTile?: (index: number) => { tileX: number; tileY: number } | null;
 };
 
 declare global {

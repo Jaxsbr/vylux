@@ -199,7 +199,11 @@ function resetMatch(): void {
   matchOutcome = null;
   matchActive = true;
 
-  // 8. Reset onboarding cue — fresh match gets fresh guidance.
+  // 8. Reset training panel — close panel and clear armed kind for fresh match.
+  trainingPanelState = INITIAL_TRAINING_PANEL_STATE;
+  syncBuildablesPanel();
+
+  // 9. Reset onboarding cue — fresh match gets fresh guidance.
   onboardingCueState = resetCue(onboardingCueState);
   syncOnboardingCue();
 }

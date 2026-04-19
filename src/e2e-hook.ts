@@ -8,7 +8,7 @@ import { buildWorker } from './worker';
 import { buildDefender } from './defender';
 import { buildRaider } from './raider';
 import type { UnitKind } from './units-config';
-import { selectHq as selectionSelectHq, clearSelection, getSelectedHq } from './selection';
+import { selectHq as selectionSelectHq, selectWorker as selectionSelectWorker, clearSelection, getSelectedHq } from './selection';
 import { tickCombat, type PointsLedger } from './combat';
 import { tickNodePoints } from './node-points';
 import { tickAi, type AiState } from './ai';
@@ -186,6 +186,7 @@ export type E2EHookExtension = {
   setScene: (name: string) => void;
   ready: () => Promise<void>;
   setEnergy: (patch: Partial<FactionEnergy>) => void;
+  getEnergy: () => FactionEnergy;
   setPoints: (patch: Partial<FactionPoints>) => void;
   setNodeHolds: (holds: Record<number, FactionHold>) => void;
   spawnWorker: (faction: string, tileX: number, tileY: number) => number;
@@ -218,6 +219,11 @@ export type E2EHookExtension = {
   // Onboarding cue hooks.
   getOnboardingCueVisible: () => boolean;
   dismissOnboardingCue: () => void;
+  // Worker selection / move-order hooks.
+  selectWorkerByIndex: (index: number) => void;
+  getWorkerSelectionRingVisible: (index: number) => boolean;
+  giveWorkerMoveOrder: (index: number, tileX: number, tileY: number) => void;
+  getWorkerTargetTile: (index: number) => { tileX: number; tileY: number } | null;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -245,6 +251,7 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
       });
     },
     setEnergy: hudSetters.setEnergy,
+    getEnergy: hudSetters.getEnergy,
     setPoints: hudSetters.setPoints,
     setNodeHolds(holds: Record<number, FactionHold>): void {
       for (const [indexStr, faction] of Object.entries(holds)) {
@@ -502,6 +509,36 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
 
     dismissOnboardingCue(): void {
       hudSetters.dismissOnboardingCue();
+    },
+
+    selectWorkerByIndex(index: number): void {
+      const blueWorkers = bundle.workers.filter((w) => w.faction === 'blue');
+      const w = blueWorkers[index];
+      if (w !== undefined) {
+        selectionSelectWorker(w);
+      }
+    },
+
+    getWorkerSelectionRingVisible(index: number): boolean {
+      const blueWorkers = bundle.workers.filter((w) => w.faction === 'blue');
+      const w = blueWorkers[index];
+      if (w === undefined) return false;
+      return w.selectionRing.visible;
+    },
+
+    giveWorkerMoveOrder(index: number, tileX: number, tileY: number): void {
+      const blueWorkers = bundle.workers.filter((w) => w.faction === 'blue');
+      const w = blueWorkers[index];
+      if (w !== undefined) {
+        w.moveTo(tileX, tileY);
+      }
+    },
+
+    getWorkerTargetTile(index: number): { tileX: number; tileY: number } | null {
+      const blueWorkers = bundle.workers.filter((w) => w.faction === 'blue');
+      const w = blueWorkers[index];
+      if (w === undefined) return null;
+      return { tileX: w.targetTileX, tileY: w.targetTileY };
     },
   };
 
