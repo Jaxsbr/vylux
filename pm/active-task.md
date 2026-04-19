@@ -76,5 +76,5 @@ the `Energy nodes` MVP checklist item.
 - `window.__vylux.setNodeHolds({ [nodeIndex]: faction })` wired through `e2e-hook.ts` and typed in `debug.ts`.
 - `early-economy` spec: nodes 0 and 1 held by blue, node 3 held by red. `mid-combat` spec: nodes 0 and 2 held by blue, node 3 held by red. `idle-start` stays neutral.
 - Screenshots regenerated: `pm/screenshots/{idle-start,early-economy,mid-combat}.png`. No green in any of them. All 19 E2E + 120 unit tests green.
-- Commit SHA: (see git log)
+- Commit SHA: `ebcf9e1`
 - Caveat: node 0 at tile (5,5) is close to the blue HQ corner (0,0) — may want to reposition to e.g. (6,6) if it visually crowds the HQ silhouette once real worker meshes exist.
