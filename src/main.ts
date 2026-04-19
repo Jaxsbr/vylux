@@ -1,5 +1,6 @@
 import { createScene } from './scene';
 import { attachDebugHook } from './debug';
+import { attachE2EHook } from './e2e-hook';
 import { attachInputHandlers } from './input';
 import { INITIAL_STATE, type PlacementState } from './placement';
 
@@ -10,6 +11,7 @@ canvas.style.cursor = 'default';
 document.body.appendChild(canvas);
 
 const hook = attachDebugHook(bundle);
+attachE2EHook(bundle);
 
 let state: PlacementState = INITIAL_STATE;
 
@@ -29,7 +31,7 @@ attachInputHandlers({
 function animate(): void {
   requestAnimationFrame(animate);
   bundle.reconcile(state);
-  bundle.renderer.render(bundle.scene, bundle.camera);
+  bundle.render();
 }
 animate();
 

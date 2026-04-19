@@ -19,6 +19,11 @@ export default defineConfig({
       testMatch: ['preview.spec.ts'],
       use: { baseURL: `http://localhost:${PREVIEW_PORT}` },
     },
+    {
+      name: 'scenes',
+      testMatch: ['scenes/*.spec.ts'],
+      use: { baseURL: `http://localhost:${DEV_PORT}` },
+    },
   ],
   webServer: [
     {

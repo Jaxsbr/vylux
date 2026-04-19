@@ -41,6 +41,9 @@ export type VyluxHook = {
   state: PlacementState;
   readonly debug: VyluxDebug;
   raycastCenter: () => { tileX: number; tileY: number } | null;
+  // Optional E2E-only extensions — present only when ?e2e=1 is in the URL.
+  setScene?: (name: string) => void;
+  ready?: () => Promise<void>;
 };
 
 declare global {
