@@ -119,15 +119,16 @@ export function createHud(): HudHandles {
 
   root.appendChild(energyBlock);
 
-  // ── Points block (top-center) ─────────────────────────────────────────────
+  // ── Points block (top-right) ──────────────────────────────────────────────
+  // Moved from top-center: the blue HQ sits in the canvas center column and
+  // was fully occluded by the old position, tanking the silhouette rubric axis.
   const pointsBlock = document.createElement('div');
   applyBaseStyles(pointsBlock);
   pointsBlock.style.top = '14px';
-  pointsBlock.style.left = '50%';
-  pointsBlock.style.transform = 'translateX(-50%)';
+  pointsBlock.style.right = '14px';
   pointsBlock.style.display = 'flex';
   pointsBlock.style.flexDirection = 'column';
-  pointsBlock.style.alignItems = 'center';
+  pointsBlock.style.alignItems = 'flex-end';
   pointsBlock.style.gap = '6px';
 
   pointsBlock.appendChild(makeSectionLabel('Points'));
