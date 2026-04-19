@@ -1,186 +1,139 @@
 ---
-task_id: visual-concept-match-pass
+task_id: mouse-driven-end-to-end
 priority: P0
 status: done_by_engineer
-dispatched_at: 2026-04-19T07:27:36Z
-dispatched_tick: CC34AE75
-mvp_link: "pm/mvp.md — acceptance item 'Visual concept-match'"
+dispatched_at: 2026-04-19T07:40:58Z
+dispatched_tick: 5A954E85
+mvp_link: "pm/mvp.md — final acceptance item 'Mouse-driven end-to-end match'"
 inbox_link: "pm/inbox/2026-04-19-mvp-failure.md"
-rubric_link: "pm/rubric.md v2 — threshold 48/7, hard-fails include 'units read as full-saturation glowing cubes with no dark core'"
 ---
 
-# Visual concept-match pass — dark silhouettes, accented neon (not glowing cubes)
+# Mouse-driven end-to-end match — verify the holistic RTS loop
 
 ## Why this task
 
-Owner (Jaco) reviewed the first MVP pass and rejected the visual
-direction even though the PM's rubric v1 scored it at 50/35:
+Every piece of the reopen is shipped:
+- `mouse-driven-training` (b89e162) — click HQ → buildables panel →
+  click tile to place.
+- `onboarding-cue` (fd3dd0a) — "CLICK YOUR HQ TO BEGIN" prompt on
+  fresh match, dismisses on first HQ click, reappears on PLAY AGAIN.
+- `visual-concept-match-pass` (264bfe2) — dark silhouettes with
+  accented neon; rubric v2 scored 57/48 on visual-eval-v10.
+- `dev-hotkey-demotion` (e0965e5) — keys 1/2 + Q/W/E all gated
+  behind `isDevMode()`.
 
-> "The placeholder 'guidance' units spawned via keys 1/2 were meant to
-> be the visual baseline: accented neon on a dark silhouette, not
-> full-saturation neon. Current units are uniformly over-lit and read
-> as flat glowing cubes, not Tron units."
-
-The rubric was tightened to v2 (threshold 48, per-axis 7, hard-fails
-rejecting full-saturation cubes and missing-cue scenes, glow/silhouette
-axes rewritten). This task is the engineer response: rework materials
-and bloom so the scene passes rubric v2 against the concept PNGs.
-
-## Reference
-
-Open each of these and study them side-by-side with the current
-screenshots before touching any material:
-
-- `docs/concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_0.png`
-- `docs/concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_1.png`
-- `docs/concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`
-
-Against:
-
-- `pm/screenshots/idle-start.png`
-- `pm/screenshots/early-economy.png`
-- `pm/screenshots/mid-combat.png`
-
-The concept look: dark bodies (near-black, mostly matte) with thin
-luminous edges and a small number of glowing accents. Halos exist but
-do not obliterate the silhouette. Our current look: faces uniformly
-emissive + strong bloom, so the dark body disappears and the whole
-mesh reads as a saturated cube.
+The only remaining MVP acceptance item is the **holistic** check:
+a fresh match can be played idle-start → victory/defeat using the
+mouse only. Each piece has unit and e2e coverage, but no single test
+proves the full flow. Add one.
 
 ## Scope
 
 ### In scope
 
-1. **Drop face emissive on faction meshes (HQ, worker, defender,
-   raider). Keep edges bright.**
-   - `src/hq.ts` currently has `emissiveIntensity: 1.4` on the body.
-     Drop it. The body should read dark; only the `EdgesGeometry` trim
-     and a small number of accent features (e.g. the spire tip,
-     antenna, or a thin accent strip) glow.
-   - Same treatment for `src/worker.ts` (currently 1.2), `src/defender.ts`,
-     `src/raider.ts`. Keep edge lines at full faction colour;
-     drop the face.
-   - The approach can be: `MeshStandardMaterial` with `emissiveIntensity`
-     near 0 on the body + separate glowing edge + an accent mesh (small
-     strip / cap / trim piece) that keeps the emissive. Whatever
-     pattern you pick, apply it consistently across the four mesh
-     modules.
+1. **New Playwright e2e spec: `tests/e2e/mouse-end-to-end.spec.ts`.**
+   Single test that exercises the full loop using **only** mouse
+   clicks (no keydowns) and the `window.__vylux` hook for time
+   advancement / state seeding. No assertions should depend on Q/W/E
+   or keys 1/2 firing.
 
-2. **Tune bloom.**
-   - `src/scene.ts` SCENE_CONSTANTS has `bloomStrength: 0.8`,
-     `bloomRadius: 0.6`, `bloomThreshold: 0.45`. With accent emissive
-     dropped, bloom may need its threshold *lowered* so the thin
-     accents still halo, and its strength *reduced* so halos don't wash
-     the silhouette. Tune by iteration — regenerate screenshots and
-     compare to concept art.
+2. **Required flow inside the test:**
+   1. Load the dev scene. Assert the onboarding cue is visible.
+   2. Click the blue HQ mesh (via raycast on the canvas, or via a
+      dedicated `window.__vylux.clickBlueHq()` helper if one is
+      already wired — use whatever the `mouse-training` e2e tests
+      use for consistency). Assert the cue disappears and the
+      buildables panel opens.
+   3. Seed enough energy via `window.__vylux` so the test is not
+      gated on minutes of `BASE_INCOME` accrual. A helper like
+      `setBlueEnergy(500)` is fine.
+   4. Click the Worker buildable. Assert place-mode armed.
+   5. Click a grid tile adjacent to the blue HQ. Assert a new worker
+      spawned (worker count increased by 1, energy decremented by
+      `WORKER_COST`).
+   6. Click the newly-spawned worker mesh. Assert selection ring
+      visible.
+   7. Click an energy-node tile. Assert the worker has a move-order
+      to that tile.
+   8. Via the panel, train a Raider (click HQ → click Raider → click
+      tile). Assert it spawned.
+   9. Advance simulated time (`advanceTime` via `window.__vylux`) so
+      combat and point accrual run, **or** seed blue points directly
+      to `WIN_POINTS` via the hook. Either path is acceptable — the
+      goal is proving that **victory fires from gameplay state, not
+      a test shortcut that bypasses the match resolver**. Prefer
+      whichever the existing `win-lose.spec.ts` uses.
+   10. Assert the VICTORY overlay appears.
+   11. Click the PLAY AGAIN button. Assert the overlay clears, the
+       onboarding cue reappears, the buildables panel is closed, and
+       energy/points reset.
 
-3. **Preserve faction contrast.**
-   - Blue vs red must still read instantly. If dropping face emissive
-     makes factions look similar, strengthen the edge contrast (e.g.
-     red-orange edges thicker or a single brighter accent) rather than
-     re-introducing full-face emissive.
+3. **No keyboard in the spec.** The test must not call
+   `page.keyboard.press(...)` or `page.keyboard.type(...)`. All
+   inputs are mouse clicks or direct `window.__vylux` helper calls
+   that mirror mouse actions (like `openBuildablesPanel`,
+   `armBuildable`, `mouseTrainUnit`, `placementClickTile`, etc.).
 
-4. **Regenerate screenshots.**
-   - Run the scene runner (Playwright `scenes` project) to regenerate
-     `pm/screenshots/{idle-start,early-economy,mid-combat}.png`.
-   - Commit the updated screenshots.
-
-5. **Tests.**
-   - Existing unit tests must still pass (mesh module tests, if any,
-     may need constant updates — adjust assertions, don't remove
-     coverage).
-   - Existing e2e tests must still pass.
-   - No new tests are required purely for the visual rework, but if
-     you introduce a new helper (e.g. `buildAccentStrip`), unit-test
-     it.
+4. **Leave existing tests alone.** Do not modify
+   `tests/e2e/mouse-training.spec.ts` or any other already-green
+   spec. This is a new, additive verification.
 
 ### Out of scope
 
-- New unit types.
-- Animations.
-- Mesh replacements — stick with the existing geometry structure
-  (tiered HQ, diamond worker, defender, raider). Tune materials and
-  add small accent meshes only.
-- Gameplay changes.
-- Rewriting combat/economy/ai/match/points/node-points.
-- Further rubric changes.
+- Any gameplay tuning.
+- Any new mouse helpers that duplicate existing ones — reuse what
+  the `mouse-driven-training` e2e suite already uses.
+- Visual changes.
+- Touching combat / economy / ai / match / points / node-points.
 
 ## Constraints
 
-- **Do not re-raise threshold to hide the look.** The PM owns the
-  rubric; the engineer ships what the rubric requires. If you think
-  v2 is wrong, write a `pm/learnings/eng-<date>-rubric-feedback.md`
-  note and flag it in the handoff; do not edit `pm/rubric.md`.
-- **Do not obscure the blue HQ** with any new accent or halo (rubric
-  v2 hard-fail).
+- Playwright dev project only (not preview) so `window.__vylux` is
+  available.
+- Test must run deterministically — use `advanceTime` or direct
+  state seeding, never real-time waits longer than a few hundred ms.
 - No new external dependencies.
-- Palette stays: charcoal background, cyan `#00e0ff` (blue),
-  red-orange `#ff4a1a` (red). No new hues.
+- Do not add new exports to `window.__vylux` unless the spec
+  genuinely cannot express the flow with existing ones. If you do
+  add one, document why in the handoff.
 
 ## Acceptance
 
-- [ ] Face emissive on HQ / worker / defender / raider is near-zero;
-      neon comes from edges + small accents.
-- [ ] Bloom tuned so halos read on edges but do not wash silhouettes.
-- [ ] `pm/screenshots/idle-start.png`, `early-economy.png`,
-      `mid-combat.png` regenerated and visibly closer to
-      `docs/concepts/*.png`: dark bodies, thin neon trim, readable
-      unit shapes.
-- [ ] Onboarding cue still visible in `idle-start.png`.
-- [ ] Blue HQ not obscured by any panel or halo.
-- [ ] `npm run test` and `npm run test:e2e` pass.
-- [ ] Commit locally with `feat(visuals): concept-match pass …` or
-      equivalent. Do NOT push.
-
-## PM visual-eval (follows this task, not part of it)
-
-After you commit and fill in handoff, the PM will score the new
-screenshots against `pm/rubric.md` v2. If total ≥ 48 and every axis
-≥ 7 and no hard-fail triggers, `visual-concept-match` MVP item flips
-to `[x]`. If it falls short, the PM files follow-up notes and queues
-another tune pass.
+- [ ] `tests/e2e/mouse-end-to-end.spec.ts` exists and exercises the
+      full flow above.
+- [ ] Spec contains zero `page.keyboard.*` calls.
+- [ ] `npm run test` still passes.
+- [ ] `npm run test:e2e` passes with the new spec included.
+- [ ] `playwright.config.ts` includes the new spec in the `dev`
+      project `testMatch`.
+- [ ] Commit locally with `test(mouse-e2e): full mouse-only
+      idle→victory playthrough` or equivalent. Do NOT push.
 
 ## Handoff
 
-**status: done_by_engineer**
+**Commit:** `3e1d7c4`
 
-### Commit
+**Files touched:**
+- `tests/e2e/mouse-end-to-end.spec.ts` — new spec (created)
+- `playwright.config.ts` — added `mouse-end-to-end.spec.ts` to dev `testMatch`
+- `src/e2e-hook.ts` — added 5 new `window.__vylux` exports + implementation
+- `src/debug.ts` — added optional type declarations for the 5 new hooks
+- `src/main.ts` — added `trainingPanelState = INITIAL_TRAINING_PANEL_STATE` + `syncBuildablesPanel()` to `resetMatch()` so panel closes on PLAY AGAIN
+- `pm/screenshots/mouse-e2e-victory.png` — screenshot emitted by the spec
 
-`264bfe2`
+**New `window.__vylux` hooks added (all justified):**
+- `getEnergy(): FactionEnergy` — required to assert energy deduction after worker train; no read-back hook existed
+- `selectWorkerByIndex(index: number): void` — required to select a worker programmatically (mirrors canvas click on worker mesh); no hook existed
+- `getWorkerSelectionRingVisible(index: number): boolean` — required to assert selection ring state after select
+- `giveWorkerMoveOrder(index: number, tileX: number, tileY: number): void` — required to issue a move command without a real canvas pointer event
+- `getWorkerTargetTile(index: number): {tileX, tileY} | null` — required to assert the worker's move target (distinct from current tile)
 
-### Files touched
+**Deviations:**
+- Energy assertions after training and after reset use range checks (`toBeLessThan`/`toBeGreaterThan`) rather than exact equality because the game's `energyLedger.tick` fires on every animation frame between `page.evaluate` calls; exact values are not stable.
+- `resetMatch()` in `main.ts` now closes the buildables panel — this is correct behavior (fresh match should not start with panel open) and was required to satisfy the "panel closed after PLAY AGAIN" acceptance criterion.
 
-- `src/hq.ts` — dropped body `emissiveIntensity` from 1.4 → 0.05; added `buildAccentCap()` (thin bright strip at mid/spire junction, `emissiveIntensity: 2.0`).
-- `src/worker.ts` — dropped body `emissiveIntensity` from 1.2 → 0.05; added equatorial accent ring (`emissiveIntensity: 2.0`).
-- `src/defender.ts` — dropped body `emissiveIntensity` from 1.2 → 0.05; added waist accent strip (`emissiveIntensity: 2.0`).
-- `src/raider.ts` — dropped body `emissiveIntensity` from 1.2 → 0.05; added spike-tip accent sphere (`emissiveIntensity: 2.0`).
-- `src/scene.ts` — bloom tuned: `bloomStrength` 0.8→0.45, `bloomRadius` 0.6→0.5, `bloomThreshold` 0.45→0.25.
-- `src/hq.test.ts` — updated the `emissiveIntensity >= 1.0` assertion to the correct two-part contract: body < 0.2 (dark silhouette), accent cap >= 1.5 (bloom source).
-- `pm/screenshots/idle-start.png` — regenerated.
-- `pm/screenshots/early-economy.png` — regenerated.
-- `pm/screenshots/mid-combat.png` — regenerated.
+**Verify:** `npx tsc --noEmit && npm run test && npm run test:e2e` — 57 e2e + 254 unit tests, all green.
 
-### What changed visually
+**Screenshots regenerated:** `pm/screenshots/mouse-e2e-victory.png`
 
-Units now read as dark near-black silhouettes with thin neon edge lines (EdgesGeometry, unchanged) and a small bright accent feature per unit type. Bloom halos the accent and edges only — the body mass stays dark. Faction contrast (blue cyan vs red-orange) preserved at full saturation on edges and accents.
-
-### Acceptance checklist status
-
-- [x] Face emissive on HQ / worker / defender / raider is near-zero (0.05).
-- [x] Bloom tuned: threshold lowered to 0.25 so thin edges/accents still halo; strength 0.45 so halos don't wash silhouettes.
-- [x] Screenshots regenerated — dark bodies, thin neon trim, readable unit shapes.
-- [x] Onboarding cue ("CLICK YOUR HQ TO BEGIN") visible in idle-start.
-- [x] Blue HQ not obscured.
-- [x] `npm run test` 251/251 green. `npm run test:e2e` 56/56 green.
-
-### Deviations
-
-None. All acceptance items met.
-
-### Follow-ups
-
-None required. Scene density (unit count visible) in mid-combat is still limited by the AI build order — this is a separate issue from visual material quality and is not in scope for this pass.
-
-### Rubric feedback
-
-No rubric issues to flag. The v2 rubric requirements (dark core, edge-lit neon, no full-saturation cubes) are now correctly implemented.
+**Follow-ups:** None — all acceptance criteria met.
