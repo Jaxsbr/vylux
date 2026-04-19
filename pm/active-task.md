@@ -1,7 +1,7 @@
 ---
 id: event-feedback-pulses
 opened_at: 2026-04-19T09:42:20Z
-status: open
+status: done_by_engineer
 priority: P0
 ---
 
@@ -109,4 +109,48 @@ Four event types, each with its own pulse. Each pulse must be:
 
 ## Handoff
 
-(Empty. Engineer fills this in with summary + commit SHA on completion.)
+**Commit:** `f7994a8`
+**Verify:** 305 unit tests + 79 e2e tests — all green.
+
+### What shipped
+
+Four event-feedback pulses, each 1:1 with its logical event:
+
+1. **Unit placement** — `triggerPlacementPulse()` called after every `trainUnit` success (player mouse path, keyboard path, AI `onTrained`). Scale-in tween 0.4→1.0 over 200ms (ease-out) on the mesh group. NOT called for scene-initial starter workers.
+
+2. **Unit death** — `triggerDeathPulse()` called from `combat.ts` `removeDead` when `hp <= 0`. Emissive spike (150ms) on the accent/tip material. Dispose is deferred until the pulse completes; both `main.ts` and `e2e-hook.ts` advanceTime drain death-pulse units before splicing.
+
+3. **Node capture** — `triggerCapturePulse()` called in the animate loop (and advanceTime loop) when `computeNodeHolder` returns a different value than the pre-`tickNodePoints` snapshot of `node.lastHolder`. Rim emissive spike 250ms. Does NOT fire while held, only on flip.
+
+4. **Point-tick** — `triggerPointFlash(el)` in `hud.ts` `updatePoints` whenever the floored integer value changes. CSS `@keyframes` flash animation (180ms) added via an injected `<style>` tag. `hasPointFlashClass(faction)` exposed for e2e assertions.
+
+### Curve choice
+
+Single shared curve in `src/event-pulse.ts`: linear attack (first 20% of duration) + quadratic decay. Same shape as `worker-harvest-pulse` but parameterised. All four event types use it. The harvest pulse is untouched.
+
+### Files touched
+
+- `src/event-pulse.ts` — new pure curve module
+- `src/event-pulse.test.ts` — 17 unit tests
+- `src/worker.ts` — placement + death pulse methods added
+- `src/defender.ts` — same; `buildDefenderMesh` now returns `{ group, accentMat }`
+- `src/raider.ts` — same; `buildRaiderMesh` now returns `{ group, tipMat }`
+- `src/energy-node.ts` — capture pulse methods + `capturePulseElapsed` added to `EnergyNodeBundle`
+- `src/hud.ts` — CSS flash injection + `hasPointFlashClass` + point-diff in `updatePoints`
+- `src/combat.ts` — `removeDead` now triggers death pulse and defers dispose
+- `src/main.ts` — wires all pulse ticks in animate loop; snapshots `nodeHolderPrev` for capture diff; AI `onTrained` triggers placement pulse
+- `src/e2e-hook.ts` — mirrors all pulse ticks in `advanceTime`; adds `getUnitPlacementPulseElapsed`, `getUnitDeathPulseActive`, `getNodeCapturePulseElapsed`, `getPointFlashClass`, `killUnit` hooks
+- `src/debug.ts` — adds hook type declarations for new hooks
+- `src/node-points.test.ts` — updated `makeNode` mock to satisfy new `EnergyNodeBundle` interface
+- `playwright.config.ts` — adds `event-feedback-pulses.spec.ts` to dev testMatch
+- `tests/e2e/event-feedback-pulses.spec.ts` — new 5-test spec covering all four event types
+- `pm/screenshots/mid-combat.png` — regenerated with a just-placed unit at pulse peak (scale-in in progress)
+
+### New window.__vylux hooks (justification)
+
+All added via `e2e-hook.ts` (only active when `?e2e=1`):
+- `getUnitPlacementPulseElapsed({ kind, faction, index })` — sample scale-in progress
+- `getUnitDeathPulseActive({ kind, faction, index })` — confirm death pulse is running
+- `getNodeCapturePulseElapsed(nodeIndex)` — sample rim emissive spike progress
+- `getPointFlashClass(faction)` — confirm CSS flash class on point counter
+- `killUnit({ kind, faction, index })` — force hp=0 to trigger death path without combat sim
