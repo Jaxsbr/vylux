@@ -52,6 +52,10 @@ export type VyluxHook = {
   setPoints?: (patch: Partial<FactionPoints>) => void;
   // Node hold setter — drives faction-hold tinting on energy nodes.
   setNodeHolds?: (holds: Record<number, FactionHold>) => void;
+  // Worker helpers — present only when ?e2e=1 is in the URL.
+  spawnWorker?: (faction: string, tileX: number, tileY: number) => number;
+  moveWorker?: (index: number, tileX: number, tileY: number) => void;
+  getWorkerTile?: (index: number) => { tileX: number; tileY: number } | null;
 };
 
 declare global {

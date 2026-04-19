@@ -13,6 +13,7 @@ import {
 } from './placement';
 import { buildHQ, type HQBundle } from './hq';
 import { buildEnergyNode, NODE_POSITIONS, type EnergyNodeBundle } from './energy-node';
+import { buildWorker, type WorkerBundle } from './worker';
 
 export const SCENE_CONSTANTS = {
   backgroundColor: '#0a0a0a',
@@ -74,6 +75,8 @@ export type SceneBundle = {
   placed: PlacedBundle;
   hqs: { blue: HQBundle; red: HQBundle };
   energyNodes: EnergyNodeBundle[];
+  /** All worker bundles — starter + any spawned via e2e hook. */
+  workers: WorkerBundle[];
   backgroundColor: string;
   cameraRotation: { yawDeg: number; pitchDeg: number };
   lightCounts: { ambient: number; directional: number };
@@ -82,6 +85,8 @@ export type SceneBundle = {
   render: () => void;
   raycastCenter: () => { tileX: number; tileY: number } | null;
   raycastPointer: (clientX: number, clientY: number) => { tileX: number; tileY: number } | null;
+  /** Raycast against all worker meshes. Returns the worker hit, or null. */
+  raycastWorker: (clientX: number, clientY: number) => WorkerBundle | null;
   reconcile: (state: PlacementState) => void;
 };
 
@@ -174,6 +179,21 @@ export function createScene(): SceneBundle {
     return node;
   });
 
+  // Starter workers — blue HQ at (0,0) gets workers at (1,0) and (0,1);
+  // red HQ at (19,19) gets workers at (18,19) and (19,18).
+  const workers: WorkerBundle[] = [];
+  const starterWorkers: Array<['blue' | 'red', number, number]> = [
+    ['blue', 1, 0],
+    ['blue', 0, 1],
+    ['red', 18, 19],
+    ['red', 19, 18],
+  ];
+  for (const [faction, tx, ty] of starterWorkers) {
+    const w = buildWorker(faction, tx, ty);
+    scene.add(w.mesh);
+    workers.push(w);
+  }
+
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -224,16 +244,49 @@ export function createScene(): SceneBundle {
   const raycastCenter = (): { tileX: number; tileY: number } | null => raycastHitAt(center);
 
   const pointer = new THREE.Vector2(0, 0);
-  const raycastPointer = (
-    clientX: number,
-    clientY: number,
-  ): { tileX: number; tileY: number } | null => {
+
+  const toNDC = (clientX: number, clientY: number): THREE.Vector2 | null => {
     const rect = renderer.domElement.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
     pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
     if (pointer.x < -1 || pointer.x > 1 || pointer.y < -1 || pointer.y > 1) return null;
-    return raycastHitAt(pointer);
+    return pointer;
+  };
+
+  const raycastPointer = (
+    clientX: number,
+    clientY: number,
+  ): { tileX: number; tileY: number } | null => {
+    const ndc = toNDC(clientX, clientY);
+    if (ndc === null) return null;
+    return raycastHitAt(ndc);
+  };
+
+  const raycastWorker = (clientX: number, clientY: number): WorkerBundle | null => {
+    const ndc = toNDC(clientX, clientY);
+    if (ndc === null) return null;
+    raycaster.setFromCamera(ndc, camera);
+    // Collect all descendant meshes from each worker group.
+    const workerMeshes: THREE.Object3D[] = [];
+    for (const w of workers) {
+      w.mesh.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          workerMeshes.push(obj);
+        }
+      });
+    }
+    const hits = raycaster.intersectObjects(workerMeshes, false);
+    if (hits.length === 0) return null;
+    // Walk up to find which WorkerBundle this hit belongs to.
+    let obj: THREE.Object3D | null = hits[0].object;
+    while (obj !== null) {
+      for (const w of workers) {
+        if (obj === w.mesh) return w;
+      }
+      obj = obj.parent;
+    }
+    return null;
   };
 
   const tileIndex = (tileX: number, tileY: number): number =>
@@ -319,6 +372,7 @@ export function createScene(): SceneBundle {
     placed,
     hqs,
     energyNodes,
+    workers,
     backgroundColor,
     cameraRotation: { yawDeg: cameraYawDeg, pitchDeg: -cameraElevationDeg },
     lightCounts: { ambient: 1, directional: 1 },
@@ -327,6 +381,7 @@ export function createScene(): SceneBundle {
     render,
     raycastCenter,
     raycastPointer,
+    raycastWorker,
     reconcile,
   };
 }

@@ -4,6 +4,7 @@ import type { SceneBundle } from './scene';
 import type { FactionEnergy } from './economy';
 import type { FactionPoints } from './points';
 import type { FactionHold } from './energy-node';
+import { buildWorker } from './worker';
 
 // E2E-only hook — installed only when the URL contains `?e2e=1`.
 // This file is imported by main.ts but the install function exits early unless
@@ -75,46 +76,48 @@ function clearGroup(group: THREE.Group): void {
 }
 
 function seedIdleStart(_group: THREE.Group): void {
-  // HQs and energy nodes are already in the scene from createScene().
+  // HQs, energy nodes, and starter workers are already in the scene from createScene().
   // Nothing extra to seed for idle-start.
 }
 
-function seedEarlyEconomy(group: THREE.Group): void {
+function seedEarlyEconomy(group: THREE.Group, bundle: SceneBundle): void {
   seedIdleStart(group);
 
-  // Blue workers near bottom-left node (tile 5,5).
-  const blueWorkerPositions: [number, number][] = [
-    [5, 5],
-    [4, 5],
-    [5, 6],
-    [6, 5],
-  ];
-  for (const [tx, ty] of blueWorkerPositions) {
-    const worker = makeBox(0.55, 0.55, BLUE_HEX, PLACED_Y);
-    worker.name = 'e2e-blue-worker';
-    placeAt(worker, tx, ty);
-    group.add(worker);
-  }
+  // Move starter blue workers near the bottom-left node (tile 5,5).
+  // Blue starters: index 0 = (1,0), index 1 = (0,1).
+  if (bundle.workers[0]) bundle.workers[0].setTile(5, 5);
+  if (bundle.workers[1]) bundle.workers[1].setTile(4, 5);
 
-  // Red workers near top-right node (tile 14,14).
-  const redWorkerPositions: [number, number][] = [
-    [14, 14],
-    [13, 14],
-    [14, 13],
-    [15, 14],
-  ];
-  for (const [tx, ty] of redWorkerPositions) {
-    const worker = makeBox(0.55, 0.55, RED_HEX, PLACED_Y);
-    worker.name = 'e2e-red-worker';
-    placeAt(worker, tx, ty);
-    group.add(worker);
-  }
+  // Spawn a third blue worker at (5,6).
+  const blueExtra = buildWorker('blue', 5, 6);
+  blueExtra.mesh.name = 'e2e-spawned-blue-worker';
+  bundle.scene.add(blueExtra.mesh);
+  bundle.workers.push(blueExtra);
+
+  // Move starter red workers near the top-right node (tile 14,14).
+  // Red starters: index 2 = (18,19), index 3 = (19,18).
+  if (bundle.workers[2]) bundle.workers[2].setTile(14, 14);
+  if (bundle.workers[3]) bundle.workers[3].setTile(13, 14);
+
+  // Spawn a third red worker at (14,13).
+  const redExtra = buildWorker('red', 14, 13);
+  redExtra.mesh.name = 'e2e-spawned-red-worker';
+  bundle.scene.add(redExtra.mesh);
+  bundle.workers.push(redExtra);
 }
 
-function seedMidCombat(group: THREE.Group): void {
+function seedMidCombat(group: THREE.Group, bundle: SceneBundle): void {
   seedIdleStart(group);
 
-  // Blue raiders charging toward the red HQ.
+  // Blue workers at their node for economy context.
+  if (bundle.workers[0]) bundle.workers[0].setTile(5, 5);
+  if (bundle.workers[1]) bundle.workers[1].setTile(4, 5);
+
+  // Red workers near their HQ.
+  if (bundle.workers[2]) bundle.workers[2].setTile(17, 18);
+  if (bundle.workers[3]) bundle.workers[3].setTile(18, 17);
+
+  // Blue raiders charging toward the red HQ (placeholder boxes — real raider mesh is a future task).
   const blueRaiderPositions: [number, number][] = [
     [15, 16],
     [16, 16],
@@ -127,11 +130,10 @@ function seedMidCombat(group: THREE.Group): void {
     group.add(raider);
   }
 
-  // Red defenders near their HQ.
+  // Red defenders near their HQ (placeholder boxes — real defender mesh is a future task).
   const redDefenderPositions: [number, number][] = [
-    [17, 18],
-    [18, 17],
     [17, 17],
+    [18, 18],
   ];
   for (const [tx, ty] of redDefenderPositions) {
     const defender = makeBox(0.75, 0.9, RED_HEX, PLACED_Y);
@@ -139,28 +141,27 @@ function seedMidCombat(group: THREE.Group): void {
     placeAt(defender, tx, ty);
     group.add(defender);
   }
-
-  // Some blue workers at their node for economy context.
-  const blueWorkerPositions: [number, number][] = [
-    [5, 5],
-    [4, 5],
-  ];
-  for (const [tx, ty] of blueWorkerPositions) {
-    const worker = makeBox(0.55, 0.55, BLUE_HEX, PLACED_Y);
-    worker.name = 'e2e-blue-worker';
-    placeAt(worker, tx, ty);
-    group.add(worker);
-  }
 }
 
-function seedScene(name: SceneName, group: THREE.Group): void {
+function seedScene(name: SceneName, group: THREE.Group, bundle: SceneBundle): void {
   clearGroup(group);
+  // Remove any extra e2e-spawned workers from previous scene.
+  const spawned = bundle.workers.filter((w) => w.mesh.name.startsWith('e2e-spawned'));
+  for (const w of spawned) {
+    bundle.scene.remove(w.mesh);
+  }
+  const spawned2 = bundle.workers.filter((w) => !w.mesh.name.startsWith('e2e-spawned'));
+  bundle.workers.length = 0;
+  for (const w of spawned2) {
+    bundle.workers.push(w);
+  }
+
   if (name === 'idle-start') {
     seedIdleStart(group);
   } else if (name === 'early-economy') {
-    seedEarlyEconomy(group);
+    seedEarlyEconomy(group, bundle);
   } else if (name === 'mid-combat') {
-    seedMidCombat(group);
+    seedMidCombat(group, bundle);
   }
 }
 
@@ -175,6 +176,9 @@ export type E2EHookExtension = {
   setEnergy: (patch: Partial<FactionEnergy>) => void;
   setPoints: (patch: Partial<FactionPoints>) => void;
   setNodeHolds: (holds: Record<number, FactionHold>) => void;
+  spawnWorker: (faction: string, tileX: number, tileY: number) => number;
+  moveWorker: (index: number, tileX: number, tileY: number) => void;
+  getWorkerTile: (index: number) => { tileX: number; tileY: number } | null;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -187,7 +191,7 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
 
   const ext: E2EHookExtension = {
     setScene(name: string): void {
-      seedScene(name as SceneName, overlayGroup);
+      seedScene(name as SceneName, overlayGroup, bundle);
     },
     ready(): Promise<void> {
       return new Promise<void>((resolve) => {
@@ -206,6 +210,25 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           node.setFactionHold(faction);
         }
       }
+    },
+    spawnWorker(faction: string, tileX: number, tileY: number): number {
+      const f = faction === 'red' ? 'red' : 'blue';
+      const w = buildWorker(f, tileX, tileY);
+      w.mesh.name = 'e2e-spawned-' + f + '-worker';
+      bundle.scene.add(w.mesh);
+      bundle.workers.push(w);
+      return bundle.workers.length - 1;
+    },
+    moveWorker(index: number, tileX: number, tileY: number): void {
+      const w = bundle.workers[index];
+      if (w !== undefined) {
+        w.setTile(tileX, tileY);
+      }
+    },
+    getWorkerTile(index: number): { tileX: number; tileY: number } | null {
+      const w = bundle.workers[index];
+      if (w === undefined) return null;
+      return { tileX: w.tileX, tileY: w.tileY };
     },
   };
 
