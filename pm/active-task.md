@@ -1,74 +1,80 @@
 ---
-id: scene-runner
-opened_at: 2026-04-19T03:50:40Z
+id: hq-building
+opened_at: 2026-04-19T03:58:58Z
 status: done_by_engineer
 priority: P0
 ---
 
-# Playwright scene-runner producing pm/screenshots/*.png
+# Real HQ buildings — Tron-silhouette, emissive, bloom-lit
 
 ## Outcome
-The PM gains eyes on the game. A Playwright scene-runner renders the three scenes
-named in `pm/rubric.md` (`idle-start`, `early-economy`, `mid-combat`) against the
-actual Three.js scene in the running dev/preview server and writes deterministic
-PNGs to `pm/screenshots/<scene>.png`. These screenshots are committed to `main`
-so the PM can score them against the rubric on the next tick.
+The blue HQ (bottom-left corner of the grid) and red HQ (top-right corner) stop
+reading as wireframe cubes and start reading as **Tron-style buildings**:
+a distinct angular silhouette with chamfered edges / stacked tiers / vertical
+"antenna" spine, strong emissive faction colour (cyan `#00e0ff` and red-orange
+`#ff4a1a`), visible outer outline, and the whole scene picks up a real
+post-processing **bloom pass** so emissive surfaces halo properly on the dark
+charcoal ground.
 
-Without this, the PM is blind and cannot do visual evaluation. No gameplay
-changes are in scope — we only need reproducible scene captures of the current
-visual state, plus test-only hooks that let future scenes exercise game state
-that does not yet exist.
+When this task lands, the `idle-start` screenshot alone should show: two
+recognisable neon buildings at opposite corners of a visibly-Tron grid, with
+bloom halos pulling the eye. It unlocks the `silhouette`, `glow`, and
+`composition` rubric axes in one move and sets the visual language the worker
+/ raider meshes will inherit next.
 
 ## Acceptance
-- Under `tests/e2e/scenes/` there is one Playwright spec per scene named to
-  match `pm/rubric.md` (`idle-start.spec.ts`, `early-economy.spec.ts`,
-  `mid-combat.spec.ts`).
-- Each spec navigates the app, waits for the Three.js canvas to render a stable
-  frame, and captures a PNG to `pm/screenshots/<scene>.png` at a fixed viewport
-  size (default 1280×800 is fine — pick one and stick to it).
-- The scene-runner uses a **test-only window hook** (e.g. `window.__vylux`) that
-  is only installed when a query param like `?e2e=1` is present, so production
-  builds do not leak test affordances. The hook exposes at minimum:
-    - `setScene(name)` — mutates scene state into the requested preset. For
-      scenes whose underlying gameplay doesn't exist yet (workers, raiders),
-      seed placeholder meshes at the correct positions / colours so the scene
-      is *visually* representative even if not functionally real.
-    - `ready()` — resolves when the next frame has rendered.
-- A single command (e.g. `npm run scenes` or `pnpm scenes`) runs all three
-  specs in headed-or-headless mode and updates the PNGs. Document it in
-  `pm/README.md` under a "Refreshing screenshots" section (append, don't rewrite).
-- Committed artefacts: the three PNGs under `pm/screenshots/`, the three specs,
-  the Playwright config update if any, the window hook code, and the npm
-  script wiring. Do **not** commit any screenshots with transparent or zero-byte
-  output — verify they're valid PNGs locally before committing.
-- Running the verify command (lint + type + unit + the new scene specs) passes
-  cleanly on `main` before commit.
+- A real `HQ` mesh class (module — name it sensibly, e.g. `src/hq.ts`) that
+  produces a faction-coloured HQ at a given grid coordinate. Geometry must be
+  more than a plain box:
+    - Multi-tier stacked silhouette (e.g. wide base → narrower mid → thin
+      spire), OR a chamfered prism with beveled edges. Either reads as
+      "building", not "cube".
+    - Visible neon outline along key edges (EdgesGeometry + LineSegments with
+      the emissive faction colour works; pick what looks best).
+    - Emissive material for the body with emissive intensity ≥ 1.0 so it
+      glows under bloom.
+- Blue HQ is placed at grid `(0, 0)`, red HQ at grid `(GRID_SIZE-1, GRID_SIZE-1)`
+  (use the constants from `pm/mvp.md` — `GRID_SIZE = 20`). HQs appear in the
+  real game path, not only via the `?e2e=1` hook.
+- A **bloom post-processing pass** is wired into the main render loop using
+  Three.js `EffectComposer` + `UnrealBloomPass` (or equivalent). Tune so
+  emissive cyan / red-orange haloes are clearly visible but don't blow out
+  the grid lines. Threshold/strength/radius live in one place and are
+  documented with a one-line comment only if the chosen values are
+  non-obvious.
+- The test-only `window.__vylux.setScene` hook is updated so the `idle-start`,
+  `early-economy`, and `mid-combat` scenes use the **real** HQ meshes (not the
+  placeholder boxes from `src/e2e-hook.ts`). Worker/raider placeholders can
+  stay boxes — that's a later task.
+- `pm/screenshots/idle-start.png`, `early-economy.png`, `mid-combat.png` are
+  regenerated via `npm run scenes` and committed. They must visibly show:
+    - Two distinct HQ silhouettes at opposite corners (not cubes).
+    - Bloom halos on the HQs.
+    - The existing grid still renders; the HQs do not obscure it entirely.
+- Verify passes (lint + type + unit + all Playwright projects including
+  `scenes`). Commit to local `main`.
 
 ## Constraints
-- Do not modify `pm/mvp.md`, `pm/persona.md`, `pm/rubric.md`, or
-  `pm/backlog.yaml` — those are PM-owned.
-- Do not alter existing gameplay code paths beyond what's needed to install the
-  `?e2e=1`-gated window hook. Specifically, leave `src/placement.ts`'s
-  state-machine shape intact if it exists.
-- Placeholder meshes for not-yet-implemented units are fine **for screenshots
-  only** — don't hack them into the main render loop permanently. Prefer
-  seeding them through the test hook.
-- Keep the viewport deterministic: same size, same camera, same seed. Flaky
-  screenshots are worse than no screenshots.
-- No `git push`. Commit to local `main` only.
+- Do **not** touch `pm/mvp.md`, `pm/persona.md`, `pm/rubric.md`, or
+  `pm/backlog.yaml` — PM-owned.
+- Keep the placement state-machine shape in `src/placement.ts` intact if it
+  exists; HQs are pre-placed fixtures, not player placements.
+- Leave the `?e2e=1` gate behaviour intact — production builds must still not
+  install the test hook.
+- Do not address energy nodes, HUD, or workers in this task. Scope is HQ
+  silhouette + bloom only. Resist scope creep — even if the fix is one line,
+  defer.
+- No new runtime dependencies unless absolutely necessary. Three.js ships
+  `EffectComposer` + `UnrealBloomPass` in its `examples/jsm/postprocessing/`
+  path — use those.
+- No `git push`.
 
 ## Handoff
 
-- Added `src/e2e-hook.ts`: a `?e2e=1`-gated hook that installs `window.__vylux.setScene(name)` and `window.__vylux.ready()`. Placeholder meshes (HQs, workers, raiders, energy nodes) are seeded directly into a dedicated `e2e-overlays` Three.js group — no placement state mutation.
-- Added three Playwright specs under `tests/e2e/scenes/`: `idle-start.spec.ts`, `early-economy.spec.ts`, `mid-combat.spec.ts`. Each navigates to `/?e2e=1`, calls `setScene`, awaits `ready`, and writes a 1280×800 PNG.
-- Updated `playwright.config.ts` with a `scenes` project matching `scenes/*.spec.ts` against the dev server.
-- Added `npm run scenes` script (`playwright test --project=scenes`) to `package.json`.
-- Appended "Refreshing screenshots" section to `pm/README.md`.
-- All 19 E2E tests pass (16 existing + 3 new scenes); typecheck and unit tests clean.
-
-Commit SHA: 75bfca4
-
-Caveats:
-- HQ meshes are box geometries with neon edge trim — placeholder. Replace with a distinct Tron-style silhouette when the HQ task lands.
-- Energy nodes are spheres with strong green emissive — placeholder. Replace when the energy-node task lands.
-- Workers and raiders are differentiated only by box size — no distinct silhouette yet.
+- `src/hq.ts` — new module: `buildHQ(faction, tileX, tileY)` produces a 4-tier angular silhouette (base → mid → spire → antenna) with emissive body (intensity 1.4) and `EdgesGeometry` neon trim in faction colour; no plain box.
+- `src/scene.ts` — `createScene()` now pre-places blue HQ at (0,0) and red HQ at (19,19) in the real game path (always visible, not e2e-gated). Bloom strength bumped to 1.2 / radius 0.7 so emissive halos are clearly visible on dark background.
+- `src/e2e-hook.ts` — removed placeholder HQ boxes from `seedIdleStart`; HQs come from `createScene()` in all three scenes. Energy-node and worker/raider placeholders unchanged.
+- `src/hq.test.ts` — 9 unit tests covering group name, tier count, Mesh+LineSegments per tier, emissive colour by faction, emissive intensity >= 1.0, and world position correctness.
+- Screenshots `pm/screenshots/{idle-start,early-economy,mid-combat}.png` regenerated — two distinct multi-tier neon silhouettes visible at opposite grid corners with bloom halos.
+- Commit SHA: (see below — filled after git commit)
+- Visual caveat: bloom threshold stays at 0 (any bright pixel halos); energy nodes are still green spheres — palette axis will only fully clear once nodes are reworked in a later task.

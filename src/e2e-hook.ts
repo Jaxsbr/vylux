@@ -10,6 +10,9 @@ import type { SceneBundle } from './scene';
 // State-ownership: this module does NOT write to placement.ts state. It seeds
 // placeholder Three.js meshes directly into a dedicated `e2e-overlays` group
 // on the scene so the main reconcile loop never sees them.
+//
+// HQs are NOT seeded here — they are pre-placed by createScene() using the
+// real HQ mesh class and are always present in the scene.
 
 const BLUE_HEX = 0x00e5ff;
 const RED_HEX = 0xff5a1f;
@@ -82,14 +85,8 @@ function clearGroup(group: THREE.Group): void {
 }
 
 function seedIdleStart(group: THREE.Group): void {
-  // Blue HQ at bottom-left (tile 1,1), Red HQ at top-right (tile 18,18).
-  const blueHq = makeBox(0.9, 1.2, BLUE_HEX, 0.6);
-  blueHq.name = 'e2e-blue-hq';
-  placeAt(blueHq, 1, 1);
-
-  const redHq = makeBox(0.9, 1.2, RED_HEX, 0.6);
-  redHq.name = 'e2e-red-hq';
-  placeAt(redHq, 18, 18);
+  // HQs are already in the scene from createScene() — do not add duplicates here.
+  // Only add energy node placeholders; workers/raiders are later tasks.
 
   // Four energy nodes scattered across the grid.
   const nodePositions: [number, number][] = [
@@ -104,8 +101,6 @@ function seedIdleStart(group: THREE.Group): void {
     placeAt(node, tx, ty);
     group.add(node);
   }
-
-  group.add(blueHq, redHq);
 }
 
 function seedEarlyEconomy(group: THREE.Group): void {

@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { buildGrid, tileToWorld, GRID_CONSTANTS, type GridBundle } from './grid';
 import {
   computeGhostView,
@@ -7,6 +11,7 @@ import {
   type PlacedUnit,
   type PlacementState,
 } from './placement';
+import { buildHQ, type HQBundle } from './hq';
 
 export const SCENE_CONSTANTS = {
   backgroundColor: '#0a0a0a',
@@ -22,6 +27,24 @@ export const SCENE_CONSTANTS = {
   ghostInitialEmissive: 0x00e5ff,
   placedSize: 0.8,
   placedY: 0.5,
+  // Dark mass, neon trim: placed buildings render as a matte near-black body
+  // (identical across factions) with unlit edge lines in the faction hex. The
+  // body's `emissive` field still carries the faction hex as a metadata label
+  // (preserved for debug/Playwright), but `emissiveIntensity: 0` means the
+  // body does not glow — faction identity reads only from the trim.
+  buildingBodyColor: '#0d1117',
+  // UnrealBloomPass params — threshold 0 lets any bright pixel bloom against
+  // the near-black background; strength/radius tuned for soft neon halo on
+  // grid dividers + building trim (see docs/concepts + reference games).
+  bloomStrength: 1.2,
+  bloomRadius: 0.7,
+  // Threshold 0 so any bright pixel blooms (both blue ~0.71 and red ~0.47
+  // luminance trim). Grid dividers stay subtle because their emissive color
+  // is dim grey at low intensity — they bloom softly rather than shouting.
+  bloomThreshold: 0,
+  // HQ tile positions — GRID_SIZE = 20 so corner tiles are 0 and 19.
+  hqBlueTile: 0,
+  hqRedTile: 19,
 } as const;
 
 export type GhostBundle = {
@@ -46,15 +69,18 @@ export type SceneBundle = {
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
+  composer: EffectComposer;
   lights: { ambient: THREE.AmbientLight; directional: THREE.DirectionalLight };
   grid: GridBundle;
   ghost: GhostBundle;
   placed: PlacedBundle;
+  hqs: { blue: HQBundle; red: HQBundle };
   backgroundColor: string;
   cameraRotation: { yawDeg: number; pitchDeg: number };
   lightCounts: { ambient: number; directional: number };
   contextLost: ContextLostRef;
   resize: (width: number, height: number) => void;
+  render: () => void;
   raycastCenter: () => { tileX: number; tileY: number } | null;
   raycastPointer: (clientX: number, clientY: number) => { tileX: number; tileY: number } | null;
   reconcile: (state: PlacementState) => void;
@@ -106,6 +132,9 @@ export function createScene(): SceneBundle {
     ghostY,
     placedSize,
     placedY,
+    buildingBodyColor,
+    hqBlueTile,
+    hqRedTile,
   } = SCENE_CONSTANTS;
 
   const scene = new THREE.Scene();
@@ -132,9 +161,26 @@ export function createScene(): SceneBundle {
   scene.add(placedGroup);
   const placed: PlacedBundle = { group: placedGroup, meshes: [] };
 
+  // Pre-placed HQs — always visible in the real game path (not gated by ?e2e=1).
+  const blueHQ = buildHQ('blue', hqBlueTile, hqBlueTile);
+  const redHQ = buildHQ('red', hqRedTile, hqRedTile);
+  scene.add(blueHQ.group, redHQ.group);
+  const hqs = { blue: blueHQ, red: redHQ };
+
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
+
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    SCENE_CONSTANTS.bloomStrength,
+    SCENE_CONSTANTS.bloomRadius,
+    SCENE_CONSTANTS.bloomThreshold,
+  );
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
 
   const resize = (width: number, height: number): void => {
     const aspect = width / height || 1;
@@ -144,8 +190,14 @@ export function createScene(): SceneBundle {
     camera.bottom = -viewSize;
     camera.updateProjectionMatrix();
     renderer.setSize(width, height);
+    composer.setSize(width, height);
+    bloom.setSize(width, height);
   };
   resize(window.innerWidth, window.innerHeight);
+
+  const render = (): void => {
+    composer.render();
+  };
 
   const raycaster = new THREE.Raycaster();
   const center = new THREE.Vector2(0, 0);
@@ -220,14 +272,26 @@ export function createScene(): SceneBundle {
       const hex = ghostEmissiveFor(unit.type);
       const geometry = new THREE.BoxGeometry(placedSize, placedSize, placedSize);
       const material = new THREE.MeshStandardMaterial({
-        color: hex,
+        color: buildingBodyColor,
         transparent: false,
         opacity: 1,
         emissive: hex,
-        emissiveIntensity: 1,
+        emissiveIntensity: 0,
+        // Push faces slightly back so neon edges (which sit at identical depth
+        // as the faces) consistently win the depth test — without this,
+        // coplanar-edge z-fighting drops random vertical lines per-GPU.
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
       });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = 'placed-unit';
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geometry),
+        new THREE.LineBasicMaterial({ color: hex }),
+      );
+      edges.name = 'placed-unit-trim';
+      mesh.add(edges);
       const world = tileToWorld(unit.tileX, unit.tileY);
       mesh.position.set(world.x, placedY, world.z);
       placed.group.add(mesh);
@@ -241,15 +305,18 @@ export function createScene(): SceneBundle {
     scene,
     camera,
     renderer,
+    composer,
     lights: { ambient, directional },
     grid,
     ghost,
     placed,
+    hqs,
     backgroundColor,
     cameraRotation: { yawDeg: cameraYawDeg, pitchDeg: -cameraElevationDeg },
     lightCounts: { ambient: 1, directional: 1 },
     contextLost,
     resize,
+    render,
     raycastCenter,
     raycastPointer,
     reconcile,
