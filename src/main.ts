@@ -19,6 +19,7 @@ import { tickAi, createAiState } from './ai';
 import { evaluateMatch, type MatchOutcome } from './match';
 import { showMatchOverlay, hideMatchOverlay, isOverlayVisible } from './overlay';
 import { createBuildablesPanel } from './buildables-panel';
+import { createNodeTooltip } from './node-tooltip';
 import {
   createOnboardingCue,
   dismissCue,
@@ -70,6 +71,9 @@ function onBuildableButtonClick(kind: UnitKind): void {
 }
 
 const buildablesPanel = createBuildablesPanel(onBuildableButtonClick);
+
+// Energy node tooltip — shown when cursor is over a tile that hosts a node.
+const nodeTooltip = createNodeTooltip();
 
 // Onboarding cue — shown on fresh match start, dismissed on first HQ click.
 const onboardingCue = createOnboardingCue();
@@ -236,6 +240,9 @@ if (hook) {
     resetMatch();
     hideMatchOverlay();
   };
+  hook.getNodeTooltipVisible = () => nodeTooltip.isVisible();
+  hook.showNodeTooltip = (x: number, y: number) => nodeTooltip.show(x, y);
+  hook.hideNodeTooltip = () => nodeTooltip.hide();
 }
 
 attachE2EHook(bundle, {
@@ -289,6 +296,9 @@ attachE2EHook(bundle, {
     onboardingCueState = dismissCue(onboardingCueState);
     syncOnboardingCue();
   },
+  getNodeTooltipVisible: () => nodeTooltip.isVisible(),
+  showNodeTooltip: (x: number, y: number) => nodeTooltip.show(x, y),
+  hideNodeTooltip: () => nodeTooltip.hide(),
 });
 
 let state: PlacementState = INITIAL_STATE;
@@ -654,6 +664,28 @@ animate();
 
 window.addEventListener('resize', () => {
   bundle.resize(window.innerWidth, window.innerHeight);
+});
+
+// Energy-node hover tooltip — fires on every canvas pointermove.
+// Raycasts to current tile and checks if it hosts a node.
+canvas.addEventListener('pointermove', (event: PointerEvent) => {
+  const tileHit = bundle.raycastPointer(event.clientX, event.clientY);
+  if (tileHit === null) {
+    nodeTooltip.hide();
+    return;
+  }
+  const isNode = bundle.energyNodes.some(
+    (n) => n.tileX === tileHit.tileX && n.tileY === tileHit.tileY,
+  );
+  if (isNode) {
+    nodeTooltip.show(event.clientX, event.clientY);
+  } else {
+    nodeTooltip.hide();
+  }
+});
+
+canvas.addEventListener('pointerleave', () => {
+  nodeTooltip.hide();
 });
 
 canvas.addEventListener('webglcontextlost', (event) => {

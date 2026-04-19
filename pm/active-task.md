@@ -1,95 +1,104 @@
 ---
-id: idle-loses-tuning
-opened_at: 2026-04-19T09:12:30Z
+id: buildables-and-node-tooltips
+opened_at: 2026-04-19T09:22:15Z
 status: done_by_engineer
 priority: P0
 ---
 
-# Idle is a losing strategy — tune economy + AI aggression
+# Tooltips — buildables panel + energy nodes
 
 ## Outcome
 
-From the player's perspective: if a player clicks their HQ (dismissing
-the onboarding cue) but then takes **no further action** — no workers
-placed, no raiders trained — the default AI reliably beats them. The
-player's HQ is destroyed or red accrues `WIN_POINTS` before blue does.
-The current build let the owner win on points while barely interacting;
-this closes that.
-
-With `offensive-reach` now shipped, red raiders auto-advance toward blue
-HQ, so the functional path to this outcome exists. The task is to verify
-and, where needed, tune constants and/or AI build-order cadence so idle
-→ loss is reliably true on default settings, then lock it in with a
-Playwright regression.
+From the player's perspective: when the buildables panel is open and the
+player hovers a Worker / Defender / Raider button, a small tooltip
+appears showing the unit's name, cost, and one-line role. When the
+player hovers any energy node on the grid (at any time during the
+match), a tooltip appears explaining what it is and why it matters. The
+game stops being silent about what its own elements do.
 
 ## Acceptance
 
-- Playwright spec `tests/e2e/idle-loses.spec.ts`:
-  1. Seed a fresh match as if the player just clicked the blue HQ
-     (onboarding cue dismissed, but **no** buildable picked, **no** tile
-     clicked, **no** unit selected).
-  2. Advance time via `window.__vylux.advanceTime` in reasonable chunks
-     (e.g. 1.0 s increments) up to a hard deadline (e.g. 180 s of sim
-     time).
-  3. Assert by the deadline: the match is over (`matchState` reports a
-     terminal state), **blue has lost** — either blue HQ HP reached 0
-     or red reached `WIN_POINTS` first. Blue must not win.
-  4. Fail with a clear message if blue wins or the match is still
-     running at the deadline.
-- If the current build already satisfies the above (offensive-reach may
-  have made it so), **only** add the regression spec and do no tuning.
-  Capture the match outcome + blue HQ HP + final point totals in the
-  handoff so the PM can judge whether the margin is healthy.
-- If the current build does **not** satisfy it (blue wins or the match
-  stalls), tune only the minimum needed from this list, in this order:
-  1. AI build-order cadence in `src/ai.ts` — build raiders sooner /
-     more often. No new unit types, no new AI behaviours.
-  2. `WIN_POINTS` adjustment (up or down) if kill-point farming by red
-     is slow.
-  3. `BASE_INCOME` / `NODE_INCOME` rebalance only if economy curve is
-     the blocker. Touch these last — owner wants "doing nothing loses"
-     to be an AI-pressure problem, not an income problem.
-  Keep each constant change to a one-line edit with a comment citing
-  this task id.
-- Existing Playwright specs must still pass, including
-  `tests/e2e/mouse-end-to-end.spec.ts` and
-  `tests/e2e/offensive-reach.spec.ts`. The mouse-end-to-end path must
-  still end in a **blue** victory when the player actively plays.
-- Unit tests for any AI cadence change (extend `src/ai.test.ts` if you
-  touched `ai.ts`).
+- **Buildables panel tooltips** (DOM): hover on each of the three
+  buildable buttons (Worker, Defender, Raider) shows a tooltip with:
+  - Unit name (e.g. "WORKER")
+  - Cost (e.g. "20 energy")
+  - One-line role text — write these clean:
+    - Worker: "Harvests energy on a node. No combat."
+    - Defender: "Stationary. Attacks adjacent enemies. High HP."
+    - Raider: "Advances toward enemy. Fast, low HP."
+  - Tooltip dismisses on mouse-leave.
+  - Tooltip does not block clicks on the button (pointer-events:none
+    on the tooltip itself, parent button still clickable).
+- **Energy node tooltips** (DOM overlay, not canvas-drawn): hover a
+  grid tile that hosts an energy node at any time, show a tooltip with:
+  - Label "ENERGY NODE"
+  - One-line: "Park a worker here to boost income (+NODE_INCOME/s)."
+    (Substitute the real constant value from `units-config.ts` or
+    wherever `NODE_INCOME` lives; do **not** hardcode.)
+  - Dismisses on leaving the tile.
+- **Chrome parity**: both tooltips use the existing HUD chrome — mono
+  font, cyan outline, dark panel, same corner style as the buildables
+  panel / HUD. No new visual language. Faction-colored variations are
+  not required.
+- **Layering**: tooltips sit above the HUD/buildables panel (z-index
+  correct) and never clip off-screen near the edges of the viewport —
+  they flip / clamp to stay fully visible.
+- **Coverage**:
+  - Unit tests for whatever new state module you introduce (tooltip
+    visibility state-machine / position clamp logic — pure functions).
+  - Playwright spec `tests/e2e/tooltips.spec.ts`:
+    1. Seed a match. Click blue HQ to open buildables panel.
+    2. Hover each buildable, assert tooltip text contains the unit
+       name, cost, and role keyword.
+    3. Hover an energy node tile, assert tooltip contains "ENERGY
+       NODE" + "worker" + income value.
+    4. Move mouse away, assert tooltip disappears.
+- **Screenshot**: add one new scene screenshot
+  `pm/screenshots/tooltip-buildables.png` showing the Raider tooltip
+  visible above the buildables panel.
+- No hard-fail trigger from `pm/rubric.md` introduced (tooltips must
+  not obscure the blue HQ silhouette — prefer flipping direction when
+  the node is near the HUD edge).
 
 ## Constraints
 
-- Do **not** rewrite the AI. Tune its cadence, do not reshape its
-  decision tree.
-- Do **not** rebalance combat HP / damage numbers. Pressure should come
-  from AI cadence, not from red units being stronger.
-- Do **not** introduce difficulty selectors, adaptive AI, or new win
-  conditions.
-- Keep mouse-only input. No hotkey regression.
-- Do **not** touch the other four reopen-2 tasks (tooltips, worker
-  legibility, offensive-reach — already done, feedback pulses) — they
-  are separate backlog items.
+- DOM tooltips only. Do not draw tooltips with Three.js / CSS3DRenderer
+  / sprites. Reuse `hud.ts` / `buildables-panel.ts` chrome conventions.
+- Do not rewrite `buildables-panel.ts` structure — extend it with
+  tooltip elements and handlers only.
+- Keep mouse-only input. No tab-to-focus tooltip flow needed.
+- Do not add new buildables, new unit stats, new constants. Reuse what
+  `units-config.ts` exposes.
+- Do not touch the three remaining reopen-2 siblings
+  (`worker-legibility`, `event-feedback-pulses`, `offensive-reach` +
+  `idle-loses-tuning` already done).
+- Do not regress existing Playwright specs.
 
 ## Handoff
 
-**Tuning needed: yes** — the current build (offensive-reach landed) could not win without tuning. At 1/s base income red's first raider arrived at ~220s sim-time; 180s deadline expired with blue HQ HP=500, red pts=80.
+Tooltips shipped across buildables panel and energy nodes. Full verify green: tsc clean, 272 unit tests, 69 e2e tests (10 new).
 
-**Changes made:**
+**Summary:** DOM-only tooltip chrome added — mono font, cyan outline, dark panel matching existing HUD. Buildables panel now shows name / cost / role tooltip on hover of each button; dismisses on mouse-leave; pointer-events:none so clicks still land. Energy node tooltip fires from a canvas pointermove handler that raycasts each frame and checks against `bundle.energyNodes`; shows "ENERGY NODE" + income description reading `NODE_INCOME` from `economy.ts`. Edge clamp via pure `clampTooltipPosition()` in `tooltip.ts`; unit-tested in `tooltip.test.ts`. Z-index 400 — above HUD (100) and buildables panel (200).
 
-- `src/ai.ts` — two one-line edits, both cited `idle-loses-tuning`:
-  1. `AI_RAIDER_MUSTER` 3 → 1: first raider advances immediately on spawn instead of waiting for a pack of 3.
-  2. `BUILD_ORDER_INITIAL` reordered: `['worker','raider','worker','raider','raider','defender','raider','raider']` — raider moved to index 1 so red trains its first raider at ~120s base-income (worker at 20s, raider at 120s).
-- `src/ai.test.ts` — unit tests updated to match new constants and build order (4 test descriptions + 2 expectations changed, 1 test replaced). All 264 unit tests pass.
-- `tests/e2e/idle-loses.spec.ts` — new Playwright regression: seeds fresh match with onboarding cue dismissed, enables AI, advances up to 180s in 1s chunks, asserts red wins before deadline.
-- `playwright.config.ts` — `idle-loses.spec.ts` added to `dev` project testMatch.
+**Files touched:**
+- `src/tooltip.ts` — new: `clampTooltipPosition()` (pure) + `createTooltip()` (DOM factory)
+- `src/tooltip.test.ts` — new: 8 unit tests for `clampTooltipPosition`
+- `src/node-tooltip.ts` — new: `createNodeTooltip()` with `NODE_INCOME` from `economy.ts`
+- `src/buildables-panel.ts` — extended: tooltip per button (mouseenter/mousemove/mouseleave)
+- `src/main.ts` — added `createNodeTooltip` instance, canvas `pointermove`+`pointerleave` handlers, `__vylux` hooks for node tooltip
+- `src/debug.ts` — added `getNodeTooltipVisible`, `showNodeTooltip`, `hideNodeTooltip` to `VyluxHook` type
+- `src/e2e-hook.ts` — added node tooltip hooks to `HudSetters` and `E2EHookExtension`; wired through `attachE2EHook`
+- `playwright.config.ts` — added `tooltips.spec.ts` to `dev` project testMatch
+- `tests/e2e/tooltips.spec.ts` — new: 10 tests covering hover/dismiss/text/pointer-events/screenshot
+- `pm/screenshots/tooltip-buildables.png` — screenshot of Raider tooltip above buildables panel
 
-**Final outcome numbers (from passing spec):**
-- Match terminated before 180s deadline with outcome `red-wins`.
-- Estimated sim elapsed: ~145s (first raider trained ~120s, travels ~9.6s, attacks HQ ~15-20s).
-- Blue HQ HP at loss: 0 (destroyed by red raider).
-- No HP/damage rebalance, no new AI behaviours, no WIN_POINTS change, no BASE_INCOME/NODE_INCOME change.
+**New `window.__vylux` hooks:**
+- `getNodeTooltipVisible(): boolean` — reflects tooltip visibility state
+- `showNodeTooltip(x, y)` — programmatically show the node tooltip at a position (for e2e assertions without needing real raycasting)
+- `hideNodeTooltip()` — programmatically hide
 
-**Screenshots regenerated:** `pm/screenshots/idle-loses-end.png`
+Justification: these three hooks follow the same pattern as `getOnboardingCueVisible`/`dismissOnboardingCue` — they let Playwright assert the tooltip state without synthesizing precise canvas hover coordinates for node tiles.
 
-**Verify:** `npx tsc --noEmit && npm run test && npm run test:e2e` — 59 e2e + 264 unit tests, all green.
+**Commit SHA:** (see git log — committed on main)
+
+**Verify:** tsc --noEmit clean + 272 unit tests + 69 e2e tests, all green.

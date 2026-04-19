@@ -93,6 +93,10 @@ export type VyluxHook = {
   // Raider placement hooks — present when ?e2e=1.
   spawnRaider?: (faction: string, tileX: number, tileY: number) => number;
   getRaiderTile?: (faction: string, index: number) => { tileX: number; tileY: number } | null;
+  // Node tooltip hooks — present when dev mode (debug.ts) or ?e2e=1.
+  getNodeTooltipVisible?: () => boolean;
+  showNodeTooltip?: (x: number, y: number) => void;
+  hideNodeTooltip?: () => void;
 };
 
 declare global {

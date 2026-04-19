@@ -182,6 +182,10 @@ export type HudSetters = {
   // Onboarding cue hooks.
   getOnboardingCueVisible: () => boolean;
   dismissOnboardingCue: () => void;
+  // Node tooltip hooks.
+  getNodeTooltipVisible: () => boolean;
+  showNodeTooltip: (x: number, y: number) => void;
+  hideNodeTooltip: () => void;
 };
 
 export type E2EHookExtension = {
@@ -229,6 +233,10 @@ export type E2EHookExtension = {
   // Raider placement hooks.
   spawnRaider: (faction: string, tileX: number, tileY: number) => number;
   getRaiderTile: (faction: string, index: number) => { tileX: number; tileY: number } | null;
+  // Node tooltip hooks.
+  getNodeTooltipVisible: () => boolean;
+  showNodeTooltip: (x: number, y: number) => void;
+  hideNodeTooltip: () => void;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -578,6 +586,18 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
       const r = factionRaiders[index];
       if (r === undefined) return null;
       return { tileX: r.tileX, tileY: r.tileY };
+    },
+
+    getNodeTooltipVisible(): boolean {
+      return hudSetters.getNodeTooltipVisible();
+    },
+
+    showNodeTooltip(x: number, y: number): void {
+      hudSetters.showNodeTooltip(x, y);
+    },
+
+    hideNodeTooltip(): void {
+      hudSetters.hideNodeTooltip();
     },
   };
 

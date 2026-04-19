@@ -4,6 +4,7 @@
 // No imports from scene.ts, input.ts, or placement.ts.
 
 import { UNIT_COSTS, type UnitKind } from './units-config';
+import { createTooltip } from './tooltip';
 
 const FONT_STACK = 'ui-monospace, "JetBrains Mono", "Fira Code", Menlo, monospace';
 const BG = 'rgba(10, 12, 16, 0.90)';
@@ -12,10 +13,16 @@ const BLUE_TEXT = '#00e0ff';
 const DIM_TEXT = 'rgba(80, 120, 130, 0.7)';
 const BLUE_SHADOW = '0 0 8px rgba(0, 224, 255, 0.5), 0 0 20px rgba(0, 224, 255, 0.2)';
 
-const BUILDABLE_DEFS: { kind: UnitKind; label: string }[] = [
-  { kind: 'worker', label: 'WORKER' },
-  { kind: 'defender', label: 'DEFENDER' },
-  { kind: 'raider', label: 'RAIDER' },
+type BuildableDef = {
+  kind: UnitKind;
+  label: string;
+  role: string;
+};
+
+const BUILDABLE_DEFS: BuildableDef[] = [
+  { kind: 'worker', label: 'WORKER', role: 'Harvests energy on a node. No combat.' },
+  { kind: 'defender', label: 'DEFENDER', role: 'Stationary. Attacks adjacent enemies. High HP.' },
+  { kind: 'raider', label: 'RAIDER', role: 'Advances toward enemy. Fast, low HP.' },
 ];
 
 export type BuildablesPanelHandles = {
@@ -94,7 +101,7 @@ export function createBuildablesPanel(
   // Buttons
   const buttons: Map<UnitKind, HTMLButtonElement> = new Map();
 
-  for (const { kind, label } of BUILDABLE_DEFS) {
+  for (const { kind, label, role } of BUILDABLE_DEFS) {
     const cost = UNIT_COSTS[kind];
 
     const btn = document.createElement('button');
@@ -135,6 +142,51 @@ export function createBuildablesPanel(
 
     btn.addEventListener('click', () => {
       onBuildableClick(kind);
+    });
+
+    // Tooltip — shown on hover, pointer-events: none so clicks still land on button.
+    const tipContent = document.createElement('div');
+    const tipName = document.createElement('div');
+    tipName.textContent = label;
+    Object.assign(tipName.style, {
+      color: BLUE_TEXT,
+      fontSize: '11px',
+      letterSpacing: '0.12em',
+      fontFamily: FONT_STACK,
+      marginBottom: '3px',
+      fontWeight: 'bold',
+    });
+    const tipCost = document.createElement('div');
+    tipCost.textContent = `${cost} energy`;
+    Object.assign(tipCost.style, {
+      color: 'rgba(0, 224, 255, 0.65)',
+      fontSize: '10px',
+      fontFamily: FONT_STACK,
+      marginBottom: '4px',
+    });
+    const tipRole = document.createElement('div');
+    tipRole.id = `vylux-tooltip-role-${kind}`;
+    tipRole.textContent = role;
+    Object.assign(tipRole.style, {
+      color: 'rgba(180, 220, 230, 0.85)',
+      fontSize: '10px',
+      fontFamily: FONT_STACK,
+    });
+    tipContent.appendChild(tipName);
+    tipContent.appendChild(tipCost);
+    tipContent.appendChild(tipRole);
+
+    const tip = createTooltip(tipContent);
+    tip.el.id = `vylux-buildable-tooltip-${kind}`;
+
+    btn.addEventListener('mouseenter', (e: MouseEvent) => {
+      tip.show(e.clientX, e.clientY);
+    });
+    btn.addEventListener('mousemove', (e: MouseEvent) => {
+      tip.show(e.clientX, e.clientY);
+    });
+    btn.addEventListener('mouseleave', () => {
+      tip.hide();
     });
 
     panel.appendChild(btn);
