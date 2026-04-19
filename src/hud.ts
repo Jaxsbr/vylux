@@ -8,6 +8,27 @@ import type { FactionPoints } from './points';
 const FONT_STACK = 'ui-monospace, "JetBrains Mono", "Fira Code", Menlo, monospace';
 const BG = 'rgba(10, 12, 16, 0.85)';
 
+const POINT_FLASH_CLASS = 'vylux-point-flash';
+const POINT_FLASH_MS = 180;
+
+function injectPointFlashStyle(): void {
+  if (document.getElementById('vylux-point-flash-style')) return;
+  const style = document.createElement('style');
+  style.id = 'vylux-point-flash-style';
+  style.textContent = `
+@keyframes vylux-point-flash-anim {
+  0%   { background: rgba(255,255,255,0.22); }
+  30%  { background: rgba(255,255,255,0.18); }
+  100% { background: transparent; }
+}
+.${POINT_FLASH_CLASS} {
+  animation: vylux-point-flash-anim ${POINT_FLASH_MS}ms ease-out forwards;
+  border-radius: 2px;
+}
+`;
+  document.head.appendChild(style);
+}
+
 const BLUE_BORDER = '#00e0ff';
 const RED_BORDER = '#ff4a1a';
 
@@ -77,13 +98,25 @@ function makeSectionLabel(text: string): HTMLDivElement {
 export type HudHandles = {
   updateEnergy: (energy: FactionEnergy) => void;
   updatePoints: (points: FactionPoints) => void;
+  /** Returns true if the given faction's points value element has the flash class applied. */
+  hasPointFlashClass: (faction: 'blue' | 'red') => boolean;
 };
 
 /**
  * Mount the HUD overlay into document.body.
  * Returns handles to push new values each frame.
  */
+function triggerPointFlash(el: HTMLElement): void {
+  // Remove and re-add class to restart animation if already playing.
+  el.classList.remove(POINT_FLASH_CLASS);
+  // Force reflow so removing and re-adding takes effect.
+  void (el.offsetWidth);
+  el.classList.add(POINT_FLASH_CLASS);
+}
+
 export function createHud(): HudHandles {
+  injectPointFlashStyle();
+
   // Root overlay — full-screen, pointer passthrough.
   const root = document.createElement('div');
   root.id = 'vylux-hud';
@@ -155,14 +188,31 @@ export function createHud(): HudHandles {
 
   document.body.appendChild(root);
 
+  let prevBluePoints = -1;
+  let prevRedPoints = -1;
+
   return {
     updateEnergy(energy: FactionEnergy): void {
       blueEnergyValue.textContent = String(Math.floor(energy.blue));
       redEnergyValue.textContent = String(Math.floor(energy.red));
     },
     updatePoints(points: FactionPoints): void {
-      bluePointsValue.textContent = String(Math.floor(points.blue));
-      redPointsValue.textContent = String(Math.floor(points.red));
+      const flooredBlue = Math.floor(points.blue);
+      const flooredRed = Math.floor(points.red);
+      if (prevBluePoints !== -1 && flooredBlue !== prevBluePoints) {
+        triggerPointFlash(bluePointsValue);
+      }
+      if (prevRedPoints !== -1 && flooredRed !== prevRedPoints) {
+        triggerPointFlash(redPointsValue);
+      }
+      bluePointsValue.textContent = String(flooredBlue);
+      redPointsValue.textContent = String(flooredRed);
+      prevBluePoints = flooredBlue;
+      prevRedPoints = flooredRed;
+    },
+    hasPointFlashClass(faction: 'blue' | 'red'): boolean {
+      const el = faction === 'blue' ? bluePointsValue : redPointsValue;
+      return el.classList.contains(POINT_FLASH_CLASS);
     },
   };
 }

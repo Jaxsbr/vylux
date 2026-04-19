@@ -14,6 +14,9 @@ export type CombatUnit = {
   takeDamage: (amount: number) => { died: boolean; damageDealt: number };
   dispose: (scene: THREE.Scene) => void;
   mesh: { position: THREE.Vector3 };
+  /** Optional death-pulse support — present on defender/raider bundles. */
+  triggerDeathPulse?: () => void;
+  readonly deathPulseActive?: boolean;
 };
 
 export type CombatWorker = {
@@ -25,6 +28,9 @@ export type CombatWorker = {
   takeDamage: (amount: number) => { died: boolean; damageDealt: number };
   dispose: (scene: THREE.Scene) => void;
   mesh: { position: THREE.Vector3 };
+  /** Optional death-pulse support — present on worker bundles. */
+  triggerDeathPulse?: () => void;
+  readonly deathPulseActive?: boolean;
 };
 
 export type CombatHq = {
@@ -275,18 +281,31 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
     raider.attackCooldownRemaining = stats.attackCooldown;
   }
 
-  // Remove dead units — splice in reverse to keep indices valid.
-  function removeDead<T extends { hp: number; dispose: (scene: THREE.Scene) => void }>(
-    arr: T[],
-  ): void {
+  // Remove dead units — trigger death pulse if available, defer disposal until pulse completes.
+  type DeadUnit = {
+    hp: number;
+    dispose: (scene: THREE.Scene) => void;
+    triggerDeathPulse?: () => void;
+    readonly deathPulseActive?: boolean;
+  };
+  function removeDead<T extends DeadUnit>(arr: T[]): void {
     for (let i = arr.length - 1; i >= 0; i--) {
-      if ((arr[i] as T).hp <= 0) {
-        arr[i]!.dispose(scene);
-        arr.splice(i, 1);
+      const unit = arr[i] as T;
+      if (unit.hp <= 0) {
+        if (unit.triggerDeathPulse !== undefined && unit.deathPulseActive === false) {
+          // Pulse not yet triggered — fire it now and leave the unit in the array.
+          unit.triggerDeathPulse();
+        } else if (unit.deathPulseActive === true) {
+          // Pulse is running — keep the unit in the array until it finishes.
+        } else {
+          // No pulse support or pulse already done — dispose immediately.
+          unit.dispose(scene);
+          arr.splice(i, 1);
+        }
       }
     }
   }
-  removeDead(workers as unknown as { hp: number; dispose: (scene: THREE.Scene) => void }[]);
+  removeDead(workers as unknown as DeadUnit[]);
   removeDead(defenders);
   removeDead(raiders);
 }

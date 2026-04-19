@@ -13,7 +13,7 @@ import type { UnitKind } from './units-config';
 import { selectHq as selectionSelectHq, selectWorker as selectionSelectWorker, clearSelection, getSelectedHq } from './selection';
 import { tickCombat, type PointsLedger } from './combat';
 import { advanceRaidersFaction } from './advance';
-import { tickNodePoints } from './node-points';
+import { tickNodePoints, computeNodeHolder } from './node-points';
 import { tickAi, type AiState } from './ai';
 import { evaluateMatch } from './match';
 import { showMatchOverlay, isOverlayVisible } from './overlay';
@@ -187,6 +187,8 @@ export type HudSetters = {
   getNodeTooltipVisible: () => boolean;
   showNodeTooltip: (x: number, y: number) => void;
   hideNodeTooltip: () => void;
+  // HUD flash detection.
+  hasPointFlashClass: (faction: 'blue' | 'red') => boolean;
 };
 
 export type E2EHookExtension = {
@@ -241,6 +243,12 @@ export type E2EHookExtension = {
   // Harvest pulse hooks — index is into bundle.workers (all factions, spawn order).
   getWorkerPulseElapsed: (index: number) => number;
   getWorkerAccentIntensity: (index: number) => number;
+  // Event feedback pulse hooks.
+  getUnitPlacementPulseElapsed: (query: { kind: string; faction: string; index: number }) => number;
+  getUnitDeathPulseActive: (query: { kind: string; faction: string; index: number }) => boolean;
+  getNodeCapturePulseElapsed: (nodeIndex: number) => number;
+  getPointFlashClass: (faction: string) => boolean;
+  killUnit: (query: { kind: string; faction: string; index: number }) => void;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -443,6 +451,43 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
         for (const d of bundle.defenders) d.tick(dt);
         for (const r of bundle.raiders) r.tick(dt);
 
+        // Tick placement pulses.
+        for (const w of bundle.workers) w.tickPlacementPulse(dt);
+        for (const d of bundle.defenders) d.tickPlacementPulse(dt);
+        for (const r of bundle.raiders) r.tickPlacementPulse(dt);
+
+        // Tick death pulses — defer dispose until pulse completes.
+        for (let i = bundle.workers.length - 1; i >= 0; i--) {
+          const w = bundle.workers[i]!;
+          if (w.deathPulseActive) {
+            const stillActive = w.tickDeathPulse(dt);
+            if (!stillActive) {
+              w.dispose(bundle.scene);
+              bundle.workers.splice(i, 1);
+            }
+          }
+        }
+        for (let i = bundle.defenders.length - 1; i >= 0; i--) {
+          const d = bundle.defenders[i]!;
+          if (d.deathPulseActive) {
+            const stillActive = d.tickDeathPulse(dt);
+            if (!stillActive) {
+              d.dispose(bundle.scene);
+              bundle.defenders.splice(i, 1);
+            }
+          }
+        }
+        for (let i = bundle.raiders.length - 1; i >= 0; i--) {
+          const r = bundle.raiders[i]!;
+          if (r.deathPulseActive) {
+            const stillActive = r.tickDeathPulse(dt);
+            if (!stillActive) {
+              r.dispose(bundle.scene);
+              bundle.raiders.splice(i, 1);
+            }
+          }
+        }
+
         // Harvest pulse — mirror of main.ts animate loop logic.
         for (const w of bundle.workers) {
           const onNode = bundle.energyNodes.some(
@@ -496,12 +541,29 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           ...bundle.defenders,
           ...bundle.raiders,
         ];
+        // Snapshot holders before tickNodePoints updates node.lastHolder.
+        const e2eNodeHolderPrev = new Map<object, FactionHold>();
+        for (const node of bundle.energyNodes) {
+          e2eNodeHolderPrev.set(node, node.lastHolder);
+        }
+
         tickNodePoints({
           nodes: bundle.energyNodes,
           units: allUnits,
           pointsLedger: hudSetters.pointsLedger,
           dt,
         });
+
+        // Node glow + capture pulse on ownership flip.
+        for (const node of bundle.energyNodes) {
+          const newHolder = computeNodeHolder(node, allUnits);
+          node.setFactionHold(newHolder);
+          const prev = e2eNodeHolderPrev.get(node) ?? null;
+          if (newHolder !== prev) {
+            node.triggerCapturePulse();
+          }
+          node.tickCapturePulse(dt);
+        }
 
         // Evaluate match end — mirrors main.ts animate loop.
         const outcome = evaluateMatch({
@@ -655,6 +717,82 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
       const w = bundle.workers[index];
       if (w === undefined) return 0;
       return w.accentEmissiveIntensity;
+    },
+
+    getUnitPlacementPulseElapsed(query: { kind: string; faction: string; index: number }): number {
+      const faction = query.faction === 'red' ? 'red' : 'blue';
+      if (query.kind === 'worker') {
+        const arr = bundle.workers.filter((u) => u.faction === faction);
+        const u = arr[query.index];
+        return u === undefined ? -1 : u.placementPulseElapsed;
+      }
+      if (query.kind === 'defender') {
+        const arr = bundle.defenders.filter((u) => u.faction === faction);
+        const u = arr[query.index];
+        return u === undefined ? -1 : u.placementPulseElapsed;
+      }
+      if (query.kind === 'raider') {
+        const arr = bundle.raiders.filter((u) => u.faction === faction);
+        const u = arr[query.index];
+        return u === undefined ? -1 : u.placementPulseElapsed;
+      }
+      return -1;
+    },
+
+    getUnitDeathPulseActive(query: { kind: string; faction: string; index: number }): boolean {
+      const faction = query.faction === 'red' ? 'red' : 'blue';
+      if (query.kind === 'worker') {
+        const arr = bundle.workers.filter((u) => u.faction === faction);
+        const u = arr[query.index];
+        return u !== undefined && u.deathPulseActive;
+      }
+      if (query.kind === 'defender') {
+        const arr = bundle.defenders.filter((u) => u.faction === faction);
+        const u = arr[query.index];
+        return u !== undefined && u.deathPulseActive;
+      }
+      if (query.kind === 'raider') {
+        const arr = bundle.raiders.filter((u) => u.faction === faction);
+        const u = arr[query.index];
+        return u !== undefined && u.deathPulseActive;
+      }
+      return false;
+    },
+
+    getNodeCapturePulseElapsed(nodeIndex: number): number {
+      const node = bundle.energyNodes[nodeIndex];
+      return node === undefined ? -1 : node.capturePulseElapsed;
+    },
+
+    getPointFlashClass(faction: string): boolean {
+      const f = faction === 'red' ? 'red' : 'blue';
+      return hudSetters.hasPointFlashClass(f);
+    },
+
+    killUnit(query: { kind: string; faction: string; index: number }): void {
+      const faction = query.faction === 'red' ? 'red' : 'blue';
+      if (query.kind === 'worker') {
+        const arr = bundle.workers.filter((u) => u.faction === faction);
+        const u = arr[query.index];
+        if (u !== undefined) {
+          u.hp = 0;
+          u.hpBar.update(0, u.maxHp);
+        }
+      } else if (query.kind === 'defender') {
+        const arr = bundle.defenders.filter((u) => u.faction === faction);
+        const u = arr[query.index];
+        if (u !== undefined) {
+          u.hp = 0;
+          u.hpBar.update(0, u.maxHp);
+        }
+      } else if (query.kind === 'raider') {
+        const arr = bundle.raiders.filter((u) => u.faction === faction);
+        const u = arr[query.index];
+        if (u !== undefined) {
+          u.hp = 0;
+          u.hpBar.update(0, u.maxHp);
+        }
+      }
     },
   };
 

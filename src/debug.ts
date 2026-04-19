@@ -100,6 +100,12 @@ export type VyluxHook = {
   // Harvest pulse hooks — present when ?e2e=1.
   getWorkerPulseElapsed?: (index: number) => number;
   getWorkerAccentIntensity?: (index: number) => number;
+  // Event feedback pulse hooks — present when ?e2e=1.
+  getUnitPlacementPulseElapsed?: (query: { kind: string; faction: string; index: number }) => number;
+  getUnitDeathPulseActive?: (query: { kind: string; faction: string; index: number }) => boolean;
+  getNodeCapturePulseElapsed?: (nodeIndex: number) => number;
+  getPointFlashClass?: (faction: string) => boolean;
+  killUnit?: (query: { kind: string; faction: string; index: number }) => void;
 };
 
 declare global {

@@ -11,6 +11,9 @@ function makeNode(tileX: number, tileY: number): EnergyNodeBundle {
     tileY,
     pointAccumulator: 0,
     lastHolder: null,
+    triggerCapturePulse: () => undefined,
+    tickCapturePulse: () => undefined,
+    get capturePulseElapsed() { return -1; },
   };
 }
 

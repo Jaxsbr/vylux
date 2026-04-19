@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { tileToWorld } from './grid';
+import {
+  eventPulseIntensity,
+  CAPTURE_PULSE_DURATION,
+  CAPTURE_PULSE_PEAK_DELTA,
+} from './event-pulse';
 
 // Neutral rim: pale-cyan — reads as part of the Tron circuit palette while
 // staying clearly distinct from the faction cyan (#00e0ff) and red (#ff4a1a).
@@ -34,6 +39,18 @@ export type EnergyNodeBundle = {
   pointAccumulator: number;
   /** Last known holder — used to detect holder changes and reset the accumulator. */
   lastHolder: FactionHold;
+  /**
+   * Fire a capture pulse on the node rim. Call when ownership flips.
+   */
+  triggerCapturePulse: () => void;
+  /**
+   * Advance the capture-pulse animation. Call every frame with the frame delta.
+   */
+  tickCapturePulse: (dt: number) => void;
+  /**
+   * Read-only: seconds elapsed since capture pulse fired, or -1 when not active.
+   */
+  readonly capturePulseElapsed: number;
 };
 
 const NODE_CONSTANTS = {
@@ -103,5 +120,34 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
     rimMat.emissive.set(rimColor);
   };
 
-  return { group, setFactionHold, tileX, tileY, pointAccumulator: 0, lastHolder: null };
+  let capturePulseElapsedInternal = -1;
+
+  return {
+    group,
+    setFactionHold,
+    tileX,
+    tileY,
+    pointAccumulator: 0,
+    lastHolder: null,
+    get capturePulseElapsed(): number { return capturePulseElapsedInternal; },
+
+    triggerCapturePulse(): void {
+      capturePulseElapsedInternal = 0;
+    },
+
+    tickCapturePulse(dt: number): void {
+      if (capturePulseElapsedInternal < 0) return;
+      capturePulseElapsedInternal += dt;
+      rimMat.emissiveIntensity = eventPulseIntensity(
+        NODE_CONSTANTS.rimEmissiveIntensity,
+        CAPTURE_PULSE_PEAK_DELTA,
+        capturePulseElapsedInternal,
+        CAPTURE_PULSE_DURATION,
+      );
+      if (capturePulseElapsedInternal >= CAPTURE_PULSE_DURATION) {
+        capturePulseElapsedInternal = -1;
+        rimMat.emissiveIntensity = NODE_CONSTANTS.rimEmissiveIntensity;
+      }
+    },
+  };
 }

@@ -8,6 +8,14 @@ import {
   PULSE_DURATION,
   PULSE_PEAK_DELTA,
 } from './worker-harvest-pulse';
+import {
+  placementPulseScale,
+  PLACEMENT_PULSE_DURATION,
+  PLACEMENT_PULSE_SCALE_START,
+  eventPulseIntensity,
+  DEATH_PULSE_DURATION,
+  DEATH_PULSE_PEAK_DELTA,
+} from './event-pulse';
 
 // Convert a floating-point tile coordinate to world position without integer assertion.
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
@@ -98,6 +106,34 @@ export type WorkerBundle = {
    * Exposed for e2e assertions without importing Three.js.
    */
   readonly accentEmissiveIntensity: number;
+  /**
+   * Fire the placement scale-in pulse. Call once when the unit is first spawned
+   * (not on initial scene load — only on trainUnit).
+   */
+  triggerPlacementPulse: () => void;
+  /**
+   * Advance the placement-pulse animation. Call every frame with the frame delta.
+   */
+  tickPlacementPulse: (dt: number) => void;
+  /**
+   * Read-only: seconds elapsed since placement pulse fired, or -1 when not active.
+   */
+  readonly placementPulseElapsed: number;
+  /**
+   * Fire the death emissive spike. Call when hp <= 0, BEFORE dispose.
+   * The unit will not call dispose itself — the caller must tick tickDeathPulse
+   * and dispose when deathPulseActive returns false.
+   */
+  triggerDeathPulse: () => void;
+  /**
+   * Advance the death-pulse animation. Returns true while pulse is active, false
+   * when the pulse has finished and the unit is ready to be disposed.
+   */
+  tickDeathPulse: (dt: number) => boolean;
+  /**
+   * Read-only: true while death pulse is running.
+   */
+  readonly deathPulseActive: boolean;
 };
 
 function clampTile(v: number): number {
@@ -226,6 +262,13 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   // Harvest pulse state — -1 means no active pulse.
   let pulseElapsedInternal = -1;
 
+  // Placement pulse state.
+  let placementPulseElapsedInternal = -1;
+
+  // Death pulse state.
+  let deathPulseElapsedInternal = -1;
+  let deathPulseActiveInternal = false;
+
   const maxHp = UNIT_STATS.worker.maxHp;
 
   const bundle: WorkerBundle = {
@@ -241,6 +284,8 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
     hpBar,
     get pulseElapsed(): number { return pulseElapsedInternal; },
     get accentEmissiveIntensity(): number { return accentMat.emissiveIntensity; },
+    get placementPulseElapsed(): number { return placementPulseElapsedInternal; },
+    get deathPulseActive(): boolean { return deathPulseActiveInternal; },
 
     takeDamage(amount: number): { died: boolean; damageDealt: number } {
       const before = bundle.hp;
@@ -336,6 +381,46 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
         pulseElapsedInternal = -1;
         accentMat.emissiveIntensity = WORKER_CONSTANTS.accentEmissiveIntensity;
       }
+    },
+
+    triggerPlacementPulse(): void {
+      placementPulseElapsedInternal = 0;
+      // Set initial scale to scaleStart immediately.
+      const s = PLACEMENT_PULSE_SCALE_START;
+      group.scale.set(s, s, s);
+    },
+
+    tickPlacementPulse(dt: number): void {
+      if (placementPulseElapsedInternal < 0) return;
+      placementPulseElapsedInternal += dt;
+      const s = placementPulseScale(placementPulseElapsedInternal, PLACEMENT_PULSE_DURATION, PLACEMENT_PULSE_SCALE_START);
+      group.scale.set(s, s, s);
+      if (placementPulseElapsedInternal >= PLACEMENT_PULSE_DURATION) {
+        placementPulseElapsedInternal = -1;
+        group.scale.set(1, 1, 1);
+      }
+    },
+
+    triggerDeathPulse(): void {
+      deathPulseElapsedInternal = 0;
+      deathPulseActiveInternal = true;
+    },
+
+    tickDeathPulse(dt: number): boolean {
+      if (!deathPulseActiveInternal) return false;
+      deathPulseElapsedInternal += dt;
+      accentMat.emissiveIntensity = eventPulseIntensity(
+        WORKER_CONSTANTS.accentEmissiveIntensity,
+        DEATH_PULSE_PEAK_DELTA,
+        deathPulseElapsedInternal,
+        DEATH_PULSE_DURATION,
+      );
+      if (deathPulseElapsedInternal >= DEATH_PULSE_DURATION) {
+        deathPulseActiveInternal = false;
+        accentMat.emissiveIntensity = WORKER_CONSTANTS.accentEmissiveIntensity;
+        return false;
+      }
+      return true;
     },
   };
 

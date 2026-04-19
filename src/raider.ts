@@ -3,6 +3,14 @@ import type { FactionId } from './placement';
 import { GRID_CONSTANTS } from './grid';
 import { UNIT_STATS } from './units-config';
 import { buildHpBar, type HpBar } from './hp-bar';
+import {
+  placementPulseScale,
+  PLACEMENT_PULSE_DURATION,
+  PLACEMENT_PULSE_SCALE_START,
+  eventPulseIntensity,
+  DEATH_PULSE_DURATION,
+  DEATH_PULSE_PEAK_DELTA,
+} from './event-pulse';
 
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
   const { tileSize, worldExtent } = GRID_CONSTANTS;
@@ -62,13 +70,21 @@ export type RaiderBundle = {
   attackCooldownRemaining: number;
   takeDamage: (amount: number) => { died: boolean; damageDealt: number };
   dispose: (scene: THREE.Scene) => void;
+  triggerPlacementPulse: () => void;
+  tickPlacementPulse: (dt: number) => void;
+  readonly placementPulseElapsed: number;
+  triggerDeathPulse: () => void;
+  tickDeathPulse: (dt: number) => boolean;
+  readonly deathPulseActive: boolean;
 };
 
 function clampTile(v: number): number {
   return Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, Math.round(v)));
 }
 
-function buildRaiderMesh(emissiveHex: number): THREE.Group {
+type RaiderMeshResult = { group: THREE.Group; tipMat: THREE.MeshStandardMaterial };
+
+function buildRaiderMesh(emissiveHex: number): RaiderMeshResult {
   const group = new THREE.Group();
 
   // Body is near-black with whisper emissive — dark blade silhouette; edges + tip carry faction.
@@ -129,7 +145,7 @@ function buildRaiderMesh(emissiveHex: number): THREE.Group {
   tip.name = 'raider-tip-accent';
 
   group.add(blade, bladeEdges, spike, spikeEdges, tip);
-  return group;
+  return { group, tipMat };
 }
 
 function buildSelectionRing(emissiveHex: number): THREE.Mesh {
@@ -153,7 +169,7 @@ export function buildRaider(faction: FactionId, tileX: number, tileY: number): R
   const group = new THREE.Group();
   group.name = `raider-${faction}`;
 
-  const raiderMesh = buildRaiderMesh(emissive);
+  const { group: raiderMesh, tipMat } = buildRaiderMesh(emissive);
   const selectionRing = buildSelectionRing(emissive);
 
   const hpBar = buildHpBar(faction, 1.2);
@@ -167,6 +183,10 @@ export function buildRaider(faction: FactionId, tileX: number, tileY: number): R
   let posY = tileY;
   let targetX = tileX;
   let targetY = tileY;
+
+  let placementPulseElapsedInternal = -1;
+  let deathPulseElapsedInternal = -1;
+  let deathPulseActiveInternal = false;
 
   const maxHp = UNIT_STATS.raider.maxHp;
 
@@ -182,6 +202,8 @@ export function buildRaider(faction: FactionId, tileX: number, tileY: number): R
     maxHp,
     hpBar,
     attackCooldownRemaining: 0,
+    get placementPulseElapsed(): number { return placementPulseElapsedInternal; },
+    get deathPulseActive(): boolean { return deathPulseActiveInternal; },
 
     takeDamage(amount: number): { died: boolean; damageDealt: number } {
       const before = bundle.hp;
@@ -253,6 +275,45 @@ export function buildRaider(faction: FactionId, tileX: number, tileY: number): R
       bundle.targetTileY = cy;
       const w = tileFloatToWorld(cx, cy);
       group.position.set(w.x, w.y, w.z);
+    },
+
+    triggerPlacementPulse(): void {
+      placementPulseElapsedInternal = 0;
+      const s = PLACEMENT_PULSE_SCALE_START;
+      group.scale.set(s, s, s);
+    },
+
+    tickPlacementPulse(dt: number): void {
+      if (placementPulseElapsedInternal < 0) return;
+      placementPulseElapsedInternal += dt;
+      const s = placementPulseScale(placementPulseElapsedInternal, PLACEMENT_PULSE_DURATION, PLACEMENT_PULSE_SCALE_START);
+      group.scale.set(s, s, s);
+      if (placementPulseElapsedInternal >= PLACEMENT_PULSE_DURATION) {
+        placementPulseElapsedInternal = -1;
+        group.scale.set(1, 1, 1);
+      }
+    },
+
+    triggerDeathPulse(): void {
+      deathPulseElapsedInternal = 0;
+      deathPulseActiveInternal = true;
+    },
+
+    tickDeathPulse(dt: number): boolean {
+      if (!deathPulseActiveInternal) return false;
+      deathPulseElapsedInternal += dt;
+      tipMat.emissiveIntensity = eventPulseIntensity(
+        RAIDER_CONSTANTS.accentEmissiveIntensity,
+        DEATH_PULSE_PEAK_DELTA,
+        deathPulseElapsedInternal,
+        DEATH_PULSE_DURATION,
+      );
+      if (deathPulseElapsedInternal >= DEATH_PULSE_DURATION) {
+        deathPulseActiveInternal = false;
+        tipMat.emissiveIntensity = RAIDER_CONSTANTS.accentEmissiveIntensity;
+        return false;
+      }
+      return true;
     },
   };
 

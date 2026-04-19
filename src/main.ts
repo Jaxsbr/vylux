@@ -16,6 +16,7 @@ import { GRID_CONSTANTS } from './grid';
 import { tickCombat } from './combat';
 import { advanceRaidersFaction } from './advance';
 import { tickNodePoints, computeNodeHolder } from './node-points';
+import type { FactionHold } from './energy-node';
 import { tickAi, createAiState } from './ai';
 import { evaluateMatch, type MatchOutcome } from './match';
 import { showMatchOverlay, hideMatchOverlay, isOverlayVisible } from './overlay';
@@ -133,14 +134,17 @@ function attemptTrain(kind: 'worker' | 'defender' | 'raider'): void {
     const w = buildWorker('blue', tileX, tileY);
     bundle.scene.add(w.mesh);
     bundle.workers.push(w);
+    w.triggerPlacementPulse();
   } else if (kind === 'defender') {
     const d = buildDefender('blue', tileX, tileY);
     bundle.scene.add(d.mesh);
     bundle.defenders.push(d);
+    d.triggerPlacementPulse();
   } else {
     const r = buildRaider('blue', tileX, tileY);
     bundle.scene.add(r.mesh);
     bundle.raiders.push(r);
+    r.triggerPlacementPulse();
   }
 }
 
@@ -300,6 +304,7 @@ attachE2EHook(bundle, {
   getNodeTooltipVisible: () => nodeTooltip.isVisible(),
   showNodeTooltip: (x: number, y: number) => nodeTooltip.show(x, y),
   hideNodeTooltip: () => nodeTooltip.hide(),
+  hasPointFlashClass: (faction: 'blue' | 'red') => hud.hasPointFlashClass(faction),
 });
 
 let state: PlacementState = INITIAL_STATE;
@@ -392,14 +397,17 @@ function attemptMouseTrain(kind: UnitKind, tileX: number, tileY: number): boolea
     const w = buildWorker('blue', spawnX, spawnY);
     bundle.scene.add(w.mesh);
     bundle.workers.push(w);
+    w.triggerPlacementPulse();
   } else if (kind === 'defender') {
     const d = buildDefender('blue', spawnX, spawnY);
     bundle.scene.add(d.mesh);
     bundle.defenders.push(d);
+    d.triggerPlacementPulse();
   } else {
     const r = buildRaider('blue', spawnX, spawnY);
     bundle.scene.add(r.mesh);
     bundle.raiders.push(r);
+    r.triggerPlacementPulse();
   }
 
   return true;
@@ -512,6 +520,10 @@ window.addEventListener('keydown', (event: KeyboardEvent) => {
 // crosses 1.0 a pulse is triggered and the accumulator wraps.
 const workerHarvestAcc = new WeakMap<object, number>();
 
+// Per-node previous holder for capture-pulse diffing (separate from node.lastHolder
+// which tickNodePoints owns — we snapshot before the tick and compare after).
+const nodeHolderPrev = new WeakMap<object, FactionHold>();
+
 let lastTime = performance.now();
 
 function animate(): void {
@@ -572,14 +584,17 @@ function animate(): void {
             const w = buildWorker('red', tileX, tileY);
             bundle.scene.add(w.mesh);
             bundle.workers.push(w);
+            w.triggerPlacementPulse();
           } else if (kind === 'defender') {
             const d = buildDefender('red', tileX, tileY);
             bundle.scene.add(d.mesh);
             bundle.defenders.push(d);
+            d.triggerPlacementPulse();
           } else {
             const r = buildRaider('red', tileX, tileY);
             bundle.scene.add(r.mesh);
             bundle.raiders.push(r);
+            r.triggerPlacementPulse();
             // If already mustering, send the new raider immediately.
             if (aiState.mustering) {
               r.moveTo(bundle.hqs.blue.tileX, bundle.hqs.blue.tileY);
@@ -598,6 +613,49 @@ function animate(): void {
     }
     for (const r of bundle.raiders) {
       r.tick(deltaSeconds);
+    }
+
+    // Tick placement pulses (scale-in tween after trainUnit).
+    for (const w of bundle.workers) {
+      w.tickPlacementPulse(deltaSeconds);
+    }
+    for (const d of bundle.defenders) {
+      d.tickPlacementPulse(deltaSeconds);
+    }
+    for (const r of bundle.raiders) {
+      r.tickPlacementPulse(deltaSeconds);
+    }
+
+    // Tick death pulses — defer dispose until pulse completes.
+    for (let i = bundle.workers.length - 1; i >= 0; i--) {
+      const w = bundle.workers[i]!;
+      if (w.deathPulseActive) {
+        const stillActive = w.tickDeathPulse(deltaSeconds);
+        if (!stillActive) {
+          w.dispose(bundle.scene);
+          bundle.workers.splice(i, 1);
+        }
+      }
+    }
+    for (let i = bundle.defenders.length - 1; i >= 0; i--) {
+      const d = bundle.defenders[i]!;
+      if (d.deathPulseActive) {
+        const stillActive = d.tickDeathPulse(deltaSeconds);
+        if (!stillActive) {
+          d.dispose(bundle.scene);
+          bundle.defenders.splice(i, 1);
+        }
+      }
+    }
+    for (let i = bundle.raiders.length - 1; i >= 0; i--) {
+      const r = bundle.raiders[i]!;
+      if (r.deathPulseActive) {
+        const stillActive = r.tickDeathPulse(deltaSeconds);
+        if (!stillActive) {
+          r.dispose(bundle.scene);
+          bundle.raiders.splice(i, 1);
+        }
+      }
     }
 
     // Harvest pulse — fire once per NODE_INCOME "unit accrued" for workers on nodes.
@@ -658,6 +716,13 @@ function animate(): void {
       ...bundle.defenders,
       ...bundle.raiders,
     ];
+
+    // Snapshot holders BEFORE tickNodePoints updates node.lastHolder so we can
+    // detect ownership flips for the capture pulse.
+    for (const node of bundle.energyNodes) {
+      nodeHolderPrev.set(node, node.lastHolder);
+    }
+
     tickNodePoints({
       nodes: bundle.energyNodes,
       units: allUnitsForNodes,
@@ -665,9 +730,20 @@ function animate(): void {
       dt: deltaSeconds,
     });
 
-    // Update node glow from live unit positions.
+    // Update node glow from live unit positions + fire capture pulses on ownership flip.
     for (const node of bundle.energyNodes) {
-      node.setFactionHold(computeNodeHolder(node, allUnitsForNodes));
+      const newHolder = computeNodeHolder(node, allUnitsForNodes);
+      node.setFactionHold(newHolder);
+      // Capture pulse fires only on ownership flip (pre-tick vs post-tick holder).
+      const prev = nodeHolderPrev.get(node) ?? null;
+      if (newHolder !== prev) {
+        node.triggerCapturePulse();
+      }
+    }
+
+    // Tick node capture pulses.
+    for (const node of bundle.energyNodes) {
+      node.tickCapturePulse(deltaSeconds);
     }
 
     hud.updatePoints(pointsLedger.get());
