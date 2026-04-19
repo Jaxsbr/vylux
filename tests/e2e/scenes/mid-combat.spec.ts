@@ -14,6 +14,8 @@ test('mid-combat scene snapshot', async ({ page }) => {
   );
 
   await page.evaluate(() => window.__vylux!.setScene!('mid-combat'));
+  await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 58, red: 43 }));
+  await page.evaluate(() => window.__vylux!.setPoints!({ blue: 145, red: 132 }));
   await page.evaluate(() => window.__vylux!.ready!());
 
   await page.screenshot({ path: 'pm/screenshots/mid-combat.png' });

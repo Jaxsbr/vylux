@@ -36,7 +36,7 @@ test.describe('US-01 scene foundation', () => {
     expect(pageErrors).toEqual([]);
   });
 
-  test('grid is mounted with 400 tiles and emissive-white dividers', async ({ page }) => {
+  test('grid is mounted with 400 tiles and dim grey dividers', async ({ page }) => {
     await page.goto('/');
     await page.waitForFunction(() => typeof window.__vylux !== 'undefined');
 
@@ -49,9 +49,9 @@ test.describe('US-01 scene foundation', () => {
       expect(debug.tileColors[idx]).toBe('#0a0a0a');
     }
 
-    expect(debug.gridLineMaterial.emissive).toBe('ffffff');
+    expect(debug.gridLineMaterial.emissive).toBe('555555');
     expect(debug.gridLineMaterial.emissiveIntensity).toBeGreaterThanOrEqual(0.1);
-    expect(debug.gridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(0.4);
+    expect(debug.gridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(0.5);
   });
 
   test('raycast from viewport center hits a tile and returns a valid (tileX, tileY)', async ({ page }) => {

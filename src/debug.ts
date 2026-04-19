@@ -1,5 +1,7 @@
 import type { SceneBundle } from './scene';
 import { INITIAL_STATE, type FactionId, type PlacementState } from './placement';
+import type { FactionEnergy } from './economy';
+import type { FactionPoints } from './points';
 import * as THREE from 'three';
 
 export type PlacedMeshDebug = {
@@ -44,6 +46,9 @@ export type VyluxHook = {
   // Optional E2E-only extensions — present only when ?e2e=1 is in the URL.
   setScene?: (name: string) => void;
   ready?: () => Promise<void>;
+  // HUD setters — always present once main.ts wires them up.
+  setEnergy?: (patch: Partial<FactionEnergy>) => void;
+  setPoints?: (patch: Partial<FactionPoints>) => void;
 };
 
 declare global {

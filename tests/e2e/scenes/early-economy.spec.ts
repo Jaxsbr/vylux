@@ -14,6 +14,8 @@ test('early-economy scene snapshot', async ({ page }) => {
   );
 
   await page.evaluate(() => window.__vylux!.setScene!('early-economy'));
+  await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 24, red: 17 }));
+  await page.evaluate(() => window.__vylux!.setPoints!({ blue: 6, red: 4 }));
   await page.evaluate(() => window.__vylux!.ready!());
 
   await page.screenshot({ path: 'pm/screenshots/early-economy.png' });

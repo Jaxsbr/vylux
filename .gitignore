@@ -9,6 +9,9 @@ credentials.json
 .build-loop.lock
 docs/plan/.build-loop.lock
 
+# PM loop
+pm/.lock
+
 # OS
 .DS_Store
 Thumbs.db

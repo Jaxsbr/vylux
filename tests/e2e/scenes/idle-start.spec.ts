@@ -14,6 +14,8 @@ test('idle-start scene snapshot', async ({ page }) => {
   );
 
   await page.evaluate(() => window.__vylux!.setScene!('idle-start'));
+  await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 0, red: 0 }));
+  await page.evaluate(() => window.__vylux!.setPoints!({ blue: 0, red: 0 }));
   await page.evaluate(() => window.__vylux!.ready!());
 
   await page.screenshot({ path: 'pm/screenshots/idle-start.png' });

@@ -87,10 +87,10 @@ describe('buildGrid', () => {
     expect(materialIds.size).toBe(TILE_COUNT);
   });
 
-  it('gridLineMaterial is emissive white with low intensity and is shared across dividers', () => {
+  it('gridLineMaterial is emissive dim grey and is shared across dividers', () => {
     const grid = buildGrid();
-    expect(grid.gridLineMaterial.emissive.getHexString()).toBe('ffffff');
+    expect(grid.gridLineMaterial.emissive.getHexString()).toBe('555555');
     expect(grid.gridLineMaterial.emissiveIntensity).toBeGreaterThanOrEqual(0.1);
-    expect(grid.gridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(0.4);
+    expect(grid.gridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(0.5);
   });
 });

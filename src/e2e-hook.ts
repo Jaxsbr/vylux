@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { tileToWorld } from './grid';
 import type { SceneBundle } from './scene';
+import type { FactionEnergy } from './economy';
+import type { FactionPoints } from './points';
 
 // E2E-only hook — installed only when the URL contains `?e2e=1`.
 // This file is imported by main.ts but the install function exits early unless
@@ -188,12 +190,19 @@ function seedScene(name: SceneName, group: THREE.Group): void {
   }
 }
 
+export type HudSetters = {
+  setEnergy: (patch: Partial<FactionEnergy>) => void;
+  setPoints: (patch: Partial<FactionPoints>) => void;
+};
+
 export type E2EHookExtension = {
   setScene: (name: string) => void;
   ready: () => Promise<void>;
+  setEnergy: (patch: Partial<FactionEnergy>) => void;
+  setPoints: (patch: Partial<FactionPoints>) => void;
 };
 
-export function attachE2EHook(bundle: SceneBundle): void {
+export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
   const params = new URLSearchParams(window.location.search);
   if (params.get('e2e') !== '1') return;
 
@@ -212,6 +221,8 @@ export function attachE2EHook(bundle: SceneBundle): void {
         });
       });
     },
+    setEnergy: hudSetters.setEnergy,
+    setPoints: hudSetters.setPoints,
   };
 
   // Merge into window.__vylux if it already exists (from debug.ts), or create

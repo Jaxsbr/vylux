@@ -110,7 +110,7 @@ Rules:
 - **Right-click / middle-click anywhere in placement mode**: no-op. Same state reference returned; never places a unit and never exits placement.
 - **Any click in idle mode**: no-op.
 
-Committed meshes render in the persistent `placed-units` THREE.Group (solid `BoxGeometry 0.8^3`, `transparent: false`, `opacity: 1`, `emissive === color === factionEmissive`, `emissiveIntensity: 1`) — visibly heavier than the translucent ghost. They are never removed in this phase (placement-only, no demolish).
+Committed meshes render in the persistent `placed-units` THREE.Group as **dark mass + neon trim**: a matte near-black body (`BoxGeometry 0.8^3`, `color: #0d1117`, `transparent: false`, `opacity: 1`, `emissiveIntensity: 0`) with an unlit `LineSegments` child on `EdgesGeometry` colored with the faction hex (`#00e5ff` blue, `#ff5a1f` red). The body's `emissive` field still carries the faction hex as a metadata label (preserved for debug/Playwright assertions), but intensity is zero so the body contributes no glow — faction identity reads only from the trim, matching the concept art (dark surfaces, neon accent lines). Heavier than the translucent ghost, and never removed in this phase (placement-only, no demolish).
 
 Debug hook (dev only):
 
