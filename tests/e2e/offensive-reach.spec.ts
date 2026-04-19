@@ -31,9 +31,9 @@ test('offensive-reach: blue raider placed at blue HQ travels to red side and dam
   const initialRedHqHp = await page.evaluate(() => window.__vylux!.getHqHp!('red'));
   expect(initialRedHqHp).toBeGreaterThan(0);
 
-  // Spawn a blue raider at (1, 0) — near the blue HQ at (0,0), bottom-left region.
+  // Spawn a blue raider at (4, 9) — near the blue HQ at (3,9), left side of the grid.
   const raiderIndex = await page.evaluate(() =>
-    window.__vylux!.spawnRaider!('blue', 1, 0),
+    window.__vylux!.spawnRaider!('blue', 4, 9),
   );
 
   // Confirm spawn position.
@@ -42,11 +42,11 @@ test('offensive-reach: blue raider placed at blue HQ travels to red side and dam
     raiderIndex,
   );
   expect(spawnTile).not.toBeNull();
-  expect(spawnTile!.tileX).toBe(1);
-  expect(spawnTile!.tileY).toBe(0);
+  expect(spawnTile!.tileX).toBe(4);
+  expect(spawnTile!.tileY).toBe(9);
 
   // Advance 12 seconds of simulated time so the raider crosses the map.
-  // Distance from (1,0) to red HQ at (19,19) is ~26 tiles; at 2.8 t/s that's ~9.3s.
+  // Distance from (4,9) to red HQ at (16,9) is 12 tiles; at 2.8 t/s that's ~4.3s.
   // We add buffer to ensure at least one attack fires.
   await page.evaluate(() => window.__vylux!.advanceTime!(12));
 
@@ -66,8 +66,8 @@ test('offensive-reach: blue raider placed at blue HQ travels to red side and dam
   // Either the raider is no longer at its spawn tile (moved across map) …
   const raiderMoved =
     midTile === null || // raider died — it reached the red side and was destroyed
-    midTile.tileX !== 1 ||
-    midTile.tileY !== 0;
+    midTile.tileX !== 4 ||
+    midTile.tileY !== 9;
 
   // … or the red HQ took damage (raider reached attack range and fired).
   const hqDamaged = redHqHpAfter < initialRedHqHp;

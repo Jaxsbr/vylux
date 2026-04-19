@@ -129,8 +129,7 @@ test.describe('unit-training — HQ selection + Q/W/E hotkeys', () => {
     await page.goto('/?e2e=1');
     await waitForHook(page);
 
-    // Move both starter blue workers away from the HQ so all 3 valid
-    // in-bounds neighbours of (0,0) are free for training spawns.
+    // Move both starter blue workers away from the HQ so neighbours of HQ (3,9) are free.
     await page.evaluate(() => {
       window.__vylux!.moveWorker!(0, 10, 10);
       window.__vylux!.moveWorker!(1, 11, 10);

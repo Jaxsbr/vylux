@@ -114,7 +114,47 @@ export function computeGhostView(state: PlacementState): GhostView {
 
 export const GRID_SIZE = 20;
 
-export type TryPlaceReason = 'occupied' | 'out-of-bounds' | 'not-in-placement';
+/** Radius of the proximity zone around the HQ (7×7 = radius 3). */
+export const PROXIMITY_RADIUS = 3;
+
+/**
+ * Returns all tiles in the proximity zone around (hqX, hqY), excluding the HQ
+ * tile itself. Clamps to grid bounds [0, GRID_SIZE).
+ */
+export function proximityZoneTiles(
+  hqX: number,
+  hqY: number,
+): Array<{ tileX: number; tileY: number }> {
+  const tiles: Array<{ tileX: number; tileY: number }> = [];
+  for (let dy = -PROXIMITY_RADIUS; dy <= PROXIMITY_RADIUS; dy++) {
+    for (let dx = -PROXIMITY_RADIUS; dx <= PROXIMITY_RADIUS; dx++) {
+      if (dx === 0 && dy === 0) continue; // exclude HQ tile
+      const tx = hqX + dx;
+      const ty = hqY + dy;
+      if (tx < 0 || tx >= GRID_SIZE || ty < 0 || ty >= GRID_SIZE) continue;
+      tiles.push({ tileX: tx, tileY: ty });
+    }
+  }
+  return tiles;
+}
+
+/**
+ * Returns true if (tileX, tileY) is within the proximity zone around (hqX, hqY),
+ * i.e., within PROXIMITY_RADIUS tiles in each axis, but not the HQ tile itself.
+ */
+export function isInProximityZone(
+  tileX: number,
+  tileY: number,
+  hqX: number,
+  hqY: number,
+): boolean {
+  if (tileX === hqX && tileY === hqY) return false;
+  const dx = Math.abs(tileX - hqX);
+  const dy = Math.abs(tileY - hqY);
+  return dx <= PROXIMITY_RADIUS && dy <= PROXIMITY_RADIUS;
+}
+
+export type TryPlaceReason = 'occupied' | 'out-of-bounds' | 'not-in-placement' | 'out-of-zone';
 
 export type TryPlaceResult =
   | { ok: true; state: PlacementState }

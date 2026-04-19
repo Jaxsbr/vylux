@@ -40,9 +40,9 @@ test.describe('event feedback pulses', () => {
       window.__vylux!.getUnitCount!({ faction: 'blue', kind: 'worker' }),
     );
 
-    // Place a worker adjacent to blue HQ (0,0 → tile 1,0).
+    // Place a worker within proximity zone of blue HQ (3,9 → tile 4,9).
     const placed = await page.evaluate(() =>
-      window.__vylux!.mouseTrainUnit!('worker', 1, 0),
+      window.__vylux!.mouseTrainUnit!('worker', 4, 9),
     );
     expect(placed).toBe(true);
 
@@ -196,7 +196,8 @@ test.describe('event feedback pulses', () => {
     await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 200 }));
     await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
     await page.evaluate(() => window.__vylux!.armBuildable!('worker'));
-    await page.evaluate(() => window.__vylux!.mouseTrainUnit!('worker', 1, 0));
+    // (4,9) is within proximity zone of blue HQ (3,9).
+    await page.evaluate(() => window.__vylux!.mouseTrainUnit!('worker', 4, 9));
 
     // Advance a tiny step so the placement pulse is in-progress.
     await page.evaluate(() => window.__vylux!.advanceTime!(0.04));

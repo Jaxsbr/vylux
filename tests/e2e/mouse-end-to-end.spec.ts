@@ -49,13 +49,13 @@ test('mouse-only: idle-start → train worker & raider → victory → play agai
   //    Worker=20, Raider=100 — seed 500 to afford both plus any overhead.
   await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 500, red: 0 }));
 
-  // Move starter blue workers out of the way so tiles near HQ are free.
+  // Move starter blue workers out of the way so tiles near HQ (3,9) are free.
   await page.evaluate(() => {
     window.__vylux!.moveWorker!(0, 10, 10);
     window.__vylux!.moveWorker!(1, 11, 10);
   });
 
-  // 4. Train a Worker: arm the buildable, then place adjacent to HQ (0,0).
+  // 4. Train a Worker: arm the buildable, then place within proximity zone of HQ (3,9).
   await page.evaluate(() => window.__vylux!.armBuildable!('worker'));
   const armedKind = await page.evaluate(() => window.__vylux!.getArmedKind!());
   expect(armedKind).toBe('worker');
@@ -65,7 +65,7 @@ test('mouse-only: idle-start → train worker & raider → victory → play agai
   );
 
   const workerPlaced = await page.evaluate(() =>
-    window.__vylux!.mouseTrainUnit!('worker', 1, 0),
+    window.__vylux!.mouseTrainUnit!('worker', 4, 9),
   );
   expect(workerPlaced).toBe(true);
 
@@ -104,7 +104,7 @@ test('mouse-only: idle-start → train worker & raider → victory → play agai
   expect(targetTile!.tileX).toBe(5);
   expect(targetTile!.tileY).toBe(5);
 
-  // 7. Train a Raider: re-open panel (or it may still be open), arm raider, place adjacent.
+  // 7. Train a Raider: re-open panel (or it may still be open), arm raider, place in zone.
   //    Panel may have closed after worker train — open it.
   await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
 
@@ -113,7 +113,8 @@ test('mouse-only: idle-start → train worker & raider → victory → play agai
   );
 
   const raiderPlaced = await page.evaluate(() =>
-    window.__vylux!.mouseTrainUnit!('raider', 0, 1),
+    // (3,10) is within proximity zone of blue HQ (3,9).
+    window.__vylux!.mouseTrainUnit!('raider', 3, 10),
   );
   expect(raiderPlaced).toBe(true);
 

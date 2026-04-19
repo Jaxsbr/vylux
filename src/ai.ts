@@ -189,7 +189,7 @@ export function tickAi(params: TickAiParams): void {
       if (r.tileX !== r.targetTileX || r.tileY !== r.targetTileY) continue;
       const dist = tileDist(r.tileX, r.tileY, redHq.tileX, redHq.tileY);
       if (dist <= 1) {
-        // Park at (hqX-2, hqY-1) — a different spot from defenders to avoid pile-up.
+        // Park 2 tiles left and 1 below HQ — different spot from defenders to avoid pile-up.
         const parkX = Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, redHq.tileX - 2));
         const parkY = Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, redHq.tileY - 1));
         r.moveTo(parkX, parkY);
@@ -205,7 +205,7 @@ export function tickAi(params: TickAiParams): void {
     if (d.hp <= 0) continue;
     const dist = tileDist(d.tileX, d.tileY, redHq.tileX, redHq.tileY);
     if (dist <= 1 && d.tileX === d.targetTileX && d.tileY === d.targetTileY) {
-      // Park at (hqX-2, hqY) — in-bounds for red HQ at (19,19): tile (17,19).
+      // Park 2 tiles left of HQ — always in-bounds given PROXIMITY_RADIUS=3 clearance.
       const parkX = Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, redHq.tileX - 2));
       const parkY = Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, redHq.tileY));
       d.moveTo(parkX, parkY);

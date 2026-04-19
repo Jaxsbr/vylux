@@ -55,7 +55,7 @@ function seedEarlyEconomy(group: THREE.Group, bundle: SceneBundle): void {
   seedIdleStart(group);
 
   // Move starter blue workers near the bottom-left node (tile 5,5).
-  // Blue starters: index 0 = (1,0), index 1 = (0,1).
+  // Blue starters: index 0 = (4,9), index 1 = (3,10).
   if (bundle.workers[0]) bundle.workers[0].setTile(5, 5);
   if (bundle.workers[1]) bundle.workers[1].setTile(4, 5);
 
@@ -66,7 +66,7 @@ function seedEarlyEconomy(group: THREE.Group, bundle: SceneBundle): void {
   bundle.workers.push(blueExtra);
 
   // Move starter red workers near the top-right node (tile 14,14).
-  // Red starters: index 2 = (18,19), index 3 = (19,18).
+  // Red starters: index 2 = (15,9), index 3 = (16,10).
   if (bundle.workers[2]) bundle.workers[2].setTile(14, 14);
   if (bundle.workers[3]) bundle.workers[3].setTile(13, 14);
 
@@ -77,12 +77,13 @@ function seedEarlyEconomy(group: THREE.Group, bundle: SceneBundle): void {
   bundle.workers.push(redExtra);
 
   // Spawn 1 defender per faction near each HQ — shows new silhouette.
-  const blueDefender = buildDefender('blue', 1, 1);
+  // Blue HQ at (3,9): defender at (4,8). Red HQ at (16,9): defender at (15,8).
+  const blueDefender = buildDefender('blue', 4, 8);
   blueDefender.mesh.name = 'e2e-spawned-blue-defender';
   bundle.scene.add(blueDefender.mesh);
   bundle.defenders.push(blueDefender);
 
-  const redDefender = buildDefender('red', 18, 18);
+  const redDefender = buildDefender('red', 15, 8);
   redDefender.mesh.name = 'e2e-spawned-red-defender';
   bundle.scene.add(redDefender.mesh);
   bundle.defenders.push(redDefender);
@@ -95,15 +96,15 @@ function seedMidCombat(group: THREE.Group, bundle: SceneBundle): void {
   if (bundle.workers[0]) bundle.workers[0].setTile(5, 5);
   if (bundle.workers[1]) bundle.workers[1].setTile(4, 5);
 
-  // Red workers near their HQ.
-  if (bundle.workers[2]) bundle.workers[2].setTile(17, 18);
-  if (bundle.workers[3]) bundle.workers[3].setTile(18, 17);
+  // Red workers near their HQ (now at 16,9).
+  if (bundle.workers[2]) bundle.workers[2].setTile(15, 8);
+  if (bundle.workers[3]) bundle.workers[3].setTile(16, 8);
 
-  // Blue raiders charging toward the red HQ — real raider meshes.
+  // Blue raiders charging toward the red HQ (now at 16,9) — real raider meshes.
   const blueRaiderPositions: [number, number][] = [
-    [15, 16],
-    [16, 16],
-    [16, 17],
+    [13, 9],
+    [13, 10],
+    [14, 9],
   ];
   for (const [tx, ty] of blueRaiderPositions) {
     const raider = buildRaider('blue', tx, ty);
@@ -112,10 +113,10 @@ function seedMidCombat(group: THREE.Group, bundle: SceneBundle): void {
     bundle.raiders.push(raider);
   }
 
-  // Red defenders near their HQ — real defender meshes.
+  // Red defenders near their HQ (16,9) — real defender meshes.
   const redDefenderPositions: [number, number][] = [
-    [17, 17],
-    [18, 18],
+    [15, 9],
+    [15, 10],
   ];
   for (const [tx, ty] of redDefenderPositions) {
     const defender = buildDefender('red', tx, ty);

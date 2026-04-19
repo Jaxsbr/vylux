@@ -2,7 +2,7 @@ import { createScene } from './scene';
 import { attachDebugHook } from './debug';
 import { attachE2EHook } from './e2e-hook';
 import { attachInputHandlers } from './input';
-import { INITIAL_STATE, type PlacementState } from './placement';
+import { INITIAL_STATE, type PlacementState, isInProximityZone } from './placement';
 import { createEnergyLedger, tickEnergyWithNodes, NODE_INCOME } from './economy';
 import type { NodeWorkerCount } from './economy';
 import { createPointsLedger } from './points';
@@ -192,12 +192,16 @@ function resetMatch(): void {
   aiState.mustering = freshAi.mustering;
   aiEnabled = true;
 
-  // 6. Rebuild starter workers.
+  // 6. Rebuild starter workers near the new left/right HQ positions.
+  // Blue HQ at (3,9): workers at (4,9) and (3,10).
+  // Red HQ at (16,9): workers at (15,9) and (16,10).
+  const bHq = bundle.hqs.blue;
+  const rHq = bundle.hqs.red;
   const starters: Array<['blue' | 'red', number, number]> = [
-    ['blue', 1, 0],
-    ['blue', 0, 1],
-    ['red', 18, 19],
-    ['red', 19, 18],
+    ['blue', bHq.tileX + 1, bHq.tileY],
+    ['blue', bHq.tileX, bHq.tileY + 1],
+    ['red', rHq.tileX - 1, rHq.tileY],
+    ['red', rHq.tileX, rHq.tileY + 1],
   ];
   for (const [faction, tx, ty] of starters) {
     const w = buildWorker(faction, tx, ty);
@@ -323,13 +327,6 @@ attachInputHandlers({
   },
 });
 
-/** Check whether (tileX, tileY) is one of the 8 neighbours of (hqX, hqY). */
-function isAdjacentToHq(tileX: number, tileY: number, hqX: number, hqY: number): boolean {
-  const dx = Math.abs(tileX - hqX);
-  const dy = Math.abs(tileY - hqY);
-  return dx <= 1 && dy <= 1 && (dx + dy > 0);
-}
-
 /**
  * Try to place the armed unit kind at (tileX, tileY), or fall back to
  * findFreeNeighbour if the clicked tile is occupied.
@@ -339,8 +336,8 @@ function attemptMouseTrain(kind: UnitKind, tileX: number, tileY: number): boolea
   const hqX = bundle.hqs.blue.tileX;
   const hqY = bundle.hqs.blue.tileY;
 
-  if (!isAdjacentToHq(tileX, tileY, hqX, hqY)) {
-    buildablesPanel.showFeedback('Must place adjacent to HQ');
+  if (!isInProximityZone(tileX, tileY, hqX, hqY)) {
+    buildablesPanel.showFeedback('Must place within 3 tiles of HQ');
     return false;
   }
 
@@ -774,7 +771,9 @@ function animate(): void {
   bundle.hqs.blue.hpBar.group.lookAt(cam.position);
   bundle.hqs.red.hpBar.group.lookAt(cam.position);
 
-  bundle.reconcile(state);
+  // Pass blue HQ position when a buildable is armed so the proximity zone renders.
+  const zoneHq = trainingPanelState.armedKind !== null ? bundle.hqs.blue : null;
+  bundle.reconcile(state, zoneHq);
   bundle.render();
 }
 animate();

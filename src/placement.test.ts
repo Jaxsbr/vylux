@@ -10,6 +10,10 @@ import {
   computeHoverView,
   tryPlace,
   handleClick,
+  proximityZoneTiles,
+  isInProximityZone,
+  PROXIMITY_RADIUS,
+  GRID_SIZE,
   type PlacementState,
 } from './placement';
 
@@ -407,5 +411,79 @@ describe('handleClick — click dispatch (phase-goal L61-L66)', () => {
   it('left-click preserves hoveredTile on successful placement', () => {
     const next = handleClick(placementBlue, { tileX: 5, tileY: 5 }, 0);
     expect(next.hoveredTile).toEqual({ tileX: 5, tileY: 5 });
+  });
+});
+
+describe('proximityZoneTiles — 7×7 zone around HQ', () => {
+  it('returns (2*radius+1)^2 - 1 tiles for interior HQ (no clamping)', () => {
+    const tiles = proximityZoneTiles(10, 10);
+    const expected = (PROXIMITY_RADIUS * 2 + 1) ** 2 - 1; // 48
+    expect(tiles.length).toBe(expected);
+  });
+
+  it('does not include the HQ tile itself', () => {
+    const tiles = proximityZoneTiles(3, 9);
+    const hasHq = tiles.some((t) => t.tileX === 3 && t.tileY === 9);
+    expect(hasHq).toBe(false);
+  });
+
+  it('all returned tiles are within grid bounds', () => {
+    for (const hqX of [0, 3, 10, 16, 19]) {
+      for (const hqY of [0, 9, 19]) {
+        const tiles = proximityZoneTiles(hqX, hqY);
+        for (const t of tiles) {
+          expect(t.tileX).toBeGreaterThanOrEqual(0);
+          expect(t.tileX).toBeLessThan(GRID_SIZE);
+          expect(t.tileY).toBeGreaterThanOrEqual(0);
+          expect(t.tileY).toBeLessThan(GRID_SIZE);
+        }
+      }
+    }
+  });
+
+  it('corner HQ (0,0) returns fewer tiles due to clamping', () => {
+    const tiles = proximityZoneTiles(0, 0);
+    // 4x4 block = 16 tiles, minus HQ = 15
+    expect(tiles.length).toBe(15);
+  });
+
+  it('edge HQ (3,0) returns tiles only in-bounds', () => {
+    const tiles = proximityZoneTiles(3, 0);
+    // Rows 0..RADIUS=3, cols 0..6: 4 rows × 7 cols - 1 (HQ) = 27
+    expect(tiles.length).toBe(27);
+  });
+});
+
+describe('isInProximityZone', () => {
+  it('HQ tile itself is never in zone', () => {
+    expect(isInProximityZone(3, 9, 3, 9)).toBe(false);
+  });
+
+  it('tiles within radius in each axis are in zone', () => {
+    const hqX = 3;
+    const hqY = 9;
+    expect(isInProximityZone(hqX + PROXIMITY_RADIUS, hqY, hqX, hqY)).toBe(true);
+    expect(isInProximityZone(hqX - PROXIMITY_RADIUS, hqY, hqX, hqY)).toBe(true);
+    expect(isInProximityZone(hqX, hqY + PROXIMITY_RADIUS, hqX, hqY)).toBe(true);
+    expect(isInProximityZone(hqX, hqY - PROXIMITY_RADIUS, hqX, hqY)).toBe(true);
+    expect(isInProximityZone(hqX + PROXIMITY_RADIUS, hqY + PROXIMITY_RADIUS, hqX, hqY)).toBe(true);
+  });
+
+  it('tiles just outside radius are not in zone', () => {
+    const hqX = 3;
+    const hqY = 9;
+    expect(isInProximityZone(hqX + PROXIMITY_RADIUS + 1, hqY, hqX, hqY)).toBe(false);
+    expect(isInProximityZone(hqX, hqY + PROXIMITY_RADIUS + 1, hqX, hqY)).toBe(false);
+    expect(isInProximityZone(hqX + PROXIMITY_RADIUS + 1, hqY + PROXIMITY_RADIUS + 1, hqX, hqY)).toBe(false);
+  });
+
+  it('is pure and consistent with proximityZoneTiles', () => {
+    const hqX = 3;
+    const hqY = 9;
+    const tiles = proximityZoneTiles(hqX, hqY);
+    // All zone tiles should return true
+    for (const t of tiles) {
+      expect(isInProximityZone(t.tileX, t.tileY, hqX, hqY)).toBe(true);
+    }
   });
 });

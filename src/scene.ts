@@ -8,6 +8,7 @@ import {
   computeGhostView,
   computeHoverView,
   ghostEmissiveFor,
+  proximityZoneTiles,
   type PlacedUnit,
   type PlacementState,
 } from './placement';
@@ -44,9 +45,12 @@ export const SCENE_CONSTANTS = {
   bloomStrength: 0.45,
   bloomRadius: 0.5,
   bloomThreshold: 0.25,
-  // HQ tile positions — GRID_SIZE = 20 so corner tiles are 0 and 19.
-  hqBlueTile: 0,
-  hqRedTile: 19,
+  // HQ tile positions — left/right, each inset 3 tiles from the map edge,
+  // vertically centred on the 20×20 grid (row 9 = floor((20-1)/2)).
+  hqBlueTileX: 3,
+  hqBlueTileY: 9,
+  hqRedTileX: 16,
+  hqRedTileY: 9,
 } as const;
 
 export type GhostBundle = {
@@ -96,7 +100,12 @@ export type SceneBundle = {
   raycastWorker: (clientX: number, clientY: number) => WorkerBundle | null;
   /** Raycast against HQ meshes. Returns the HQBundle hit, or null. */
   raycastHq: (clientX: number, clientY: number) => import('./hq').HQBundle | null;
-  reconcile: (state: PlacementState) => void;
+  /**
+   * Call every frame with the current placement state. Also pass the armed
+   * HQ position (null when no buildable is armed) so the proximity zone
+   * highlight can be rendered.
+   */
+  reconcile: (state: PlacementState, zoneHq: { tileX: number; tileY: number } | null) => void;
 };
 
 export function computeCameraPosition(
@@ -146,8 +155,10 @@ export function createScene(): SceneBundle {
     placedSize,
     placedY,
     buildingBodyColor,
-    hqBlueTile,
-    hqRedTile,
+    hqBlueTileX,
+    hqBlueTileY,
+    hqRedTileX,
+    hqRedTileY,
   } = SCENE_CONSTANTS;
 
   const scene = new THREE.Scene();
@@ -175,8 +186,8 @@ export function createScene(): SceneBundle {
   const placed: PlacedBundle = { group: placedGroup, meshes: [] };
 
   // Pre-placed HQs — always visible in the real game path (not gated by ?e2e=1).
-  const blueHQ = buildHQ('blue', hqBlueTile, hqBlueTile);
-  const redHQ = buildHQ('red', hqRedTile, hqRedTile);
+  const blueHQ = buildHQ('blue', hqBlueTileX, hqBlueTileY);
+  const redHQ = buildHQ('red', hqRedTileX, hqRedTileY);
   scene.add(blueHQ.group, redHQ.group);
   const hqs = { blue: blueHQ, red: redHQ };
 
@@ -188,14 +199,14 @@ export function createScene(): SceneBundle {
     return node;
   });
 
-  // Starter workers — blue HQ at (0,0) gets workers at (1,0) and (0,1);
-  // red HQ at (19,19) gets workers at (18,19) and (19,18).
+  // Starter workers — blue HQ at (3,9) gets workers at (4,9) and (3,10);
+  // red HQ at (16,9) gets workers at (15,9) and (16,10).
   const workers: WorkerBundle[] = [];
   const starterWorkers: Array<['blue' | 'red', number, number]> = [
-    ['blue', 1, 0],
-    ['blue', 0, 1],
-    ['red', 18, 19],
-    ['red', 19, 18],
+    ['blue', hqBlueTileX + 1, hqBlueTileY],
+    ['blue', hqBlueTileX, hqBlueTileY + 1],
+    ['red', hqRedTileX - 1, hqRedTileY],
+    ['red', hqRedTileX, hqRedTileY + 1],
   ];
   for (const [faction, tx, ty] of starterWorkers) {
     const w = buildWorker(faction, tx, ty);
@@ -330,12 +341,37 @@ export function createScene(): SceneBundle {
     tileY * GRID_CONSTANTS.gridSize + tileX;
 
   let lastHover: { tileX: number; tileY: number } | null = null;
+  // Zone tiles highlighted in the previous reconcile pass — cleared each frame.
+  let lastZoneTiles: Array<{ tileX: number; tileY: number }> = [];
+  // Semi-transparent cyan overlay for the proximity zone preview.
+  const ZONE_COLOR = '#0a3040';
 
-  const reconcile = (state: PlacementState): void => {
+  const reconcile = (state: PlacementState, zoneHq: { tileX: number; tileY: number } | null): void => {
+    // Clear previous zone highlights first.
+    for (const t of lastZoneTiles) {
+      const mesh = grid.tileMeshes[tileIndex(t.tileX, t.tileY)];
+      if (mesh !== undefined) {
+        (mesh.material as THREE.MeshStandardMaterial).color.set(GRID_CONSTANTS.tileColor);
+      }
+    }
+    lastZoneTiles = [];
+
     if (lastHover !== null) {
       const prev = grid.tileMeshes[tileIndex(lastHover.tileX, lastHover.tileY)];
       (prev.material as THREE.MeshStandardMaterial).color.set(GRID_CONSTANTS.tileColor);
       lastHover = null;
+    }
+
+    // Render proximity zone highlight when a buildable is armed.
+    if (zoneHq !== null) {
+      const zoneTiles = proximityZoneTiles(zoneHq.tileX, zoneHq.tileY);
+      for (const t of zoneTiles) {
+        const mesh = grid.tileMeshes[tileIndex(t.tileX, t.tileY)];
+        if (mesh !== undefined) {
+          (mesh.material as THREE.MeshStandardMaterial).color.set(ZONE_COLOR);
+          lastZoneTiles.push(t);
+        }
+      }
     }
 
     const hoverView = computeHoverView(state);

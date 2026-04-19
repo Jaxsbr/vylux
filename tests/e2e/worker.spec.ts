@@ -56,12 +56,12 @@ test.describe('worker unit — hook helpers', () => {
       w3: window.__vylux?.getWorkerTile?.(3),
     }));
 
-    // Blue workers start at (1,0) and (0,1).
-    expect(tiles.w0).toEqual({ tileX: 1, tileY: 0 });
-    expect(tiles.w1).toEqual({ tileX: 0, tileY: 1 });
-    // Red workers start at (18,19) and (19,18).
-    expect(tiles.w2).toEqual({ tileX: 18, tileY: 19 });
-    expect(tiles.w3).toEqual({ tileX: 19, tileY: 18 });
+    // Blue HQ at (3,9): blue workers start at (4,9) and (3,10).
+    expect(tiles.w0).toEqual({ tileX: 4, tileY: 9 });
+    expect(tiles.w1).toEqual({ tileX: 3, tileY: 10 });
+    // Red HQ at (16,9): red workers start at (15,9) and (16,10).
+    expect(tiles.w2).toEqual({ tileX: 15, tileY: 9 });
+    expect(tiles.w3).toEqual({ tileX: 16, tileY: 10 });
   });
 
   test('moveWorker teleports the worker to the given tile (?e2e=1)', async ({ page }) => {
@@ -121,9 +121,9 @@ test.describe('worker unit — click-to-move via hook', () => {
       { timeout: 15_000 },
     );
 
-    // Worker 0 (blue) starts at (1,0).
+    // Worker 0 (blue) starts at (4,9) — adjacent to blue HQ (3,9).
     const before = await page.evaluate(() => window.__vylux!.getWorkerTile!(0));
-    expect(before).toEqual({ tileX: 1, tileY: 0 });
+    expect(before).toEqual({ tileX: 4, tileY: 9 });
 
     // Teleport worker 0 to (10,10) via the hook.
     await page.evaluate(() => window.__vylux!.moveWorker!(0, 10, 10));

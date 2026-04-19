@@ -135,7 +135,7 @@ test.describe('mouse-training — click HQ → buildables panel → place unit',
     await page.goto('/?e2e=1');
     await waitForHook(page);
 
-    // Move existing blue workers away so tiles near HQ (0,0) are free.
+    // Move existing blue workers away so tiles near HQ (3,9) are free.
     await page.evaluate(() => {
       window.__vylux!.moveWorker!(0, 10, 10);
       window.__vylux!.moveWorker!(1, 11, 10);
@@ -147,11 +147,11 @@ test.describe('mouse-training — click HQ → buildables panel → place unit',
       window.__vylux!.getUnitCount!({ faction: 'blue', kind: 'worker' }),
     );
 
-    // Open panel + arm worker + place at tile (1,0) adjacent to HQ (0,0).
+    // Open panel + arm worker + place at tile (4,9) — within proximity zone of HQ (3,9).
     await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
     await page.evaluate(() => window.__vylux!.armBuildable!('worker'));
     const success = await page.evaluate(() =>
-      window.__vylux!.mouseTrainUnit!('worker', 1, 0),
+      window.__vylux!.mouseTrainUnit!('worker', 4, 9),
     );
 
     expect(success).toBe(true);
@@ -183,7 +183,8 @@ test.describe('mouse-training — click HQ → buildables panel → place unit',
 
     await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
     const success = await page.evaluate(() =>
-      window.__vylux!.mouseTrainUnit!('defender', 1, 0),
+      // (4,9) is within proximity zone of blue HQ (3,9).
+      window.__vylux!.mouseTrainUnit!('defender', 4, 9),
     );
 
     expect(success).toBe(true);
@@ -212,7 +213,8 @@ test.describe('mouse-training — click HQ → buildables panel → place unit',
 
     await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
     const success = await page.evaluate(() =>
-      window.__vylux!.mouseTrainUnit!('raider', 0, 1),
+      // (3,10) is within proximity zone of blue HQ (3,9).
+      window.__vylux!.mouseTrainUnit!('raider', 3, 10),
     );
 
     expect(success).toBe(true);
@@ -237,8 +239,8 @@ test.describe('mouse-training — click HQ → buildables panel → place unit',
 
     await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
     const success = await page.evaluate(() =>
-      // Tile (5,5) is not adjacent to HQ at (0,0).
-      window.__vylux!.mouseTrainUnit!('worker', 5, 5),
+      // Tile (10,10) is outside the 7x7 proximity zone of HQ (3,9).
+      window.__vylux!.mouseTrainUnit!('worker', 10, 10),
     );
 
     expect(success).toBe(false);
@@ -267,7 +269,8 @@ test.describe('mouse-training — click HQ → buildables panel → place unit',
 
     await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
     const success = await page.evaluate(() =>
-      window.__vylux!.mouseTrainUnit!('worker', 1, 0),
+      // (4,9) is in zone of HQ (3,9) but energy is too low.
+      window.__vylux!.mouseTrainUnit!('worker', 4, 9),
     );
 
     expect(success).toBe(false);
@@ -294,8 +297,9 @@ test.describe('mouse-training — click HQ → buildables panel → place unit',
     await page.evaluate(() => window.__vylux!.armBuildable!('worker'));
 
     // Train a unit via mouseTrainUnit directly (simulates the tile click path).
+    // (4,9) is within proximity zone of blue HQ (3,9).
     const success = await page.evaluate(() =>
-      window.__vylux!.mouseTrainUnit!('worker', 1, 0),
+      window.__vylux!.mouseTrainUnit!('worker', 4, 9),
     );
     expect(success).toBe(true);
 
