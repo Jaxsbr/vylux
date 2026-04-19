@@ -177,6 +177,9 @@ export type HudSetters = {
   armBuildable: (kind: UnitKind) => void;
   getArmedKind: () => UnitKind | null;
   mouseTrainUnit: (kind: UnitKind, tileX: number, tileY: number) => boolean;
+  // Onboarding cue hooks.
+  getOnboardingCueVisible: () => boolean;
+  dismissOnboardingCue: () => void;
 };
 
 export type E2EHookExtension = {
@@ -212,6 +215,9 @@ export type E2EHookExtension = {
   armBuildable: (kind: string) => void;
   getArmedKind: () => string | null;
   mouseTrainUnit: (kind: string, tileX: number, tileY: number) => boolean;
+  // Onboarding cue hooks.
+  getOnboardingCueVisible: () => boolean;
+  dismissOnboardingCue: () => void;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -488,6 +494,14 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
 
     mouseTrainUnit(kind: string, tileX: number, tileY: number): boolean {
       return hudSetters.mouseTrainUnit(kind as UnitKind, tileX, tileY);
+    },
+
+    getOnboardingCueVisible(): boolean {
+      return hudSetters.getOnboardingCueVisible();
+    },
+
+    dismissOnboardingCue(): void {
+      hudSetters.dismissOnboardingCue();
     },
   };
 

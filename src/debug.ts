@@ -81,6 +81,9 @@ export type VyluxHook = {
   armBuildable?: (kind: string) => void;
   getArmedKind?: () => string | null;
   mouseTrainUnit?: (kind: string, tileX: number, tileY: number) => boolean;
+  // Onboarding cue hooks — present when ?e2e=1.
+  getOnboardingCueVisible?: () => boolean;
+  dismissOnboardingCue?: () => void;
 };
 
 declare global {

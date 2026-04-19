@@ -18,6 +18,14 @@ import { tickAi, createAiState } from './ai';
 import { evaluateMatch, type MatchOutcome } from './match';
 import { showMatchOverlay, hideMatchOverlay, isOverlayVisible } from './overlay';
 import { createBuildablesPanel } from './buildables-panel';
+import {
+  createOnboardingCue,
+  dismissCue,
+  resetCue,
+  shouldShowCue,
+  INITIAL_ONBOARDING_CUE_STATE,
+  type OnboardingCueState,
+} from './onboarding-cue';
 import type { UnitKind } from './units-config';
 import {
   INITIAL_TRAINING_PANEL_STATE,
@@ -61,6 +69,18 @@ function onBuildableButtonClick(kind: UnitKind): void {
 }
 
 const buildablesPanel = createBuildablesPanel(onBuildableButtonClick);
+
+// Onboarding cue — shown on fresh match start, dismissed on first HQ click.
+const onboardingCue = createOnboardingCue();
+let onboardingCueState: OnboardingCueState = INITIAL_ONBOARDING_CUE_STATE;
+
+function syncOnboardingCue(): void {
+  if (shouldShowCue(onboardingCueState)) {
+    onboardingCue.show();
+  } else {
+    onboardingCue.hide();
+  }
+}
 
 // Expose HUD setters on the window hook so E2E specs and debug can
 // force deterministic values.
@@ -178,6 +198,10 @@ function resetMatch(): void {
   // 7. Match state.
   matchOutcome = null;
   matchActive = true;
+
+  // 8. Reset onboarding cue — fresh match gets fresh guidance.
+  onboardingCueState = resetCue(onboardingCueState);
+  syncOnboardingCue();
 }
 
 if (hook) {
@@ -236,6 +260,9 @@ attachE2EHook(bundle, {
       setTrainingPanelState(next);
     }
     syncBuildablesPanel();
+    // Dismiss onboarding cue on the first panel open (e2e path).
+    onboardingCueState = dismissCue(onboardingCueState);
+    syncOnboardingCue();
   },
   closeBuildablesPanel: () => {
     const next = handleEscape(trainingPanelState);
@@ -251,6 +278,11 @@ attachE2EHook(bundle, {
   getArmedKind: () => trainingPanelState.armedKind,
   mouseTrainUnit: (kind: UnitKind, tileX: number, tileY: number) => {
     return attemptMouseTrain(kind, tileX, tileY);
+  },
+  getOnboardingCueVisible: () => onboardingCue.isVisible(),
+  dismissOnboardingCue: () => {
+    onboardingCueState = dismissCue(onboardingCueState);
+    syncOnboardingCue();
   },
 });
 
@@ -395,6 +427,11 @@ canvas.addEventListener('pointerdown', (event: PointerEvent) => {
       const next = handleHqClick(trainingPanelState);
       setTrainingPanelState(next);
       syncBuildablesPanel();
+      // Dismiss onboarding cue on the first panel open.
+      if (next.panelOpen) {
+        onboardingCueState = dismissCue(onboardingCueState);
+        syncOnboardingCue();
+      }
       selectHq(hqHit);
     } else {
       // Red HQ click — deselect everything.
