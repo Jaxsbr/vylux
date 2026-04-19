@@ -1,7 +1,7 @@
 ---
 id: worker-legibility
 opened_at: 2026-04-19T09:30:10Z
-status: open
+status: done_by_engineer
 priority: P0
 ---
 
@@ -145,4 +145,4 @@ pulse fires.
 
 ### Commit SHA
 
-(filled after commit)
+`965b010`
