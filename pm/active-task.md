@@ -113,6 +113,6 @@ This unblocks `unit-training`, `combat`, and `ai-opponent` downstream.
 - **Hook API changes:** `spawnWorker`, `moveWorker` on the e2e-hook (requires `?e2e=1`); `getWorkerTile` exposed on the debug hook in dev mode always (no `?e2e=1` needed). Old placeholder worker/raider cubes in `seedEarlyEconomy` / `seedIdleStart` replaced with `buildWorker` calls on real starter workers.
 - **Caveats:** Workers pass through each other — no collision detection. Fine for MVP; flag for `worker-harvesting` or `combat` task. The `pointerdown` worker-click handler added to canvas in `main.ts` runs alongside the placement-mode handler in `input.ts`; idle-mode guard (`state.mode !== 'idle'`) prevents interference when placement mode is active.
 
-Commit SHA: (see below after git commit)
+Commit SHA: `353878e`
 
 Screenshots regenerated: `pm/screenshots/idle-start.png` (4 starter workers visible), `pm/screenshots/early-economy.png`, `pm/screenshots/mid-combat.png`.
