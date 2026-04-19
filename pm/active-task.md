@@ -116,7 +116,7 @@ the visual-target axis already satisfied — makes the MVP **complete**.
 
 status: done_by_engineer
 
-Commit: (see below — filled after commit)
+Commit: dd96f51
 
 ### What shipped
 
