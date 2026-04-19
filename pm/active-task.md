@@ -58,4 +58,4 @@ blue HQ visible from top to bottom.
 - Choice: top-right was selected because the blue HQ sits in the canvas vertical center column; top-right is the furthest from both HQ footprints while keeping both HUD reads (energy top-left, points top-right) symmetrically framed.
 - Blue HQ dome and antenna spire are now fully visible, unobscured, in all three screenshots: `idle-start.png`, `early-economy.png`, `mid-combat.png`.
 - All 19 E2E tests, 120 unit tests, and TypeScript type-check pass. Screenshots regenerated via `npm run scenes`.
-- Commit SHA: (see below after commit)
+- Commit SHA: `901a7c9`
