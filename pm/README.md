@@ -14,6 +14,7 @@ pm/
   backlog.yaml        Task queue.
   active-task.md      Current task the engineer is building (absent when idle).
   .lock               Loop lock (gitignored). Stale after 30 min.
+  inbox/              Messages from Jaco to the PM (see "Directing the PM").
   history/            Completed tasks + tick-log.md.
   scores/             JSON per visual-eval run.
   screenshots/        PNG scenes the PM scores against docs/concepts/.
@@ -58,6 +59,70 @@ rm pm/.lock
 Edit `pm/mvp.md` directly. The PM re-reads it every tick, so changes land
 immediately. If you've already shipped features that a newly-added MVP item
 implicitly covers, tick them off yourself — the PM will trust the file.
+
+## Directing the PM (inbox messages)
+
+When you want to redirect the PM without editing `pm/mvp.md` by hand — e.g.
+you're unhappy with quality, you want to pivot, you want to tighten the
+rubric — drop a message in `pm/inbox/`.
+
+### How it works
+
+- Every tick, **before** the completion gate, the PM lists `pm/inbox/*.md`.
+- Each message's frontmatter has two flags: `draft` and `processed`.
+
+| `draft` | `processed` | PM behaviour                                        |
+| ------- | ----------- | --------------------------------------------------- |
+| `true`  | `false`     | **Ignored.** PM does not read the body. Safe to keep editing. |
+| `false` | `false`     | **Active directive.** PM reads, acts, flips `processed: true`, writes a `## Response` block. |
+| `false` | `true`      | **Historical.** PM skips. Kept in-place for audit.  |
+| `true`  | `true`      | (Shouldn't happen; treated as draft.)               |
+
+- Messages outrank the completion gate — a boss directive can reopen a
+  `status: complete` MVP.
+- Multiple active directives are processed in filename-sort order. Use a
+  date prefix (e.g. `2026-04-19-visual-quality.md`) to order your messages
+  by intent.
+
+### Writing a message
+
+Use the helper script — it copies the template to a date-prefixed,
+slug-sanitised filename:
+
+```
+pm/new-message.sh <slug>
+# e.g.
+pm/new-message.sh visual-quality
+pm/new-message.sh "rubric too lenient"     # spaces get dashed automatically
+```
+
+This creates `pm/inbox/YYYY-MM-DD-<slug>.md` (UTC date) and prints the path.
+
+Then:
+
+1. Open the new file and fill in `## Context`, `## Direction`, and
+   optionally `## Constraints` + `## What 'resolved' looks like`.
+2. While `draft: true`, the PM ignores the file — safe to keep editing.
+3. Flip frontmatter to `draft: false` when ready.
+4. On the next tick (up to ~2 min later), the PM reads, mutates the
+   relevant files (`pm/mvp.md`, `pm/rubric.md`, `pm/backlog.yaml`, or
+   abandons `pm/active-task.md`), then writes a `## Response` block back
+   into your message and sets `processed: true`.
+
+(If you'd rather not use the script, you can `cp pm/inbox/_template.md
+pm/inbox/YYYY-MM-DD-<slug>.md` by hand — same result.)
+
+### Retracting a message
+
+If you want to pull a message back before the PM sees it, just edit it
+back to `draft: true` (or delete the file). Once `processed: true`,
+retracting is a no-op — send a follow-up message instead.
+
+### Reading what the PM did
+
+- The `## Response` section at the bottom of each processed message.
+- The corresponding line in `pm/history/tick-log.md`
+  (`<timestamp> <tick_id> inbox:<filename> → <short action>`).
 
 ## Reading what happened
 
