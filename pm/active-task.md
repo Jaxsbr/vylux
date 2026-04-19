@@ -66,7 +66,7 @@ that does not yet exist.
 - Appended "Refreshing screenshots" section to `pm/README.md`.
 - All 19 E2E tests pass (16 existing + 3 new scenes); typecheck and unit tests clean.
 
-Commit SHA: (see below after commit)
+Commit SHA: 75bfca4
 
 Caveats:
 - HQ meshes are box geometries with neon edge trim — placeholder. Replace with a distinct Tron-style silhouette when the HQ task lands.
