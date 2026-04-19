@@ -76,5 +76,5 @@ bloom halos pulling the eye. It unlocks the `silhouette`, `glow`, and
 - `src/e2e-hook.ts` — removed placeholder HQ boxes from `seedIdleStart`; HQs come from `createScene()` in all three scenes. Energy-node and worker/raider placeholders unchanged.
 - `src/hq.test.ts` — 9 unit tests covering group name, tier count, Mesh+LineSegments per tier, emissive colour by faction, emissive intensity >= 1.0, and world position correctness.
 - Screenshots `pm/screenshots/{idle-start,early-economy,mid-combat}.png` regenerated — two distinct multi-tier neon silhouettes visible at opposite grid corners with bloom halos.
-- Commit SHA: (see below — filled after git commit)
+- Commit SHA: `32a70ec`
 - Visual caveat: bloom threshold stays at 0 (any bright pixel halos); energy nodes are still green spheres — palette axis will only fully clear once nodes are reworked in a later task.
