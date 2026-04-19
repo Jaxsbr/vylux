@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   BASE_INCOME,
+  NODE_INCOME,
   tickEnergy,
+  tickEnergyWithNodes,
   setEnergyValues,
   createEnergyLedger,
 } from './economy';
@@ -101,5 +103,32 @@ describe('createEnergyLedger', () => {
     ledger.set({ blue: 99 });
     expect(ledger.get().blue).toBe(99);
     expect(ledger.get().red).toBeCloseTo(before);
+  });
+});
+
+describe('tickEnergyWithNodes', () => {
+  it('applies only BASE_INCOME when no node workers', () => {
+    const next = tickEnergyWithNodes({ blue: 0, red: 0 }, { blue: 0, red: 0 }, 1);
+    expect(next.blue).toBeCloseTo(BASE_INCOME);
+    expect(next.red).toBeCloseTo(BASE_INCOME);
+  });
+
+  it('adds NODE_INCOME per worker on node for the relevant faction', () => {
+    const next = tickEnergyWithNodes({ blue: 0, red: 0 }, { blue: 2, red: 1 }, 1);
+    expect(next.blue).toBeCloseTo(BASE_INCOME + NODE_INCOME * 2);
+    expect(next.red).toBeCloseTo(BASE_INCOME + NODE_INCOME * 1);
+  });
+
+  it('does not mutate input', () => {
+    const input = { blue: 10, red: 20 };
+    tickEnergyWithNodes(input, { blue: 1, red: 0 }, 1);
+    expect(input.blue).toBe(10);
+    expect(input.red).toBe(20);
+  });
+
+  it('clamps to non-negative even with zero delta', () => {
+    const next = tickEnergyWithNodes({ blue: 0, red: 0 }, { blue: 0, red: 0 }, 0);
+    expect(next.blue).toBe(0);
+    expect(next.red).toBe(0);
   });
 });

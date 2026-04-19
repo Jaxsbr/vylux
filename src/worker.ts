@@ -3,6 +3,11 @@ import type { FactionId } from './placement';
 import { GRID_CONSTANTS } from './grid';
 import { UNIT_STATS } from './units-config';
 import { buildHpBar, type HpBar } from './hp-bar';
+import {
+  harvestPulseIntensity,
+  PULSE_DURATION,
+  PULSE_PEAK_DELTA,
+} from './worker-harvest-pulse';
 
 // Convert a floating-point tile coordinate to world position without integer assertion.
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
@@ -73,13 +78,38 @@ export type WorkerBundle = {
   takeDamage: (amount: number) => { died: boolean; damageDealt: number };
   /** Remove mesh from scene and dispose geometries/materials. */
   dispose: (scene: THREE.Scene) => void;
+  /**
+   * Signal that this worker just received a NODE_INCOME tick — triggers a
+   * brief emissive spike on the accent ring. Must be called once per tick.
+   */
+  triggerHarvestPulse: () => void;
+  /**
+   * Advance the harvest-pulse animation. Call every frame with the frame delta.
+   * No-op when the worker is not currently on a node or the pulse has decayed.
+   */
+  tickPulse: (dt: number) => void;
+  /**
+   * Read-only: seconds elapsed since last pulse trigger, or -1 when not pulsing.
+   * Exposed so e2e hooks can sample the animation state.
+   */
+  readonly pulseElapsed: number;
+  /**
+   * Read-only: current emissive intensity of the accent ring.
+   * Exposed for e2e assertions without importing Three.js.
+   */
+  readonly accentEmissiveIntensity: number;
 };
 
 function clampTile(v: number): number {
   return Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, Math.round(v)));
 }
 
-function buildDiamondMesh(emissiveHex: number): THREE.Group {
+type DiamondMeshResult = {
+  group: THREE.Group;
+  accentMat: THREE.MeshStandardMaterial;
+};
+
+function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
   const group = new THREE.Group();
 
   // Upper half — top cone, wide base pointing down.
@@ -152,7 +182,7 @@ function buildDiamondMesh(emissiveHex: number): THREE.Group {
   // The group origin will be placed at the tile's world Y.
   group.position.y = WORKER_CONSTANTS.bodyY;
 
-  return group;
+  return { group, accentMat };
 }
 
 function buildSelectionRing(emissiveHex: number): THREE.Mesh {
@@ -177,7 +207,7 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   const group = new THREE.Group();
   group.name = `worker-${faction}`;
 
-  const diamond = buildDiamondMesh(emissive);
+  const { group: diamond, accentMat } = buildDiamondMesh(emissive);
   const selectionRing = buildSelectionRing(emissive);
 
   const hpBar = buildHpBar(faction, 0.7);
@@ -193,6 +223,9 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   let targetX = tileX;
   let targetY = tileY;
 
+  // Harvest pulse state — -1 means no active pulse.
+  let pulseElapsedInternal = -1;
+
   const maxHp = UNIT_STATS.worker.maxHp;
 
   const bundle: WorkerBundle = {
@@ -206,6 +239,8 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
     hp: maxHp,
     maxHp,
     hpBar,
+    get pulseElapsed(): number { return pulseElapsedInternal; },
+    get accentEmissiveIntensity(): number { return accentMat.emissiveIntensity; },
 
     takeDamage(amount: number): { died: boolean; damageDealt: number } {
       const before = bundle.hp;
@@ -278,6 +313,29 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
       bundle.targetTileY = cy;
       const w = tileFloatToWorld(cx, cy);
       group.position.set(w.x, w.y, w.z);
+    },
+
+    triggerHarvestPulse(): void {
+      pulseElapsedInternal = 0;
+    },
+
+    tickPulse(dt: number): void {
+      if (pulseElapsedInternal < 0) {
+        // Not pulsing — ensure accent is at baseline in case it was pulsing before.
+        accentMat.emissiveIntensity = WORKER_CONSTANTS.accentEmissiveIntensity;
+        return;
+      }
+      pulseElapsedInternal += dt;
+      accentMat.emissiveIntensity = harvestPulseIntensity(
+        WORKER_CONSTANTS.accentEmissiveIntensity,
+        PULSE_PEAK_DELTA,
+        pulseElapsedInternal,
+        PULSE_DURATION,
+      );
+      if (pulseElapsedInternal >= PULSE_DURATION) {
+        pulseElapsedInternal = -1;
+        accentMat.emissiveIntensity = WORKER_CONSTANTS.accentEmissiveIntensity;
+      }
     },
   };
 

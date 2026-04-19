@@ -3,7 +3,8 @@ import { attachDebugHook } from './debug';
 import { attachE2EHook } from './e2e-hook';
 import { attachInputHandlers } from './input';
 import { INITIAL_STATE, type PlacementState } from './placement';
-import { createEnergyLedger } from './economy';
+import { createEnergyLedger, tickEnergyWithNodes, NODE_INCOME } from './economy';
+import type { NodeWorkerCount } from './economy';
 import { createPointsLedger } from './points';
 import { createHud } from './hud';
 import { selectWorker, selectHq, getSelected, getSelectedHq, clearSelection } from './selection';
@@ -506,6 +507,11 @@ window.addEventListener('keydown', (event: KeyboardEvent) => {
   }
 });
 
+// Per-worker harvest accumulator — tracks fractional NODE_INCOME progress.
+// Key is the worker object reference identity (using Map). When accumulator
+// crosses 1.0 a pulse is triggered and the accumulator wraps.
+const workerHarvestAcc = new WeakMap<object, number>();
+
 let lastTime = performance.now();
 
 function animate(): void {
@@ -516,7 +522,21 @@ function animate(): void {
   lastTime = now;
 
   if (matchActive) {
-    energyLedger.tick(deltaSeconds);
+    // Count workers on energy nodes per faction for NODE_INCOME bonus.
+    const allUnitsForIncome = [
+      ...bundle.workers,
+      ...bundle.defenders,
+      ...bundle.raiders,
+    ];
+    const nodeWorkers: NodeWorkerCount = { blue: 0, red: 0 };
+    for (const node of bundle.energyNodes) {
+      const holder = computeNodeHolder(node, allUnitsForIncome);
+      if (holder === 'blue') nodeWorkers.blue++;
+      else if (holder === 'red') nodeWorkers.red++;
+    }
+
+    // Tick energy with node income bonus.
+    energyLedger.set(tickEnergyWithNodes(energyLedger.get(), nodeWorkers, deltaSeconds));
     hud.updateEnergy(energyLedger.get());
     hud.updatePoints(pointsLedger.get());
 
@@ -578,6 +598,27 @@ function animate(): void {
     }
     for (const r of bundle.raiders) {
       r.tick(deltaSeconds);
+    }
+
+    // Harvest pulse — fire once per NODE_INCOME "unit accrued" for workers on nodes.
+    for (const w of bundle.workers) {
+      const onNode = bundle.energyNodes.some(
+        (n) => n.tileX === w.tileX && n.tileY === w.tileY,
+      );
+      if (onNode) {
+        const prev = workerHarvestAcc.get(w) ?? 0;
+        const next = prev + NODE_INCOME * deltaSeconds;
+        if (next >= 1) {
+          w.triggerHarvestPulse();
+          workerHarvestAcc.set(w, next - Math.floor(next));
+        } else {
+          workerHarvestAcc.set(w, next);
+        }
+      } else {
+        // Worker left the node — reset accumulator so next arrival starts fresh.
+        workerHarvestAcc.set(w, 0);
+      }
+      w.tickPulse(deltaSeconds);
     }
 
     // Advance raiders toward nearest enemy — runs before combat so raiders

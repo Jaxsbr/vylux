@@ -97,6 +97,9 @@ export type VyluxHook = {
   getNodeTooltipVisible?: () => boolean;
   showNodeTooltip?: (x: number, y: number) => void;
   hideNodeTooltip?: () => void;
+  // Harvest pulse hooks — present when ?e2e=1.
+  getWorkerPulseElapsed?: (index: number) => number;
+  getWorkerAccentIntensity?: (index: number) => number;
 };
 
 declare global {

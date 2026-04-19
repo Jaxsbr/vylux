@@ -1,104 +1,148 @@
 ---
-id: buildables-and-node-tooltips
-opened_at: 2026-04-19T09:22:15Z
-status: done_by_engineer
+id: worker-legibility
+opened_at: 2026-04-19T09:30:10Z
+status: open
 priority: P0
 ---
 
-# Tooltips — buildables panel + energy nodes
+# Worker behaviour legibility — consistent anim + readable harvest tick
 
 ## Outcome
 
-From the player's perspective: when the buildables panel is open and the
-player hovers a Worker / Defender / Raider button, a small tooltip
-appears showing the unit's name, cost, and one-line role. When the
-player hovers any energy node on the grid (at any time during the
-match), a tooltip appears explaining what it is and why it matters. The
-game stops being silent about what its own elements do.
+From the player's perspective: blue and red workers behave identically.
+When a worker is not on an energy node it sits still (no random
+jitter). When a worker is on an energy node there is a clear visual
+cue that ties to the harvest/income tick — a brief pulse, beam, or
+scale tween fires on each `NODE_INCOME` tick so the player can see
+"this worker is actively harvesting right now". The current red
+up/down random-looking motion is gone or redefined as the harvest
+tick itself and reads that way. A cold-start player can tell from a
+single screenshot whether a worker is idling or harvesting.
 
 ## Acceptance
 
-- **Buildables panel tooltips** (DOM): hover on each of the three
-  buildable buttons (Worker, Defender, Raider) shows a tooltip with:
-  - Unit name (e.g. "WORKER")
-  - Cost (e.g. "20 energy")
-  - One-line role text — write these clean:
-    - Worker: "Harvests energy on a node. No combat."
-    - Defender: "Stationary. Attacks adjacent enemies. High HP."
-    - Raider: "Advances toward enemy. Fast, low HP."
-  - Tooltip dismisses on mouse-leave.
-  - Tooltip does not block clicks on the button (pointer-events:none
-    on the tooltip itself, parent button still clickable).
-- **Energy node tooltips** (DOM overlay, not canvas-drawn): hover a
-  grid tile that hosts an energy node at any time, show a tooltip with:
-  - Label "ENERGY NODE"
-  - One-line: "Park a worker here to boost income (+NODE_INCOME/s)."
-    (Substitute the real constant value from `units-config.ts` or
-    wherever `NODE_INCOME` lives; do **not** hardcode.)
-  - Dismisses on leaving the tile.
-- **Chrome parity**: both tooltips use the existing HUD chrome — mono
-  font, cyan outline, dark panel, same corner style as the buildables
-  panel / HUD. No new visual language. Faction-colored variations are
-  not required.
-- **Layering**: tooltips sit above the HUD/buildables panel (z-index
-  correct) and never clip off-screen near the edges of the viewport —
-  they flip / clamp to stay fully visible.
-- **Coverage**:
-  - Unit tests for whatever new state module you introduce (tooltip
-    visibility state-machine / position clamp logic — pure functions).
-  - Playwright spec `tests/e2e/tooltips.spec.ts`:
-    1. Seed a match. Click blue HQ to open buildables panel.
-    2. Hover each buildable, assert tooltip text contains the unit
-       name, cost, and role keyword.
-    3. Hover an energy node tile, assert tooltip contains "ENERGY
-       NODE" + "worker" + income value.
-    4. Move mouse away, assert tooltip disappears.
-- **Screenshot**: add one new scene screenshot
-  `pm/screenshots/tooltip-buildables.png` showing the Raider tooltip
-  visible above the buildables panel.
-- No hard-fail trigger from `pm/rubric.md` introduced (tooltips must
-  not obscure the blue HQ silhouette — prefer flipping direction when
-  the node is near the HUD edge).
+- Blue workers and red workers share **the same** idle and harvest
+  visuals — no faction-specific motion logic. Only the faction color
+  (cyan vs red-orange) differs.
+- Off-node workers are static: no bob, no jitter, no sway. Full stop.
+- On-node workers visibly pulse on every `NODE_INCOME` tick. Choose
+  one and stick to it:
+  - (a) a short scale-up-then-down tween on the worker mesh (e.g.
+    1.0 → 1.15 → 1.0 over ~180ms), **or**
+  - (b) a brief emissive/edge-pulse on the worker's accent mesh
+    (e.g. emissiveIntensity spike and decay over ~180ms), **or**
+  - (c) a short beam/line segment between the worker and the node
+    that fades over ~180ms.
+  Whatever you pick, the pulse must be tied 1:1 to the income tick
+  fired by `economy.ts` — not a free-running animation clock.
+- Pure animation module with unit tests (e.g.
+  `src/worker-harvest-pulse.ts` + `.test.ts`): pure function taking
+  elapsed-since-tick + tick duration → scale/intensity factor. No
+  Three.js in the unit tests.
+- Wiring in the animate loop hooks the pulse state to the actual
+  `NODE_INCOME` fire event for any worker currently on a node.
+- Playwright spec `tests/e2e/worker-legibility.spec.ts`:
+  1. Seed a match. Spawn one blue worker off-node and one blue
+     worker on an energy node (via `window.__vylux` — extend hooks
+     if needed, justify in handoff).
+  2. Advance time ~0.5 s with `advanceTime(0.05)` repeated. On each
+     sub-step, sample the worker's current scale/emissive-intensity
+     via a small hook (justify).
+  3. Assert: the off-node worker's sampled values never vary beyond
+     epsilon. The on-node worker shows non-trivial variation that
+     peaks within the first ~200ms after a `NODE_INCOME` tick.
+  4. Fail if the off-node worker moves at all, or if the on-node
+     worker never pulses.
+- Regenerate `pm/screenshots/early-economy.png` so the on-node
+  harvest visual is visible in the frame (if the harvest pulse is
+  transient, capture at a moment where at least one worker's pulse
+  is near its peak — use a deterministic seed via the scene runner
+  if needed).
+- Existing Playwright specs must still pass (mouse-end-to-end,
+  offensive-reach, idle-loses, tooltips, onboarding-cue).
 
 ## Constraints
 
-- DOM tooltips only. Do not draw tooltips with Three.js / CSS3DRenderer
-  / sprites. Reuse `hud.ts` / `buildables-panel.ts` chrome conventions.
-- Do not rewrite `buildables-panel.ts` structure — extend it with
-  tooltip elements and handlers only.
-- Keep mouse-only input. No tab-to-focus tooltip flow needed.
-- Do not add new buildables, new unit stats, new constants. Reuse what
-  `units-config.ts` exposes.
-- Do not touch the three remaining reopen-2 siblings
-  (`worker-legibility`, `event-feedback-pulses`, `offensive-reach` +
-  `idle-loses-tuning` already done).
-- Do not regress existing Playwright specs.
+- Do not change worker **movement** behaviour (selection + tile-hop
+  click-to-move stays identical). Only idle / on-node visuals
+  change.
+- Do not change the economy tick rate or `NODE_INCOME` value.
+- Do not introduce particle systems, post-processing effects, or
+  sound. Stick to mesh tweens / emissive changes / thin line
+  segments.
+- Both factions must share the same code path. No `if
+  (faction === 'red')` branches in the animation logic.
+- Do not touch the other reopen-2 siblings (`event-feedback-pulses`
+  is still separate — it's for place / death / capture / point-tick
+  events, not harvest).
+- Do not regress `pm/rubric.md` v2 thresholds (no hard-fails).
 
 ## Handoff
 
-Tooltips shipped across buildables panel and energy nodes. Full verify green: tsc clean, 272 unit tests, 69 e2e tests (10 new).
+### Pulse option chosen: emissive spike (option b)
 
-**Summary:** DOM-only tooltip chrome added — mono font, cyan outline, dark panel matching existing HUD. Buildables panel now shows name / cost / role tooltip on hover of each button; dismisses on mouse-leave; pointer-events:none so clicks still land. Energy node tooltip fires from a canvas pointermove handler that raycasts each frame and checks against `bundle.energyNodes`; shows "ENERGY NODE" + income description reading `NODE_INCOME` from `economy.ts`. Edge clamp via pure `clampTooltipPosition()` in `tooltip.ts`; unit-tested in `tooltip.test.ts`. Z-index 400 — above HUD (100) and buildables panel (200).
+Rationale: the Tron palette already drives readability through emissive accents —
+making the worker's equatorial ring "flare" on each income tick is consistent with
+the visual language and reads clearly in a static screenshot without relying on
+the viewer being able to see motion. Scale tweens are subtle from the isometric
+camera angle; the emissive spike lights up the bloom pass noticeably.
 
-**Files touched:**
-- `src/tooltip.ts` — new: `clampTooltipPosition()` (pure) + `createTooltip()` (DOM factory)
-- `src/tooltip.test.ts` — new: 8 unit tests for `clampTooltipPosition`
-- `src/node-tooltip.ts` — new: `createNodeTooltip()` with `NODE_INCOME` from `economy.ts`
-- `src/buildables-panel.ts` — extended: tooltip per button (mouseenter/mousemove/mouseleave)
-- `src/main.ts` — added `createNodeTooltip` instance, canvas `pointermove`+`pointerleave` handlers, `__vylux` hooks for node tooltip
-- `src/debug.ts` — added `getNodeTooltipVisible`, `showNodeTooltip`, `hideNodeTooltip` to `VyluxHook` type
-- `src/e2e-hook.ts` — added node tooltip hooks to `HudSetters` and `E2EHookExtension`; wired through `attachE2EHook`
-- `playwright.config.ts` — added `tooltips.spec.ts` to `dev` project testMatch
-- `tests/e2e/tooltips.spec.ts` — new: 10 tests covering hover/dismiss/text/pointer-events/screenshot
-- `pm/screenshots/tooltip-buildables.png` — screenshot of Raider tooltip above buildables panel
+Pulse curve: fast linear attack (0 → peak in 17% of duration ~30ms) then
+quadratic decay back to baseline over the remaining ~150ms. Total duration 180ms.
+Base accent emissiveIntensity = 2.0; peak = 5.0 (+3.0 delta).
 
-**New `window.__vylux` hooks:**
-- `getNodeTooltipVisible(): boolean` — reflects tooltip visibility state
-- `showNodeTooltip(x, y)` — programmatically show the node tooltip at a position (for e2e assertions without needing real raycasting)
-- `hideNodeTooltip()` — programmatically hide
+### NODE_INCOME wiring
 
-Justification: these three hooks follow the same pattern as `getOnboardingCueVisible`/`dismissOnboardingCue` — they let Playwright assert the tooltip state without synthesizing precise canvas hover coordinates for node tiles.
+`economy.ts::tickEnergy()` only used `BASE_INCOME` — `NODE_INCOME` was exported
+but never applied to energy. Added `tickEnergyWithNodes()` (pure, tested) that
+accepts a `NodeWorkerCount` per faction and adds `NODE_INCOME * count * dt` on
+top of `BASE_INCOME`. Both `main.ts` animate loop and `e2e-hook.ts::advanceTime`
+now count how many workers each faction has on held energy nodes and use this
+function. `tickEnergy()` is unchanged (still used by existing tests).
 
-**Commit SHA:** fd17dbf
+The discrete pulse trigger uses a per-worker fractional accumulator: accrues
+`NODE_INCOME * dt` each frame; when it crosses 1.0 `triggerHarvestPulse()` is
+called and the accumulator wraps. This gives one pulse every `1/NODE_INCOME`
+seconds (0.5s with NODE_INCOME=2). Off-node: accumulator is reset to 0 and no
+pulse fires.
 
-**Verify:** tsc --noEmit clean + 272 unit tests + 69 e2e tests, all green.
+### New `window.__vylux` hooks (both require `?e2e=1`)
+
+- `getWorkerPulseElapsed(index)` — seconds since last pulse trigger, -1 if not
+  pulsing. Index is into `bundle.workers` (all factions, spawn order).
+  Justified: Playwright needs to assert whether a pulse is active without
+  importing Three.js.
+- `getWorkerAccentIntensity(index)` — current `emissiveIntensity` of the accent
+  ring material. Justified: same; avoids any Three.js in test assertions.
+
+### Files touched
+
+- `src/worker-harvest-pulse.ts` — new: pure curve functions
+- `src/worker-harvest-pulse.test.ts` — new: 12 unit tests
+- `src/economy.ts` — added `tickEnergyWithNodes`, `NodeWorkerCount`
+- `src/economy.test.ts` — added 4 tests for `tickEnergyWithNodes`
+- `src/worker.ts` — refactored `buildDiamondMesh` to return `accentMat`;
+  added `triggerHarvestPulse`, `tickPulse`, `pulseElapsed`, `accentEmissiveIntensity`
+  to `WorkerBundle` type + implementation
+- `src/debug.ts` — added `getWorkerPulseElapsed?` and `getWorkerAccentIntensity?`
+  to `VyluxHook`
+- `src/e2e-hook.ts` — wired `tickEnergyWithNodes`, harvest pulse ticking in
+  `advanceTime`; added `getWorkerPulseElapsed` and `getWorkerAccentIntensity`
+  to `E2EHookExtension` and `attachE2EHook`
+- `src/main.ts` — replaced `energyLedger.tick()` with `tickEnergyWithNodes`;
+  added `workerHarvestAcc` WeakMap; added harvest pulse trigger + `tickPulse`
+  calls in animate loop
+- `playwright.config.ts` — added `worker-legibility.spec.ts` to dev testMatch
+- `tests/e2e/worker-legibility.spec.ts` — new: 5 e2e tests
+- `pm/screenshots/early-economy.png` — regenerated: captured at 530ms into the
+  match (0.5s advance + 0.03s peak-attack step) so at least one on-node worker
+  is at peak emissive during the screenshot frame
+
+### Verify
+
+`npx tsc --noEmit && npm run test && npm run test:e2e` — fully green.
+288 unit tests. 74 e2e tests.
+
+### Commit SHA
+
+(filled after commit)

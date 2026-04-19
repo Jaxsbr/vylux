@@ -2,7 +2,7 @@
 // Pure helper + a mutable instance. No imports from scene.ts or input.ts.
 
 export const BASE_INCOME = 1; // energy per second, always trickles
-export const NODE_INCOME = 2; // bonus energy/sec per held node (future wiring)
+export const NODE_INCOME = 2; // bonus energy/sec per held node
 export const NODE_POINT_RATE = 1; // points/sec per held energy node
 
 export type FactionEnergy = { blue: number; red: number };
@@ -45,6 +45,36 @@ export function subtractEnergy(
   return {
     ...current,
     [faction]: Math.max(0, current[faction] - cost),
+  };
+}
+
+export type NodeWorkerCount = { blue: number; red: number };
+
+/**
+ * Advance energy by BASE_INCOME trickle plus NODE_INCOME bonus for any
+ * workers standing on held energy nodes.
+ * Pure: returns a new FactionEnergy; never mutates the input.
+ *
+ * @param current    - Current energy state.
+ * @param nodeWorkers - Number of workers per faction currently on nodes.
+ * @param deltaSeconds - Frame delta in seconds.
+ */
+export function tickEnergyWithNodes(
+  current: FactionEnergy,
+  nodeWorkers: NodeWorkerCount,
+  deltaSeconds: number,
+): FactionEnergy {
+  return {
+    blue: Math.max(
+      0,
+      current.blue +
+        (BASE_INCOME + NODE_INCOME * nodeWorkers.blue) * deltaSeconds,
+    ),
+    red: Math.max(
+      0,
+      current.red +
+        (BASE_INCOME + NODE_INCOME * nodeWorkers.red) * deltaSeconds,
+    ),
   };
 }
 

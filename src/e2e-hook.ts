@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { SceneBundle } from './scene';
 import type { FactionEnergy } from './economy';
-import { tickEnergy } from './economy';
+import { tickEnergyWithNodes, NODE_INCOME } from './economy';
+import type { NodeWorkerCount } from './economy';
 import type { FactionPoints } from './points';
 import type { FactionHold } from './energy-node';
 import { buildWorker } from './worker';
@@ -237,6 +238,9 @@ export type E2EHookExtension = {
   getNodeTooltipVisible: () => boolean;
   showNodeTooltip: (x: number, y: number) => void;
   hideNodeTooltip: () => void;
+  // Harvest pulse hooks — index is into bundle.workers (all factions, spawn order).
+  getWorkerPulseElapsed: (index: number) => number;
+  getWorkerAccentIntensity: (index: number) => number;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -247,6 +251,9 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
   // via setAiEnabled(true). This prevents AI from interfering with existing
   // combat/worker/training specs that were written before AI existed.
   hudSetters.setAiEnabled(false);
+
+  // Per-worker harvest accumulator for pulse triggering in advanceTime.
+  const e2eWorkerHarvestAcc = new WeakMap<object, number>();
 
   const overlayGroup = new THREE.Group();
   overlayGroup.name = 'e2e-overlays';
@@ -368,8 +375,26 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
         const dt = Math.min(STEP, remaining);
         remaining -= dt;
 
-        // Tick energy — mirrors main.ts energyLedger.tick.
-        energyCache = tickEnergy(energyCache, dt);
+        // Tick energy with node income bonus — mirrors main.ts.
+        const allUnitsForIncome = [
+          ...bundle.workers,
+          ...bundle.defenders,
+          ...bundle.raiders,
+        ];
+        const nodeWorkers: NodeWorkerCount = { blue: 0, red: 0 };
+        for (const node of bundle.energyNodes) {
+          let hasBlue = false;
+          let hasRed = false;
+          for (const u of allUnitsForIncome) {
+            if (u.tileX === node.tileX && u.tileY === node.tileY) {
+              if (u.faction === 'blue') hasBlue = true;
+              else hasRed = true;
+            }
+          }
+          if (hasBlue && !hasRed) nodeWorkers.blue++;
+          else if (hasRed && !hasBlue) nodeWorkers.red++;
+        }
+        energyCache = tickEnergyWithNodes(energyCache, nodeWorkers, dt);
 
         // Tick AI if enabled.
         if (hudSetters.getAiEnabled()) {
@@ -417,6 +442,26 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
         for (const w of bundle.workers) w.tick(dt);
         for (const d of bundle.defenders) d.tick(dt);
         for (const r of bundle.raiders) r.tick(dt);
+
+        // Harvest pulse — mirror of main.ts animate loop logic.
+        for (const w of bundle.workers) {
+          const onNode = bundle.energyNodes.some(
+            (n) => n.tileX === w.tileX && n.tileY === w.tileY,
+          );
+          if (onNode) {
+            const prev = e2eWorkerHarvestAcc.get(w) ?? 0;
+            const next = prev + NODE_INCOME * dt;
+            if (next >= 1) {
+              w.triggerHarvestPulse();
+              e2eWorkerHarvestAcc.set(w, next - Math.floor(next));
+            } else {
+              e2eWorkerHarvestAcc.set(w, next);
+            }
+          } else {
+            e2eWorkerHarvestAcc.set(w, 0);
+          }
+          w.tickPulse(dt);
+        }
 
         // Advance raiders toward nearest enemy (mirrors main.ts).
         const raiderRange = UNIT_STATS.raider.range;
@@ -598,6 +643,18 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
 
     hideNodeTooltip(): void {
       hudSetters.hideNodeTooltip();
+    },
+
+    getWorkerPulseElapsed(index: number): number {
+      const w = bundle.workers[index];
+      if (w === undefined) return -1;
+      return w.pulseElapsed;
+    },
+
+    getWorkerAccentIntensity(index: number): number {
+      const w = bundle.workers[index];
+      if (w === undefined) return 0;
+      return w.accentEmissiveIntensity;
     },
   };
 
