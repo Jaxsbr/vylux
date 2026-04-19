@@ -2,7 +2,7 @@
 id: node-control-points
 opened_at: 2026-04-19T05:17:20Z
 priority: P0
-status: open
+status: done_by_engineer
 ---
 
 # Node-control points — 1 pt/sec per held energy node
@@ -94,7 +94,7 @@ faction's point counter upward in the HUD.
 
 ## Handoff
 
-**Commit SHA:** (filled after commit)
+**Commit SHA:** f89a34d
 
 **Summary:** Shipped node-control scoring. New `src/node-points.ts` exports `computeNodeHolder` (pure, reused for both glow and scoring) and `tickNodePoints` (fractional accumulator, whole-point emission via existing `addPoints`). `NODE_POINT_RATE = 1` and `NODE_INCOME = 2` added to `economy.ts`. `EnergyNodeBundle` gains `pointAccumulator` and `lastHolder`. `main.ts` calls `tickNodePoints` + updates node glow from live unit positions each frame. `advanceTime` in `e2e-hook.ts` now also ticks node points. New hooks: `getNodePointAccumulator`, `getPoints`. Unit tests in `src/node-points.test.ts` (11 tests). New `tests/e2e/node-points.spec.ts` (2 tests). `early-economy.spec.ts` adds `advanceTime(2.0)` to show live point accrual in screenshot.
 
