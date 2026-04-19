@@ -99,6 +99,6 @@ Tooltips shipped across buildables panel and energy nodes. Full verify green: ts
 
 Justification: these three hooks follow the same pattern as `getOnboardingCueVisible`/`dismissOnboardingCue` — they let Playwright assert the tooltip state without synthesizing precise canvas hover coordinates for node tiles.
 
-**Commit SHA:** (see git log — committed on main)
+**Commit SHA:** fd17dbf
 
 **Verify:** tsc --noEmit clean + 272 unit tests + 69 e2e tests, all green.
