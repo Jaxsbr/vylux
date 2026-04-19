@@ -87,7 +87,7 @@ and `Point system`).
 - Updated all three scene specs (`idle-start`, `early-economy`, `mid-combat`) to seed deterministic energy and point values before taking their screenshots; regenerated `pm/screenshots/{idle-start,early-economy,mid-combat}.png` via `npm run scenes`.
 - Verify: `npx tsc --noEmit && npm run test && npm run test:e2e` — 109 unit tests + 19 E2E tests, all green.
 
-Commit SHA: (filled after commit)
+Commit SHA: 90c25db
 
 Follow-ups worth a dedicated task:
 - Camera framing: grid occupies <1/3 of frame; HQ halos dominate centre — score notes this repeatedly. A camera zoom-out or grid-offset task would improve `grid_presence` and `composition` axes.
