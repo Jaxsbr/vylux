@@ -1,7 +1,7 @@
 ---
 task_id: mouse-driven-training
 priority: P0
-status: dispatched
+status: done_by_engineer
 dispatched_at: 2026-04-19T07:06:46Z
 dispatched_tick: 1C68398E
 mvp_link: "pm/mvp.md — acceptance items 'Unit training (mouse-driven)' and 'Mouse-driven end-to-end match'"
@@ -139,7 +139,7 @@ When done, fill out the `## Handoff` section below with:
 ## Handoff
 
 **Status:** done_by_engineer
-**Commit:** (see below — filled after commit)
+**Commit:** `b89e162`
 
 ### Files touched
 
