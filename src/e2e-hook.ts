@@ -1,10 +1,13 @@
 import * as THREE from 'three';
-import { tileToWorld } from './grid';
 import type { SceneBundle } from './scene';
 import type { FactionEnergy } from './economy';
 import type { FactionPoints } from './points';
 import type { FactionHold } from './energy-node';
 import { buildWorker } from './worker';
+import { buildDefender } from './defender';
+import { buildRaider } from './raider';
+import type { UnitKind } from './units-config';
+import { selectHq as selectionSelectHq, clearSelection, getSelectedHq } from './selection';
 
 // E2E-only hook — installed only when the URL contains `?e2e=1`.
 // This file is imported by main.ts but the install function exits early unless
@@ -12,53 +15,12 @@ import { buildWorker } from './worker';
 // never run any of this logic.
 //
 // State-ownership: this module does NOT write to placement.ts state. It seeds
-// placeholder Three.js meshes directly into a dedicated `e2e-overlays` group
-// on the scene so the main reconcile loop never sees them.
+// unit meshes directly into the scene so the main reconcile loop never sees them.
 //
 // HQs and energy nodes are NOT seeded here — they are pre-placed by
 // createScene() and are always present in the scene.
 
-const BLUE_HEX = 0x00e5ff;
-const RED_HEX = 0xff5a1f;
-const BODY_COLOR = '#0d1117';
-const PLACED_Y = 0.5;
-
 type SceneName = 'idle-start' | 'early-economy' | 'mid-combat';
-
-function hexColor(hex: number): string {
-  return '#' + hex.toString(16).padStart(6, '0');
-}
-
-function makeBox(
-  size: number,
-  height: number,
-  colorHex: number,
-  y: number,
-): THREE.Mesh {
-  const geometry = new THREE.BoxGeometry(size, height, size);
-  const material = new THREE.MeshStandardMaterial({
-    color: BODY_COLOR,
-    emissive: colorHex,
-    emissiveIntensity: 0,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
-  const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(geometry),
-    new THREE.LineBasicMaterial({ color: hexColor(colorHex) }),
-  );
-  edges.name = 'e2e-trim';
-  mesh.add(edges);
-  mesh.position.y = y;
-  return mesh;
-}
-
-function placeAt(mesh: THREE.Mesh, tileX: number, tileY: number): void {
-  const world = tileToWorld(tileX, tileY);
-  mesh.position.set(world.x, mesh.position.y, world.z);
-}
 
 function clearGroup(group: THREE.Group): void {
   while (group.children.length > 0) {
@@ -104,6 +66,17 @@ function seedEarlyEconomy(group: THREE.Group, bundle: SceneBundle): void {
   redExtra.mesh.name = 'e2e-spawned-red-worker';
   bundle.scene.add(redExtra.mesh);
   bundle.workers.push(redExtra);
+
+  // Spawn 1 defender per faction near each HQ — shows new silhouette.
+  const blueDefender = buildDefender('blue', 1, 1);
+  blueDefender.mesh.name = 'e2e-spawned-blue-defender';
+  bundle.scene.add(blueDefender.mesh);
+  bundle.defenders.push(blueDefender);
+
+  const redDefender = buildDefender('red', 18, 18);
+  redDefender.mesh.name = 'e2e-spawned-red-defender';
+  bundle.scene.add(redDefender.mesh);
+  bundle.defenders.push(redDefender);
 }
 
 function seedMidCombat(group: THREE.Group, bundle: SceneBundle): void {
@@ -117,44 +90,57 @@ function seedMidCombat(group: THREE.Group, bundle: SceneBundle): void {
   if (bundle.workers[2]) bundle.workers[2].setTile(17, 18);
   if (bundle.workers[3]) bundle.workers[3].setTile(18, 17);
 
-  // Blue raiders charging toward the red HQ (placeholder boxes — real raider mesh is a future task).
+  // Blue raiders charging toward the red HQ — real raider meshes.
   const blueRaiderPositions: [number, number][] = [
     [15, 16],
     [16, 16],
     [16, 17],
   ];
   for (const [tx, ty] of blueRaiderPositions) {
-    const raider = makeBox(0.65, 0.65, BLUE_HEX, PLACED_Y);
-    raider.name = 'e2e-blue-raider';
-    placeAt(raider, tx, ty);
-    group.add(raider);
+    const raider = buildRaider('blue', tx, ty);
+    raider.mesh.name = 'e2e-blue-raider';
+    bundle.scene.add(raider.mesh);
+    bundle.raiders.push(raider);
   }
 
-  // Red defenders near their HQ (placeholder boxes — real defender mesh is a future task).
+  // Red defenders near their HQ — real defender meshes.
   const redDefenderPositions: [number, number][] = [
     [17, 17],
     [18, 18],
   ];
   for (const [tx, ty] of redDefenderPositions) {
-    const defender = makeBox(0.75, 0.9, RED_HEX, PLACED_Y);
-    defender.name = 'e2e-red-defender';
-    placeAt(defender, tx, ty);
-    group.add(defender);
+    const defender = buildDefender('red', tx, ty);
+    defender.mesh.name = 'e2e-red-defender';
+    bundle.scene.add(defender.mesh);
+    bundle.defenders.push(defender);
   }
 }
 
 function seedScene(name: SceneName, group: THREE.Group, bundle: SceneBundle): void {
   clearGroup(group);
+
   // Remove any extra e2e-spawned workers from previous scene.
-  const spawned = bundle.workers.filter((w) => w.mesh.name.startsWith('e2e-spawned'));
-  for (const w of spawned) {
+  const spawnedWorkers = bundle.workers.filter((w) => w.mesh.name.startsWith('e2e-spawned'));
+  for (const w of spawnedWorkers) {
     bundle.scene.remove(w.mesh);
   }
-  const spawned2 = bundle.workers.filter((w) => !w.mesh.name.startsWith('e2e-spawned'));
+  const keepWorkers = bundle.workers.filter((w) => !w.mesh.name.startsWith('e2e-spawned'));
   bundle.workers.length = 0;
-  for (const w of spawned2) {
+  for (const w of keepWorkers) {
     bundle.workers.push(w);
   }
+
+  // Remove all e2e-spawned defenders.
+  for (const d of bundle.defenders) {
+    bundle.scene.remove(d.mesh);
+  }
+  bundle.defenders.length = 0;
+
+  // Remove all e2e-spawned raiders.
+  for (const r of bundle.raiders) {
+    bundle.scene.remove(r.mesh);
+  }
+  bundle.raiders.length = 0;
 
   if (name === 'idle-start') {
     seedIdleStart(group);
@@ -168,6 +154,7 @@ function seedScene(name: SceneName, group: THREE.Group, bundle: SceneBundle): vo
 export type HudSetters = {
   setEnergy: (patch: Partial<FactionEnergy>) => void;
   setPoints: (patch: Partial<FactionPoints>) => void;
+  attemptTrain: (kind: UnitKind) => void;
 };
 
 export type E2EHookExtension = {
@@ -179,6 +166,9 @@ export type E2EHookExtension = {
   spawnWorker: (faction: string, tileX: number, tileY: number) => number;
   moveWorker: (index: number, tileX: number, tileY: number) => void;
   getWorkerTile: (index: number) => { tileX: number; tileY: number } | null;
+  selectHq: (faction: string) => void;
+  pressTrainKey: (key: string) => void;
+  getUnitCount: (query: { faction: string; kind: string }) => number;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -229,6 +219,40 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
       const w = bundle.workers[index];
       if (w === undefined) return null;
       return { tileX: w.tileX, tileY: w.tileY };
+    },
+    selectHq(faction: string): void {
+      if (faction === 'red') {
+        clearSelection();
+      } else {
+        selectionSelectHq(bundle.hqs.blue);
+      }
+    },
+    pressTrainKey(key: string): void {
+      // Gate on blue HQ being selected — same condition as the real keyboard handler.
+      const selectedHq = getSelectedHq();
+      if (selectedHq === null || selectedHq.faction !== 'blue') return;
+
+      const k = key.toLowerCase();
+      if (k === 'q') {
+        hudSetters.attemptTrain('worker');
+      } else if (k === 'w') {
+        hudSetters.attemptTrain('defender');
+      } else if (k === 'e') {
+        hudSetters.attemptTrain('raider');
+      }
+    },
+    getUnitCount(query: { faction: string; kind: string }): number {
+      const faction = query.faction === 'red' ? 'red' : 'blue';
+      if (query.kind === 'worker') {
+        return bundle.workers.filter((u) => u.faction === faction).length;
+      }
+      if (query.kind === 'defender') {
+        return bundle.defenders.filter((u) => u.faction === faction).length;
+      }
+      if (query.kind === 'raider') {
+        return bundle.raiders.filter((u) => u.faction === faction).length;
+      }
+      return 0;
     },
   };
 

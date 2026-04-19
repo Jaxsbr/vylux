@@ -6,7 +6,12 @@ import { INITIAL_STATE, type PlacementState } from './placement';
 import { createEnergyLedger } from './economy';
 import { createPointsLedger } from './points';
 import { createHud } from './hud';
-import { selectWorker, getSelected } from './selection';
+import { selectWorker, selectHq, getSelected, getSelectedHq, clearSelection } from './selection';
+import { buildWorker } from './worker';
+import { buildDefender } from './defender';
+import { buildRaider } from './raider';
+import { trainUnit, buildOccupiedSet } from './training';
+import { GRID_CONSTANTS } from './grid';
 
 const bundle = createScene();
 const canvas = bundle.renderer.domElement;
@@ -31,6 +36,51 @@ const setPoints = (patch: Parameters<typeof pointsLedger.set>[0]): void => {
   hud.updatePoints(pointsLedger.get());
 };
 
+// Training: attempt to train a unit of the given kind for blue faction.
+// Shared by keyboard handler and e2e hook pressTrainKey.
+function attemptTrain(kind: 'worker' | 'defender' | 'raider'): void {
+  const allUnits = [
+    ...bundle.workers,
+    ...bundle.defenders,
+    ...bundle.raiders,
+  ];
+  const hqTiles = [bundle.hqs.blue, bundle.hqs.red];
+  const occupied = buildOccupiedSet(allUnits, hqTiles);
+  const isOccupied = (tx: number, ty: number): boolean => occupied.has(`${tx},${ty}`);
+
+  const result = trainUnit(
+    energyLedger.get(),
+    'blue',
+    kind,
+    bundle.hqs.blue.tileX,
+    bundle.hqs.blue.tileY,
+    GRID_CONSTANTS.gridSize,
+    isOccupied,
+  );
+
+  if (!result.ok) return;
+
+  // Apply energy deduction.
+  energyLedger.set({ blue: result.newEnergy.blue, red: result.newEnergy.red });
+  hud.updateEnergy(energyLedger.get());
+
+  const { tileX, tileY } = result.spawnTile;
+
+  if (kind === 'worker') {
+    const w = buildWorker('blue', tileX, tileY);
+    bundle.scene.add(w.mesh);
+    bundle.workers.push(w);
+  } else if (kind === 'defender') {
+    const d = buildDefender('blue', tileX, tileY);
+    bundle.scene.add(d.mesh);
+    bundle.defenders.push(d);
+  } else {
+    const r = buildRaider('blue', tileX, tileY);
+    bundle.scene.add(r.mesh);
+    bundle.raiders.push(r);
+  }
+}
+
 if (hook) {
   hook.setEnergy = setEnergy;
   hook.setPoints = setPoints;
@@ -42,7 +92,7 @@ if (hook) {
   };
 }
 
-attachE2EHook(bundle, { setEnergy, setPoints });
+attachE2EHook(bundle, { setEnergy, setPoints, attemptTrain });
 
 let state: PlacementState = INITIAL_STATE;
 
@@ -59,14 +109,24 @@ attachInputHandlers({
   },
 });
 
-// Worker click-to-select / click-to-move wiring.
-// Left-click on a blue worker selects it.
-// Left-click on grid tile while a blue worker is selected moves that worker.
-// Left-click on red worker / HQ / node (anything non-blue-worker on grid) deselects.
+// Worker / HQ click-to-select + click-to-move wiring.
+// Priority: HQ hit → worker hit → tile hit / deselect.
 canvas.addEventListener('pointerdown', (event: PointerEvent) => {
   if (event.button !== 0) return;
   // Only process in idle mode — placement mode owns its own click logic.
   if (state.mode !== 'idle') return;
+
+  // HQ raycast — higher priority than worker (HQ is a large mesh).
+  const hqHit = bundle.raycastHq(event.clientX, event.clientY);
+  if (hqHit !== null) {
+    if (hqHit.faction === 'blue') {
+      selectHq(hqHit);
+    } else {
+      // Red HQ click — deselect everything.
+      clearSelection();
+    }
+    return;
+  }
 
   const workerHit = bundle.raycastWorker(event.clientX, event.clientY);
   if (workerHit !== null) {
@@ -74,7 +134,7 @@ canvas.addEventListener('pointerdown', (event: PointerEvent) => {
       selectWorker(workerHit);
     } else {
       // Red worker click — deselect.
-      selectWorker(null);
+      clearSelection();
     }
     return;
   }
@@ -87,7 +147,23 @@ canvas.addEventListener('pointerdown', (event: PointerEvent) => {
     // Clicked empty tile with no selection — deselect (already null, no-op).
   } else {
     // Off-grid click — deselect.
-    selectWorker(null);
+    clearSelection();
+  }
+});
+
+// Training hotkeys — only active when blue HQ is the current selection.
+window.addEventListener('keydown', (event: KeyboardEvent) => {
+  if (state.mode !== 'idle') return;
+  const selectedHq = getSelectedHq();
+  if (selectedHq === null || selectedHq.faction !== 'blue') return;
+
+  const key = event.key.toLowerCase();
+  if (key === 'q') {
+    attemptTrain('worker');
+  } else if (key === 'w') {
+    attemptTrain('defender');
+  } else if (key === 'e') {
+    attemptTrain('raider');
   }
 });
 
@@ -104,9 +180,15 @@ function animate(): void {
   hud.updateEnergy(energyLedger.get());
   hud.updatePoints(pointsLedger.get());
 
-  // Tick all workers (movement).
+  // Tick all units (movement).
   for (const w of bundle.workers) {
     w.tick(deltaSeconds);
+  }
+  for (const d of bundle.defenders) {
+    d.tick(deltaSeconds);
+  }
+  for (const r of bundle.raiders) {
+    r.tick(deltaSeconds);
   }
 
   bundle.reconcile(state);

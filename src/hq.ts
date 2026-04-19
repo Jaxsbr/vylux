@@ -71,7 +71,26 @@ export type HQBundle = {
   faction: FactionId;
   tileX: number;
   tileY: number;
+  /** Selection ring rendered under the HQ tile — shown when selected. */
+  selectionRing: THREE.Mesh;
 };
+
+function buildHQSelectionRing(emissiveHex: number): THREE.Mesh {
+  // Larger ring under the HQ — same cyan style as worker ring.
+  const ringGeo = new THREE.RingGeometry(0.48, 0.60, 32);
+  const ringMat = new THREE.MeshStandardMaterial({
+    color: 0x00e5ff,
+    emissive: emissiveHex,
+    emissiveIntensity: 1.5,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.01;
+  ring.name = 'hq-selection-ring';
+  ring.visible = false;
+  return ring;
+}
 
 /**
  * Build a Tron-style HQ group at the given tile coordinate.
@@ -89,8 +108,11 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
   group.add(buildTier(HQ_CONSTANTS.spireW, HQ_CONSTANTS.spireH, HQ_CONSTANTS.spireY, emissive));
   group.add(buildTier(HQ_CONSTANTS.antennaW, HQ_CONSTANTS.antennaH, HQ_CONSTANTS.antennaY, emissive));
 
+  const selectionRing = buildHQSelectionRing(emissive);
+  group.add(selectionRing);
+
   const world = tileToWorld(tileX, tileY);
   group.position.set(world.x, world.y, world.z);
 
-  return { group, faction, tileX, tileY };
+  return { group, faction, tileX, tileY, selectionRing };
 }

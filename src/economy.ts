@@ -31,10 +31,26 @@ export function setEnergyValues(
   };
 }
 
+/**
+ * Subtract cost from one faction's energy. Clamps at 0, never goes negative.
+ * Returns a new object; does not mutate input.
+ */
+export function subtractEnergy(
+  current: FactionEnergy,
+  faction: keyof FactionEnergy,
+  cost: number,
+): FactionEnergy {
+  return {
+    ...current,
+    [faction]: Math.max(0, current[faction] - cost),
+  };
+}
+
 export function createEnergyLedger(): {
   get: () => FactionEnergy;
   tick: (deltaSeconds: number) => void;
   set: (patch: Partial<FactionEnergy>) => void;
+  subtract: (faction: keyof FactionEnergy, cost: number) => void;
 } {
   let state: FactionEnergy = { blue: 0, red: 0 };
   return {
@@ -44,6 +60,9 @@ export function createEnergyLedger(): {
     },
     set: (patch: Partial<FactionEnergy>) => {
       state = setEnergyValues(state, patch);
+    },
+    subtract: (faction: keyof FactionEnergy, cost: number) => {
+      state = subtractEnergy(state, faction, cost);
     },
   };
 }

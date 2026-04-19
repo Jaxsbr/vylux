@@ -56,6 +56,10 @@ export type VyluxHook = {
   spawnWorker?: (faction: string, tileX: number, tileY: number) => number;
   moveWorker?: (index: number, tileX: number, tileY: number) => void;
   getWorkerTile?: (index: number) => { tileX: number; tileY: number } | null;
+  // Training helpers — present only when ?e2e=1 is in the URL.
+  selectHq?: (faction: string) => void;
+  pressTrainKey?: (key: string) => void;
+  getUnitCount?: (query: { faction: string; kind: string }) => number;
 };
 
 declare global {

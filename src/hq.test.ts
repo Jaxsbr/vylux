@@ -26,8 +26,10 @@ describe('buildHQ', () => {
 
   it('every tier child group contains a Mesh and a LineSegments', () => {
     const hq = buildHQ('red', 19, 19);
-    for (const child of hq.group.children) {
-      const tier = child as THREE.Group;
+    // Filter to only Group children (excludes the flat selection ring Mesh).
+    const tierGroups = hq.group.children.filter((c) => c instanceof THREE.Group) as THREE.Group[];
+    expect(tierGroups.length).toBeGreaterThanOrEqual(4);
+    for (const tier of tierGroups) {
       const hasMesh = tier.children.some((c) => c instanceof THREE.Mesh);
       const hasEdges = tier.children.some((c) => c instanceof THREE.LineSegments);
       expect(hasMesh).toBe(true);
@@ -37,8 +39,8 @@ describe('buildHQ', () => {
 
   it('blue HQ tier meshes have emissive colour close to #00e0ff', () => {
     const hq = buildHQ('blue', 0, 0);
-    for (const child of hq.group.children) {
-      const tier = child as THREE.Group;
+    const tierGroups = hq.group.children.filter((c) => c instanceof THREE.Group) as THREE.Group[];
+    for (const tier of tierGroups) {
       const mesh = tier.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       // emissive.r ~ 0, emissive.g ~ 0.878, emissive.b ~ 1.0
@@ -49,8 +51,8 @@ describe('buildHQ', () => {
 
   it('red HQ tier meshes have emissive colour close to #ff4a1a', () => {
     const hq = buildHQ('red', 19, 19);
-    for (const child of hq.group.children) {
-      const tier = child as THREE.Group;
+    const tierGroups = hq.group.children.filter((c) => c instanceof THREE.Group) as THREE.Group[];
+    for (const tier of tierGroups) {
       const mesh = tier.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       expect(mat.emissive.r).toBeGreaterThan(0.9);
@@ -60,12 +62,18 @@ describe('buildHQ', () => {
 
   it('emissive intensity is >= 1.0 so bloom can pick it up', () => {
     const hq = buildHQ('blue', 0, 0);
-    for (const child of hq.group.children) {
-      const tier = child as THREE.Group;
+    const tierGroups = hq.group.children.filter((c) => c instanceof THREE.Group) as THREE.Group[];
+    for (const tier of tierGroups) {
       const mesh = tier.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       expect(mat.emissiveIntensity).toBeGreaterThanOrEqual(1.0);
     }
+  });
+
+  it('HQ bundle has a selectionRing that starts invisible', () => {
+    const hq = buildHQ('blue', 0, 0);
+    expect(hq.selectionRing).toBeInstanceOf(THREE.Mesh);
+    expect(hq.selectionRing.visible).toBe(false);
   });
 
   it('group world position matches tileToWorld(0, 0) for tile (0, 0)', () => {

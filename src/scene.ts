@@ -14,6 +14,8 @@ import {
 import { buildHQ, type HQBundle } from './hq';
 import { buildEnergyNode, NODE_POSITIONS, type EnergyNodeBundle } from './energy-node';
 import { buildWorker, type WorkerBundle } from './worker';
+import type { DefenderBundle } from './defender';
+import type { RaiderBundle } from './raider';
 
 export const SCENE_CONSTANTS = {
   backgroundColor: '#0a0a0a',
@@ -75,8 +77,12 @@ export type SceneBundle = {
   placed: PlacedBundle;
   hqs: { blue: HQBundle; red: HQBundle };
   energyNodes: EnergyNodeBundle[];
-  /** All worker bundles — starter + any spawned via e2e hook. */
+  /** All worker bundles — starter + any spawned via training or e2e hook. */
   workers: WorkerBundle[];
+  /** All defender bundles — spawned via training or e2e hook. */
+  defenders: DefenderBundle[];
+  /** All raider bundles — spawned via training or e2e hook. */
+  raiders: RaiderBundle[];
   backgroundColor: string;
   cameraRotation: { yawDeg: number; pitchDeg: number };
   lightCounts: { ambient: number; directional: number };
@@ -87,6 +93,8 @@ export type SceneBundle = {
   raycastPointer: (clientX: number, clientY: number) => { tileX: number; tileY: number } | null;
   /** Raycast against all worker meshes. Returns the worker hit, or null. */
   raycastWorker: (clientX: number, clientY: number) => WorkerBundle | null;
+  /** Raycast against HQ meshes. Returns the HQBundle hit, or null. */
+  raycastHq: (clientX: number, clientY: number) => import('./hq').HQBundle | null;
   reconcile: (state: PlacementState) => void;
 };
 
@@ -194,6 +202,9 @@ export function createScene(): SceneBundle {
     workers.push(w);
   }
 
+  const defenders: DefenderBundle[] = [];
+  const raiders: RaiderBundle[] = [];
+
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -289,6 +300,31 @@ export function createScene(): SceneBundle {
     return null;
   };
 
+  const raycastHq = (clientX: number, clientY: number): import('./hq').HQBundle | null => {
+    const ndc = toNDC(clientX, clientY);
+    if (ndc === null) return null;
+    raycaster.setFromCamera(ndc, camera);
+    const hqList = [hqs.blue, hqs.red];
+    const hqMeshes: THREE.Object3D[] = [];
+    for (const hq of hqList) {
+      hq.group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          hqMeshes.push(obj);
+        }
+      });
+    }
+    const hits = raycaster.intersectObjects(hqMeshes, false);
+    if (hits.length === 0) return null;
+    let hitObj: THREE.Object3D | null = hits[0].object;
+    while (hitObj !== null) {
+      for (const hq of hqList) {
+        if (hitObj === hq.group) return hq;
+      }
+      hitObj = hitObj.parent;
+    }
+    return null;
+  };
+
   const tileIndex = (tileX: number, tileY: number): number =>
     tileY * GRID_CONSTANTS.gridSize + tileX;
 
@@ -373,6 +409,8 @@ export function createScene(): SceneBundle {
     hqs,
     energyNodes,
     workers,
+    defenders,
+    raiders,
     backgroundColor,
     cameraRotation: { yawDeg: cameraYawDeg, pitchDeg: -cameraElevationDeg },
     lightCounts: { ambient: 1, directional: 1 },
@@ -382,6 +420,7 @@ export function createScene(): SceneBundle {
     raycastCenter,
     raycastPointer,
     raycastWorker,
+    raycastHq,
     reconcile,
   };
 }
