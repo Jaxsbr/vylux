@@ -60,6 +60,10 @@ export type VyluxHook = {
   selectHq?: (faction: string) => void;
   pressTrainKey?: (key: string) => void;
   getUnitCount?: (query: { faction: string; kind: string }) => number;
+  // Combat test hooks.
+  setUnitHp?: (query: { faction: string; kind: string; index: number; hp: number }) => void;
+  getHqHp?: (faction: string) => number;
+  advanceTime?: (seconds: number) => void;
 };
 
 declare global {

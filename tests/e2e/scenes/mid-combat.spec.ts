@@ -8,7 +8,8 @@ test('mid-combat scene snapshot', async ({ page }) => {
     () =>
       typeof window.__vylux !== 'undefined' &&
       typeof window.__vylux.setScene === 'function' &&
-      typeof window.__vylux.ready === 'function',
+      typeof window.__vylux.ready === 'function' &&
+      typeof window.__vylux.advanceTime === 'function',
     null,
     { timeout: 15_000 },
   );
@@ -18,6 +19,10 @@ test('mid-combat scene snapshot', async ({ page }) => {
   await page.evaluate(() => window.__vylux!.setPoints!({ blue: 145, red: 132 }));
   // Node 0 (5,5) held by blue economy; node 2 (5,14) contested → blue; node 3 (14,14) held by red.
   await page.evaluate(() => window.__vylux!.setNodeHolds!({ 0: 'blue', 2: 'blue', 3: 'red' }));
+
+  // Advance simulated time so attack beams fire and HP bars become partially drained.
+  await page.evaluate(() => window.__vylux!.advanceTime!(1.2));
+
   await page.evaluate(() => window.__vylux!.ready!());
 
   await page.screenshot({ path: 'pm/screenshots/mid-combat.png' });

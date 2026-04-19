@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { FactionId } from './placement';
 import { GRID_CONSTANTS } from './grid';
+import { UNIT_STATS } from './units-config';
+import { buildHpBar, type HpBar } from './hp-bar';
 
 // Convert a floating-point tile coordinate to world position without integer assertion.
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
@@ -55,6 +57,16 @@ export type WorkerBundle = {
   setTile: (tileX: number, tileY: number) => void;
   /** Selection ring mesh — shown when selected. */
   selectionRing: THREE.Mesh;
+  /** Current HP. */
+  hp: number;
+  /** Maximum HP. */
+  maxHp: number;
+  /** HP bar group (billboarded each frame by main.ts). */
+  hpBar: HpBar;
+  /** Apply damage. Returns { died, damageDealt }. */
+  takeDamage: (amount: number) => { died: boolean; damageDealt: number };
+  /** Remove mesh from scene and dispose geometries/materials. */
+  dispose: (scene: THREE.Scene) => void;
 };
 
 function clampTile(v: number): number {
@@ -144,7 +156,9 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   const diamond = buildDiamondMesh(emissive);
   const selectionRing = buildSelectionRing(emissive);
 
-  group.add(diamond, selectionRing);
+  const hpBar = buildHpBar(faction, 0.7);
+  hpBar.group.visible = false;
+  group.add(diamond, selectionRing, hpBar.group);
 
   const world = tileFloatToWorld(tileX, tileY);
   group.position.set(world.x, world.y, world.z);
@@ -155,6 +169,8 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   let targetX = tileX;
   let targetY = tileY;
 
+  const maxHp = UNIT_STATS.worker.maxHp;
+
   const bundle: WorkerBundle = {
     mesh: group,
     faction,
@@ -163,6 +179,32 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
     targetTileX: tileX,
     targetTileY: tileY,
     selectionRing,
+    hp: maxHp,
+    maxHp,
+    hpBar,
+
+    takeDamage(amount: number): { died: boolean; damageDealt: number } {
+      const before = bundle.hp;
+      bundle.hp = Math.max(0, bundle.hp - amount);
+      const damageDealt = before - bundle.hp;
+      hpBar.update(bundle.hp, bundle.maxHp);
+      hpBar.group.visible = bundle.hp < bundle.maxHp;
+      return { died: bundle.hp <= 0, damageDealt };
+    },
+
+    dispose(scene: THREE.Scene): void {
+      scene.remove(group);
+      group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose();
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach((m) => m.dispose());
+          } else {
+            obj.material.dispose();
+          }
+        }
+      });
+    },
 
     tick(dt: number): void {
       const dx = targetX - posX;

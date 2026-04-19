@@ -12,6 +12,7 @@ import { buildDefender } from './defender';
 import { buildRaider } from './raider';
 import { trainUnit, buildOccupiedSet } from './training';
 import { GRID_CONSTANTS } from './grid';
+import { tickCombat } from './combat';
 
 const bundle = createScene();
 const canvas = bundle.renderer.domElement;
@@ -90,9 +91,13 @@ if (hook) {
     if (w === undefined) return null;
     return { tileX: w.tileX, tileY: w.tileY };
   };
+  hook.getHqHp = (faction: string): number => {
+    const f = faction === 'red' ? 'red' : 'blue';
+    return bundle.hqs[f].hp;
+  };
 }
 
-attachE2EHook(bundle, { setEnergy, setPoints, attemptTrain });
+attachE2EHook(bundle, { setEnergy, setPoints, attemptTrain, pointsLedger });
 
 let state: PlacementState = INITIAL_STATE;
 
@@ -190,6 +195,34 @@ function animate(): void {
   for (const r of bundle.raiders) {
     r.tick(deltaSeconds);
   }
+
+  // Tick combat — resolves attacks, deaths, and scoring.
+  tickCombat({
+    units: {
+      workers: bundle.workers,
+      defenders: bundle.defenders,
+      raiders: bundle.raiders,
+    },
+    hqs: bundle.hqs,
+    pointsLedger,
+    dt: deltaSeconds,
+    scene: bundle.scene,
+  });
+  hud.updatePoints(pointsLedger.get());
+
+  // Billboard HP bars toward camera each frame.
+  const cam = bundle.camera;
+  for (const w of bundle.workers) {
+    w.hpBar.group.lookAt(cam.position);
+  }
+  for (const d of bundle.defenders) {
+    d.hpBar.group.lookAt(cam.position);
+  }
+  for (const r of bundle.raiders) {
+    r.hpBar.group.lookAt(cam.position);
+  }
+  bundle.hqs.blue.hpBar.group.lookAt(cam.position);
+  bundle.hqs.red.hpBar.group.lookAt(cam.position);
 
   bundle.reconcile(state);
   bundle.render();

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { FactionId } from './placement';
 import { tileToWorld } from './grid';
+import { HQ_MAX_HP } from './units-config';
+import { buildHpBar, type HpBar } from './hp-bar';
 
 // Faction emissive hex values — match the palette used in placement.ts ghost emissive.
 const FACTION_EMISSIVE: Record<FactionId, number> = {
@@ -68,11 +70,19 @@ function buildTier(
 
 export type HQBundle = {
   group: THREE.Group;
+  /** Alias for group — used by combat.ts which expects mesh.position. */
+  mesh: { position: THREE.Vector3 };
   faction: FactionId;
   tileX: number;
   tileY: number;
   /** Selection ring rendered under the HQ tile — shown when selected. */
   selectionRing: THREE.Mesh;
+  hp: number;
+  maxHp: number;
+  hpBar: HpBar;
+  /** Fractional damage accumulator for scoring floor(total/10) points. */
+  damageAccumulator: number;
+  takeDamage: (amount: number) => { died: boolean; damageDealt: number };
 };
 
 function buildHQSelectionRing(emissiveHex: number): THREE.Mesh {
@@ -111,8 +121,36 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
   const selectionRing = buildHQSelectionRing(emissive);
   group.add(selectionRing);
 
+  // HP bar — always visible on HQs.
+  const hpBar = buildHpBar(faction, 2.1);
+  hpBar.group.visible = true;
+  group.add(hpBar.group);
+
   const world = tileToWorld(tileX, tileY);
   group.position.set(world.x, world.y, world.z);
 
-  return { group, faction, tileX, tileY, selectionRing };
+  const maxHp = HQ_MAX_HP;
+
+  const bundle: HQBundle = {
+    group,
+    mesh: group,
+    faction,
+    tileX,
+    tileY,
+    selectionRing,
+    hp: maxHp,
+    maxHp,
+    hpBar,
+    damageAccumulator: 0,
+
+    takeDamage(amount: number): { died: boolean; damageDealt: number } {
+      const before = bundle.hp;
+      bundle.hp = Math.max(0, bundle.hp - amount);
+      const damageDealt = before - bundle.hp;
+      hpBar.update(bundle.hp, bundle.maxHp);
+      return { died: bundle.hp <= 0, damageDealt };
+    },
+  };
+
+  return bundle;
 }

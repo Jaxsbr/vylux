@@ -26,8 +26,10 @@ describe('buildHQ', () => {
 
   it('every tier child group contains a Mesh and a LineSegments', () => {
     const hq = buildHQ('red', 19, 19);
-    // Filter to only Group children (excludes the flat selection ring Mesh).
-    const tierGroups = hq.group.children.filter((c) => c instanceof THREE.Group) as THREE.Group[];
+    // Filter to only Group children (excludes selection ring Mesh and hp-bar Group).
+    const tierGroups = hq.group.children.filter(
+      (c) => c instanceof THREE.Group && c.name !== 'hp-bar',
+    ) as THREE.Group[];
     expect(tierGroups.length).toBeGreaterThanOrEqual(4);
     for (const tier of tierGroups) {
       const hasMesh = tier.children.some((c) => c instanceof THREE.Mesh);
@@ -39,7 +41,9 @@ describe('buildHQ', () => {
 
   it('blue HQ tier meshes have emissive colour close to #00e0ff', () => {
     const hq = buildHQ('blue', 0, 0);
-    const tierGroups = hq.group.children.filter((c) => c instanceof THREE.Group) as THREE.Group[];
+    const tierGroups = hq.group.children.filter(
+      (c) => c instanceof THREE.Group && c.name !== 'hp-bar',
+    ) as THREE.Group[];
     for (const tier of tierGroups) {
       const mesh = tier.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
       const mat = mesh.material as THREE.MeshStandardMaterial;
@@ -51,7 +55,9 @@ describe('buildHQ', () => {
 
   it('red HQ tier meshes have emissive colour close to #ff4a1a', () => {
     const hq = buildHQ('red', 19, 19);
-    const tierGroups = hq.group.children.filter((c) => c instanceof THREE.Group) as THREE.Group[];
+    const tierGroups = hq.group.children.filter(
+      (c) => c instanceof THREE.Group && c.name !== 'hp-bar',
+    ) as THREE.Group[];
     for (const tier of tierGroups) {
       const mesh = tier.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
       const mat = mesh.material as THREE.MeshStandardMaterial;
@@ -62,7 +68,9 @@ describe('buildHQ', () => {
 
   it('emissive intensity is >= 1.0 so bloom can pick it up', () => {
     const hq = buildHQ('blue', 0, 0);
-    const tierGroups = hq.group.children.filter((c) => c instanceof THREE.Group) as THREE.Group[];
+    const tierGroups = hq.group.children.filter(
+      (c) => c instanceof THREE.Group && c.name !== 'hp-bar',
+    ) as THREE.Group[];
     for (const tier of tierGroups) {
       const mesh = tier.children.find((c) => c instanceof THREE.Mesh) as THREE.Mesh;
       const mat = mesh.material as THREE.MeshStandardMaterial;

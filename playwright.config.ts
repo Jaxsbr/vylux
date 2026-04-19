@@ -11,7 +11,7 @@ export default defineConfig({
   projects: [
     {
       name: 'dev',
-      testMatch: ['foundation.spec.ts', 'smoke-dev.spec.ts', 'worker.spec.ts', 'training.spec.ts'],
+      testMatch: ['foundation.spec.ts', 'smoke-dev.spec.ts', 'worker.spec.ts', 'training.spec.ts', 'combat.spec.ts'],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },
     {

@@ -18,6 +18,21 @@ export function setPointValues(
   };
 }
 
+export type Faction = 'blue' | 'red';
+
+/**
+ * Add points to one faction in-place. Clamps result to >= 0.
+ * Mutates the ledger object returned by createPointsLedger.
+ */
+export function addPoints(
+  ledger: { get: () => FactionPoints; set: (patch: Partial<FactionPoints>) => void },
+  faction: Faction,
+  amount: number,
+): void {
+  const cur = ledger.get();
+  ledger.set({ [faction]: Math.max(0, cur[faction] + amount) });
+}
+
 export function createPointsLedger(): {
   get: () => FactionPoints;
   set: (patch: Partial<FactionPoints>) => void;

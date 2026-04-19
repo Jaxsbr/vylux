@@ -8,6 +8,7 @@ import { buildDefender } from './defender';
 import { buildRaider } from './raider';
 import type { UnitKind } from './units-config';
 import { selectHq as selectionSelectHq, clearSelection, getSelectedHq } from './selection';
+import { tickCombat, type PointsLedger } from './combat';
 
 // E2E-only hook — installed only when the URL contains `?e2e=1`.
 // This file is imported by main.ts but the install function exits early unless
@@ -155,6 +156,7 @@ export type HudSetters = {
   setEnergy: (patch: Partial<FactionEnergy>) => void;
   setPoints: (patch: Partial<FactionPoints>) => void;
   attemptTrain: (kind: UnitKind) => void;
+  pointsLedger: PointsLedger;
 };
 
 export type E2EHookExtension = {
@@ -169,6 +171,10 @@ export type E2EHookExtension = {
   selectHq: (faction: string) => void;
   pressTrainKey: (key: string) => void;
   getUnitCount: (query: { faction: string; kind: string }) => number;
+  // Combat test hooks.
+  setUnitHp: (query: { faction: string; kind: string; index: number; hp: number }) => void;
+  getHqHp: (faction: string) => number;
+  advanceTime: (seconds: number) => void;
 };
 
 export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void {
@@ -253,6 +259,49 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
         return bundle.raiders.filter((u) => u.faction === faction).length;
       }
       return 0;
+    },
+
+    setUnitHp(query: { faction: string; kind: string; index: number; hp: number }): void {
+      const faction = query.faction === 'red' ? 'red' : 'blue';
+      let arr: Array<{ faction: string; hp: number; maxHp: number; hpBar: { update: (hp: number, max: number) => void; group: { visible: boolean } } }> = [];
+      if (query.kind === 'worker') {
+        arr = bundle.workers.filter((u) => u.faction === faction);
+      } else if (query.kind === 'defender') {
+        arr = bundle.defenders.filter((u) => u.faction === faction);
+      } else if (query.kind === 'raider') {
+        arr = bundle.raiders.filter((u) => u.faction === faction);
+      }
+      const unit = arr[query.index];
+      if (unit === undefined) return;
+      unit.hp = Math.max(0, query.hp);
+      unit.hpBar.update(unit.hp, unit.maxHp);
+      unit.hpBar.group.visible = unit.hp < unit.maxHp;
+    },
+
+    getHqHp(faction: string): number {
+      const f = faction === 'red' ? 'red' : 'blue';
+      return bundle.hqs[f].hp;
+    },
+
+    advanceTime(seconds: number): void {
+      // Simulate combat ticks in fixed steps so cooldown-based logic resolves.
+      const STEP = 0.016;
+      let remaining = seconds;
+      while (remaining > 0) {
+        const dt = Math.min(STEP, remaining);
+        remaining -= dt;
+        tickCombat({
+          units: {
+            workers: bundle.workers,
+            defenders: bundle.defenders,
+            raiders: bundle.raiders,
+          },
+          hqs: bundle.hqs,
+          pointsLedger: hudSetters.pointsLedger,
+          dt,
+          scene: bundle.scene,
+        });
+      }
     },
   };
 
