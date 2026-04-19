@@ -18,7 +18,7 @@ export const SCENE_CONSTANTS = {
   cameraYawDeg: 45,
   cameraElevationDeg: 30,
   cameraDistance: 30,
-  viewSize: 12,
+  viewSize: 10,
   ambientIntensity: 0.3,
   directionalIntensity: 0.8,
   ghostSize: 0.8,
@@ -33,15 +33,12 @@ export const SCENE_CONSTANTS = {
   // (preserved for debug/Playwright), but `emissiveIntensity: 0` means the
   // body does not glow — faction identity reads only from the trim.
   buildingBodyColor: '#0d1117',
-  // UnrealBloomPass params — threshold 0 lets any bright pixel bloom against
-  // the near-black background; strength/radius tuned for soft neon halo on
-  // grid dividers + building trim (see docs/concepts + reference games).
-  bloomStrength: 1.2,
-  bloomRadius: 0.7,
-  // Threshold 0 so any bright pixel blooms (both blue ~0.71 and red ~0.47
-  // luminance trim). Grid dividers stay subtle because their emissive color
-  // is dim grey at low intensity — they bloom softly rather than shouting.
-  bloomThreshold: 0,
+  // Bloom target: HQ tier edges readable at distance, faction halo present but
+  // not washing the silhouette. threshold=0.45 passes HQ emissive (~1.4×faction
+  // colour) while blocking dim grid dividers (0.4 intensity on grey 0x555555).
+  bloomStrength: 0.8,
+  bloomRadius: 0.6,
+  bloomThreshold: 0.45,
   // HQ tile positions — GRID_SIZE = 20 so corner tiles are 0 and 19.
   hqBlueTile: 0,
   hqRedTile: 19,

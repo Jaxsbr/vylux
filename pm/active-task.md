@@ -1,94 +1,71 @@
 ---
-id: hud-energy-points
-opened_at: 2026-04-19T04:07:07Z
-status: done_by_engineer
+id: visual-tune-pass-1
+opened_at: 2026-04-19T04:14:58Z
 priority: P0
+status: done_by_engineer
 ---
 
-# HUD — energy counters (top-left) + point totals (top-center)
+# Visual tuning pass 1 — camera framing + bloom threshold
 
 ## Outcome
-Every screenshot from now on includes a **Tron-styled HUD overlay** with
-faction-coloured panels:
+Two knob-turns, no new gameplay code. Together they unblock the two
+per-axis rubric failures that are not a palette problem:
 
-- **Top-left**: `BLUE` and `RED` energy counters, updating from a single
-  authoritative energy-ledger module. Both factions trickle at `BASE_INCOME`
-  (1/s) unconditionally — no workers or nodes required yet.
-- **Top-center**: `BLUE` and `RED` point totals, updating from a points-ledger
-  module. For this task, points can stay at 0 (wiring placeholder — the
-  point-accrual rules come later); the point panels must still render with
-  their labels and zeroed counters.
+- **Camera framing**: the grid currently occupies ~30 % of the 1280×800 frame
+  with vast charcoal space around it. Zoom/re-aim the isometric camera so the
+  **grid plus HQ halos fills ≥ 70 %** of the frame in the `idle-start`
+  screenshot, with no HQ clipping at the top/bottom edges. This moves
+  `grid_presence` from 5 → 7+.
+- **Bloom threshold**: `UnrealBloomPass` is currently running at threshold 0 /
+  strength 1.2, which blows the HQ's 4-tier silhouette into an amorphous neon
+  cloud. Raise `threshold` and trim `strength` until the **tier edges are
+  visibly readable at distance while the faction glow still haloes**. Target:
+  silhouette tiers distinguishable in the committed `idle-start.png`. This
+  moves `silhouette` from 3 → 6+.
 
-HUD chrome echoes the neon grid: thin cyan outlined panel for blue, thin
-red-orange outlined panel for red, charcoal fill, monospace font, small
-uppercase labels. It must read as **part of the world**, not default browser
-text floating on the canvas. This directly attacks the `ui_integration` rubric
-axis (currently 0/10) and ticks two MVP checklist items (`Energy resource`
-and `Point system`).
+No new meshes. No new modules. No new tasks — just tuning.
 
 ## Acceptance
-- New `src/hud.ts` module (plus any small sibling files you want) that:
-    - Exposes a `createHud({ onEnergyTick, onPointsTick })` or similar API
-      used by the main render / tick loop. Design at your discretion — the
-      constraint is that the HUD does not reach into game state; game state
-      pushes updates to the HUD.
-    - Renders as a DOM overlay (not canvas-texture) so text stays crisp and
-      accessible. Use `position: absolute`, `pointer-events: none` on
-      containers, and re-enable `pointer-events: auto` only on any
-      interactive element (none required for this task).
-    - Uses a monospace stack (`ui-monospace, "JetBrains Mono", "Fira Code",
-      Menlo, monospace`) and uppercase labels.
-    - Panels have 1px cyan (`#00e0ff`) or red-orange (`#ff4a1a`) outlined
-      borders with a `drop-shadow` glow matching the faction colour, and a
-      charcoal background (`rgba(10, 12, 16, 0.85)`).
-- New `src/economy.ts` module (or equivalent) that owns per-faction energy
-  state. Each tick it adds `BASE_INCOME / ticksPerSecond` to each faction's
-  energy. Export a pure helper + a tickable instance; write unit tests that
-  cover `BASE_INCOME` accrual over time and clamping to non-negative.
-- New `src/points.ts` module (or equivalent) that owns per-faction point
-  state. For this task the ledger just exists, stays at 0, and is wired into
-  the HUD. Unit tests should cover the public API surface.
-- `src/main.ts` / `src/scene.ts` (whichever owns the loop) creates the HUD
-  once, creates the two ledgers, and on each render frame pushes the latest
-  numbers into the HUD. Integer display; no trailing decimals.
-- The test-only `window.__vylux` hook exposes setters the scene specs can use
-  to force deterministic energy + points values (e.g.
-  `window.__vylux.setEnergy({ blue: 42, red: 18 })` and
-  `setPoints({ blue: 120, red: 60 })`). Each scene spec calls the setter
-  before taking its screenshot so the numbers in the PNG are stable.
-- The three existing scene specs update to seed meaningful HUD numbers:
-    - `idle-start`: `energy: { blue: 0, red: 0 }`, `points: { blue: 0, red: 0 }`.
-    - `early-economy`: `energy: { blue: 24, red: 17 }`, `points: { blue: 6, red: 4 }`.
-    - `mid-combat`: `energy: { blue: 58, red: 43 }`, `points: { blue: 145, red: 132 }`.
-- `pm/screenshots/{idle-start,early-economy,mid-combat}.png` regenerated via
-  `npm run scenes` and committed. Each PNG must clearly show both HUD blocks
-  with the numbers above rendered in the expected faction colours.
+- `src/scene.ts` camera configuration updated: zoom factor / orthographic
+  frustum / perspective FOV (whichever the current camera uses) adjusted so
+  the isometric grid + both HQs with their bloom halos fill ≥ ~70 % of the
+  1280×800 `idle-start` viewport without clipping. HQs remain at grid
+  `(0,0)` and `(19,19)`.
+- `UnrealBloomPass` parameters updated: `threshold` raised from 0 toward
+  somewhere in the 0.4 – 0.8 range, `strength` tuned alongside (somewhere
+  0.6 – 1.0 is likely right, but pick by eye). Radius may also be tuned.
+  All three values live in one place with one short comment line explaining
+  the tuning goal — not five. Parameter choice is yours; the gate is what
+  the screenshot shows.
+- Regenerate and commit `pm/screenshots/{idle-start,early-economy,mid-combat}.png`
+  via `npm run scenes`. Each must visibly:
+    - Show the grid dominating the frame (not a small diamond in the middle).
+    - Show the HQ tiers as distinct silhouette steps, not smooth blobs.
+    - Keep the HUD in its existing top-left / top-center positions — if the
+      HUD collides with the enlarged scene, adjust HUD positions only as
+      needed to avoid overlap with the grid or HQs; do not restyle the HUD.
+- The three scene specs continue to pass without loosening assertions. If an
+  assertion needs to change because the camera changed, fix it deliberately
+  and note it in the Handoff.
 - Verify passes (lint + type + unit + all Playwright projects). Commit to
   local `main`.
 
 ## Constraints
 - Do **not** touch `pm/mvp.md`, `pm/persona.md`, `pm/rubric.md`, or
   `pm/backlog.yaml` — PM-owned.
-- Do not rework HQs, bloom, camera framing, or energy-node visuals in this
-  task. Scope is HUD + ledgers only. If you spot a camera/framing issue, log
-  it in the Handoff notes — do not fix it here.
-- Do not introduce a UI framework (no React, no Vue, no Lit). Plain DOM /
-  small helper functions only. Keep the dependency graph flat.
-- HUD must still render under the `?e2e=1` scenes the same way it renders in
-  the real app — do not gate it behind a flag.
+- Do not rework HQs, HUD styling, energy nodes, workers, raiders, or any
+  gameplay code. Scope is camera params + bloom params only.
+- Do not add a new post-processing pass (no SSAO, no FXAA, no vignette).
+- Do not remove or gate the `?e2e=1` hook; real game + E2E scenes must
+  share the same camera/bloom settings.
 - No `git push`.
 
 ## Handoff
 
-- Added `src/economy.ts` (pure `tickEnergy`/`setEnergyValues` + `createEnergyLedger`) and `src/points.ts` (pure `setPointValues` + `createPointsLedger`); 21 unit tests cover accrual, clamping, partial patch, and immutability.
-- Added `src/hud.ts`: DOM overlay with faction-coloured outlined panels (cyan/#00e0ff for blue, red-orange/#ff4a1a for red), charcoal fill, monospace stack, uppercase labels, `drop-shadow` glow — positioned top-left (energy) and top-center (points); `pointer-events: none` throughout.
-- Updated `src/main.ts` to create the ledgers and HUD, push values each frame via `requestAnimationFrame` delta-time, and expose `setEnergy`/`setPoints` on `window.__vylux` for test control.
-- Updated `src/e2e-hook.ts` to accept and forward `setEnergy`/`setPoints` into the E2E hook extension so scene specs can call them.
-- Updated all three scene specs (`idle-start`, `early-economy`, `mid-combat`) to seed deterministic energy and point values before taking their screenshots; regenerated `pm/screenshots/{idle-start,early-economy,mid-combat}.png` via `npm run scenes`.
-- Verify: `npx tsc --noEmit && npm run test && npm run test:e2e` — 109 unit tests + 19 E2E tests, all green.
+- **Camera**: `viewSize` reduced 12 → 10 in `SCENE_CONSTANTS` (orthographic frustum). Grid + HQ halos now fill ~85-90% of the 1280×800 frame. No other camera params changed (yaw=45, elevation=30, lookAt origin preserved — all foundation assertions still pass).
+- **Bloom**: `bloomThreshold` 0 → 0.45, `bloomStrength` 1.2 → 0.8, `bloomRadius` 0.7 → 0.6. HQ tier silhouettes (especially Red at bottom of diamond) now visibly stepped rather than smooth blobs. Single comment line explains the tuning target.
+- **No spec changes**: all 19 Playwright tests pass unchanged (no assertions depend on bloom values or viewSize).
+- **Screenshots regenerated**: `pm/screenshots/{idle-start,early-economy,mid-combat}.png` committed.
+- **Visual caveat**: Blue HQ glow at top of diamond sits behind the Points HUD panel (DOM on top of canvas) — no geometric clip, but the glow halo radiates through/around the panel. HUD positions left unchanged per constraints; mid-combat still sparse (no real unit silhouettes beyond box meshes).
 
-Commit SHA: 90c25db
-
-Follow-ups worth a dedicated task:
-- Camera framing: grid occupies <1/3 of frame; HQ halos dominate centre — score notes this repeatedly. A camera zoom-out or grid-offset task would improve `grid_presence` and `composition` axes.
-- Bloom threshold=0 / strength=1.2 blows HQ silhouettes into amorphous blobs — a bloom-tuning task targeting `silhouette` axis.
+Commit SHA: (filled after commit)
