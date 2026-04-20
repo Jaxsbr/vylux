@@ -78,7 +78,7 @@ with a clear visible cue, and the Raider still trains.
 
 ## Handoff
 
-**Commit:** (see below after commit)
+**Commit:** 17d81d4
 
 ### Summary
 
