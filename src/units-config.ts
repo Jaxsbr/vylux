@@ -11,6 +11,23 @@ export const UNIT_COSTS: Record<UnitKind, number> = {
   raider: RAIDER_COST,
 };
 
+// Named HP constants — tuned so fights last ≥3 hits.
+// Worker: 80 HP, raider damage 20 → 4 hits to kill (visible exchange).
+// Raider: 60 HP, defender damage 15 → 4 hits to kill (raiders don't evaporate).
+// Defender: 120 HP, raider damage 20 → 6 hits to kill (tank feel preserved).
+export const WORKER_HP = 80;
+export const DEFENDER_HP = 120;
+export const RAIDER_HP = 60;
+
+// Named damage constants.
+export const RAIDER_DAMAGE = 20;
+export const RAIDER_VS_HQ_DAMAGE = 20; // same damage path, kept separate for future tuning
+export const DEFENDER_DAMAGE = 15;
+
+// Retaliation window: if a defender hit a raider within this many combat ticks,
+// the raider retaliates on that defender before targeting anything else.
+export const RETALIATE_WINDOW_TICKS = 4;
+
 // Combat stat blocks.
 export type CombatStats = {
   maxHp: number;
@@ -20,9 +37,9 @@ export type CombatStats = {
 };
 
 export const UNIT_STATS: Record<UnitKind, CombatStats> = {
-  worker: { maxHp: 20, damage: 0, range: 0, attackCooldown: 0 },
-  defender: { maxHp: 100, damage: 15, range: 1.5, attackCooldown: 1.0 },
-  raider: { maxHp: 40, damage: 20, range: 1.5, attackCooldown: 0.8 },
+  worker: { maxHp: WORKER_HP, damage: 0, range: 0, attackCooldown: 0 },
+  defender: { maxHp: DEFENDER_HP, damage: DEFENDER_DAMAGE, range: 1.5, attackCooldown: 1.0 },
+  raider: { maxHp: RAIDER_HP, damage: RAIDER_DAMAGE, range: 1.5, attackCooldown: 0.8 },
 };
 
 export const HQ_MAX_HP = 500;

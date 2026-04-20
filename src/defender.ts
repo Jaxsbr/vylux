@@ -10,6 +10,8 @@ import {
   eventPulseIntensity,
   DEATH_PULSE_DURATION,
   DEATH_PULSE_PEAK_DELTA,
+  DAMAGE_PULSE_DURATION,
+  DAMAGE_PULSE_PEAK_DELTA,
 } from './event-pulse';
 
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
@@ -72,10 +74,21 @@ export type DefenderBundle = {
   triggerDeathPulse: () => void;
   tickDeathPulse: (dt: number) => boolean;
   readonly deathPulseActive: boolean;
+  /** Fire the damage-taken emissive flash. Called by combat.ts on each hit. */
+  triggerDamagePulse: () => void;
+  tickDamagePulse: (dt: number) => void;
+  /** Unique numeric id for this defender — used for raider retaliation tracking. */
+  readonly unitId: number;
 };
 
 function clampTile(v: number): number {
   return Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, Math.round(v)));
+}
+
+// Monotonically-increasing id for defender units — used for raider retaliation tracking.
+let _nextDefenderId = 1;
+function nextDefenderId(): number {
+  return _nextDefenderId++;
 }
 
 type DefenderMeshResult = { group: THREE.Group; accentMat: THREE.MeshStandardMaterial };
@@ -190,6 +203,8 @@ export function buildDefender(faction: FactionId, tileX: number, tileY: number):
   let placementPulseElapsedInternal = -1;
   let deathPulseElapsedInternal = -1;
   let deathPulseActiveInternal = false;
+  let damagePulseElapsedInternal = -1;
+  const defenderUnitId = nextDefenderId();
 
   const maxHp = UNIT_STATS.defender.maxHp;
 
@@ -205,6 +220,7 @@ export function buildDefender(faction: FactionId, tileX: number, tileY: number):
     maxHp,
     hpBar,
     attackCooldownRemaining: 0,
+    unitId: defenderUnitId,
     get placementPulseElapsed(): number { return placementPulseElapsedInternal; },
     get deathPulseActive(): boolean { return deathPulseActiveInternal; },
 
@@ -317,6 +333,25 @@ export function buildDefender(faction: FactionId, tileX: number, tileY: number):
         return false;
       }
       return true;
+    },
+
+    triggerDamagePulse(): void {
+      damagePulseElapsedInternal = 0;
+    },
+
+    tickDamagePulse(dt: number): void {
+      if (damagePulseElapsedInternal < 0) return;
+      damagePulseElapsedInternal += dt;
+      accentMat.emissiveIntensity = eventPulseIntensity(
+        DEF_CONSTANTS.accentEmissiveIntensity,
+        DAMAGE_PULSE_PEAK_DELTA,
+        damagePulseElapsedInternal,
+        DAMAGE_PULSE_DURATION,
+      );
+      if (damagePulseElapsedInternal >= DAMAGE_PULSE_DURATION) {
+        damagePulseElapsedInternal = -1;
+        accentMat.emissiveIntensity = DEF_CONSTANTS.accentEmissiveIntensity;
+      }
     },
   };
 

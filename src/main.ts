@@ -864,6 +864,19 @@ function animate(): void {
       r.tickPlacementPulse(deltaSeconds);
     }
 
+    // Tick damage pulses (emissive flash on each hit).
+    for (const w of bundle.workers) {
+      w.tickDamagePulse(deltaSeconds);
+    }
+    for (const d of bundle.defenders) {
+      d.tickDamagePulse(deltaSeconds);
+    }
+    for (const r of bundle.raiders) {
+      r.tickDamagePulse(deltaSeconds);
+    }
+    bundle.hqs.blue.tickDamagePulse(deltaSeconds);
+    bundle.hqs.red.tickDamagePulse(deltaSeconds);
+
     // Tick death pulses — defer dispose until pulse completes.
     for (let i = bundle.workers.length - 1; i >= 0; i--) {
       const w = bundle.workers[i]!;
@@ -924,6 +937,7 @@ function animate(): void {
       'blue',
       bundle.raiders,
       bundle.workers.filter((w) => w.faction === 'red'),
+      bundle.defenders.filter((d) => d.faction === 'red'),
       bundle.hqs.red,
       raiderRange,
     );
@@ -931,6 +945,7 @@ function animate(): void {
       'red',
       bundle.raiders,
       bundle.workers.filter((w) => w.faction === 'blue'),
+      bundle.defenders.filter((d) => d.faction === 'blue'),
       bundle.hqs.blue,
       raiderRange,
     );

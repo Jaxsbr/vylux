@@ -14,7 +14,7 @@ import type { EnergyNodeBundle } from './energy-node';
 import type { HQBundle } from './hq';
 import { UNIT_COSTS, UNIT_STATS, type UnitKind } from './units-config';
 import { trainUnit, buildOccupiedSet } from './training';
-import { advanceRaiders, type AdvanceTarget } from './advance';
+import { advanceRaiders, type AdvanceTarget, type AdvanceDefender } from './advance';
 import { findNearestLiveUnoccupied } from './worker-task';
 
 export const AI_TRAIN_COOLDOWN = 0.5;
@@ -163,15 +163,19 @@ export function tickAi(params: TickAiParams): void {
   }
   if (state.mustering) {
     const blueWorkers = allWorkers.filter((w) => w.faction === 'blue');
+    const blueDefenders = allDefenders.filter((d) => d.faction === 'blue');
     const enemyWorkerTargets: AdvanceTarget[] = blueWorkers.map((w) => ({
       tileX: w.tileX, tileY: w.tileY, hp: w.hp,
+    }));
+    const enemyDefenderTargets: AdvanceDefender[] = blueDefenders.map((d) => ({
+      tileX: d.tileX, tileY: d.tileY, hp: d.hp, unitId: d.unitId,
     }));
     const hqTarget: AdvanceTarget = {
       tileX: blueHq.tileX, tileY: blueHq.tileY, hp: blueHq.hp,
     };
-    advanceRaiders(livingRedRaiders, enemyWorkerTargets, hqTarget, UNIT_STATS.raider.range);
+    advanceRaiders(livingRedRaiders, enemyWorkerTargets, enemyDefenderTargets, hqTarget, UNIT_STATS.raider.range);
   }
 
-  // Suppress unused warnings — redDefenders is passed in for future use.
+  // Suppress unused warning — redDefenders passed in for future use (e.g. AI defender retreat).
   void redDefenders;
 }

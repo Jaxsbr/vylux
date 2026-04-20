@@ -3,6 +3,7 @@ import type { FactionId } from './placement';
 import { tileToWorld } from './grid';
 import { HQ_MAX_HP } from './units-config';
 import { buildHpBar, type HpBar } from './hp-bar';
+import { eventPulseIntensity, DAMAGE_PULSE_DURATION, DAMAGE_PULSE_PEAK_DELTA } from './event-pulse';
 
 // Faction emissive hex values — match the palette used in placement.ts ghost emissive.
 const FACTION_EMISSIVE: Record<FactionId, number> = {
@@ -116,6 +117,9 @@ export type HQBundle = {
   /** Fractional damage accumulator for scoring floor(total/10) points. */
   damageAccumulator: number;
   takeDamage: (amount: number) => { died: boolean; damageDealt: number };
+  /** Fire the damage-taken emissive flash on each hit. Called by combat.ts. */
+  triggerDamagePulse: () => void;
+  tickDamagePulse: (dt: number) => void;
 };
 
 function buildHQSelectionRing(emissiveHex: number): THREE.Mesh {
@@ -151,7 +155,10 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
   group.add(buildTier(HQ_CONSTANTS.spireW, HQ_CONSTANTS.spireH, HQ_CONSTANTS.spireY, emissive));
   group.add(buildTier(HQ_CONSTANTS.antennaW, HQ_CONSTANTS.antennaH, HQ_CONSTANTS.antennaY, emissive));
   // Accent cap: thin bright strip between mid and spire tiers — the primary bloom source.
-  group.add(buildAccentCap(emissive));
+  const accentCap = buildAccentCap(emissive);
+  group.add(accentCap);
+  // Keep a reference to the accent cap material for damage pulse.
+  const accentCapMat = accentCap.material as THREE.MeshStandardMaterial;
 
   const selectionRing = buildHQSelectionRing(emissive);
   group.add(selectionRing);
@@ -165,6 +172,8 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
   group.position.set(world.x, world.y, world.z);
 
   const maxHp = HQ_MAX_HP;
+
+  let damagePulseElapsedInternal = -1;
 
   const bundle: HQBundle = {
     group,
@@ -184,6 +193,25 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
       const damageDealt = before - bundle.hp;
       hpBar.update(bundle.hp, bundle.maxHp);
       return { died: bundle.hp <= 0, damageDealt };
+    },
+
+    triggerDamagePulse(): void {
+      damagePulseElapsedInternal = 0;
+    },
+
+    tickDamagePulse(dt: number): void {
+      if (damagePulseElapsedInternal < 0) return;
+      damagePulseElapsedInternal += dt;
+      accentCapMat.emissiveIntensity = eventPulseIntensity(
+        HQ_CONSTANTS.accentEmissiveIntensity,
+        DAMAGE_PULSE_PEAK_DELTA,
+        damagePulseElapsedInternal,
+        DAMAGE_PULSE_DURATION,
+      );
+      if (damagePulseElapsedInternal >= DAMAGE_PULSE_DURATION) {
+        damagePulseElapsedInternal = -1;
+        accentCapMat.emissiveIntensity = HQ_CONSTANTS.accentEmissiveIntensity;
+      }
     },
   };
 

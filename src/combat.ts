@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { FactionId } from './placement';
-import { UNIT_STATS } from './units-config';
+import { UNIT_STATS, RETALIATE_WINDOW_TICKS } from './units-config';
 import { addPoints } from './points';
 
 // Minimum interfaces used by combat — allows mocking in tests without Three.js scene.
@@ -17,6 +17,8 @@ export type CombatUnit = {
   /** Optional death-pulse support — present on defender/raider bundles. */
   triggerDeathPulse?: () => void;
   readonly deathPulseActive?: boolean;
+  /** Optional damage-taken flash — called on every hit. */
+  triggerDamagePulse?: () => void;
 };
 
 export type CombatWorker = {
@@ -31,6 +33,8 @@ export type CombatWorker = {
   /** Optional death-pulse support — present on worker bundles. */
   triggerDeathPulse?: () => void;
   readonly deathPulseActive?: boolean;
+  /** Optional damage-taken flash — called on every hit. */
+  triggerDamagePulse?: () => void;
 };
 
 export type CombatHq = {
@@ -42,6 +46,8 @@ export type CombatHq = {
   damageAccumulator: number;
   takeDamage: (amount: number) => { died: boolean; damageDealt: number };
   mesh: { position: THREE.Vector3 };
+  /** Optional damage-taken flash — called on every raider hit. */
+  triggerDamagePulse?: () => void;
 };
 
 export type PointsLedger = {
@@ -130,6 +136,18 @@ function enemyFaction(f: FactionId): FactionId {
   return f === 'blue' ? 'red' : 'blue';
 }
 
+// Raider retaliation state — keyed by raider object reference.
+// Tracks which tick this raider was last hit by a defender, and which defender id.
+type RaiderRetaliationState = {
+  lastHitTick: number;      // combat-tick counter when last hit by a defender
+  lastHitDefenderId: number; // numeric id of the most-recent attacker defender
+};
+const raiderRetaliation = new WeakMap<object, RaiderRetaliationState>();
+
+// Global combat tick counter — incremented each tickCombat call.
+// Used for retaliation window comparison.
+let combatTickCounter = 0;
+
 export type TickCombatArgs = {
   units: {
     workers: CombatWorker[];
@@ -142,7 +160,19 @@ export type TickCombatArgs = {
   scene: THREE.Scene;
 };
 
+// Extended raider interface — raiders produced by raider.ts carry these extra fields.
+type RetaliatingRaider = CombatUnit & {
+  lastHitByDefenderTick?: number;
+  lastHitByDefenderId?: number;
+};
+
+// Extended defender interface — defenders produced by defender.ts carry a unitId.
+type IdentifiedDefender = CombatUnit & {
+  unitId?: number;
+};
+
 export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatArgs): void {
+  combatTickCounter++;
   const { workers, defenders, raiders } = units;
 
   // Collect all active beams for fading.
@@ -207,6 +237,7 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
     if (target.kind === 'hq') {
       const { damageDealt } = target.hq.takeDamage(stats.damage);
       targetPos = target.hq.mesh.position.clone();
+      target.hq.triggerDamagePulse?.();
       // Accumulate fractional points.
       target.hq.damageAccumulator += damageDealt;
       const pts = Math.floor(target.hq.damageAccumulator / 10);
@@ -217,6 +248,20 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
     } else {
       const { died, damageDealt: _ } = target.unit.takeDamage(stats.damage);
       targetPos = target.unit.mesh.position.clone();
+      target.unit.triggerDamagePulse?.();
+      // Track retaliation: if we hit a raider, record this hit on the raider.
+      // Tiebreaker for multiple defenders: most-recent hit wins (latest tick wins).
+      const hitRaider = target.unit as RetaliatingRaider;
+      if (hitRaider.lastHitByDefenderTick !== undefined) {
+        const defId = (def as IdentifiedDefender).unitId ?? 0;
+        hitRaider.lastHitByDefenderTick = combatTickCounter;
+        hitRaider.lastHitByDefenderId = defId;
+        // Also write to the WeakMap for the advance-logic's retaliation check.
+        raiderRetaliation.set(target.unit, {
+          lastHitTick: combatTickCounter,
+          lastHitDefenderId: defId,
+        });
+      }
       if (died) {
         addPoints(pointsLedger, def.faction, 5);
       }
@@ -226,7 +271,13 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
     def.attackCooldownRemaining = stats.attackCooldown;
   }
 
-  // Process raiders — target: workers + HQ only (not enemy defenders).
+  // Process raiders — target: workers + defenders + HQ (nearest, with retaliation priority).
+  //
+  // Targeting priority per raider:
+  //   1. RETALIATE: if a defender hit this raider within RETALIATE_WINDOW_TICKS, target
+  //      that defender first (even if it's not the nearest). If out of range, fall through.
+  //   2. NEAREST ENEMY: nearest of {workers, defenders, HQ} by Chebyshev. Tiebreaker:
+  //      workers before defenders before HQ (first candidate wins on equal dist).
   for (const raider of raiders) {
     raider.attackCooldownRemaining -= dt;
     if (raider.attackCooldownRemaining > 0) continue;
@@ -236,9 +287,43 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
     const hqTarget = hqs[enemy];
 
     const enemyWorkers = workers.filter((w) => w.faction === enemy);
+    const enemyDefenders = defenders.filter((d) => d.faction === enemy);
 
+    // -- Retaliation check --
+    // Read from the bundle's own retaliation fields (set by defender-hit tracking above).
+    const retRaider = raider as RetaliatingRaider;
+    if (
+      retRaider.lastHitByDefenderTick !== undefined &&
+      retRaider.lastHitByDefenderId !== undefined &&
+      combatTickCounter - retRaider.lastHitByDefenderTick <= RETALIATE_WINDOW_TICKS
+    ) {
+      const retaliateId = retRaider.lastHitByDefenderId;
+      const retTarget = enemyDefenders.find(
+        (d) => (d as IdentifiedDefender).unitId === retaliateId && d.hp > 0,
+      );
+      if (retTarget !== undefined) {
+        const retDist = chebyshev(raider.tileX, raider.tileY, retTarget.tileX, retTarget.tileY);
+        if (retDist <= stats.range) {
+          // Fire on the retaliation target.
+          const { died } = retTarget.takeDamage(stats.damage);
+          retTarget.triggerDamagePulse?.();
+          fireBeam(raider, retTarget.mesh.position.clone(), scene, FACTION_COLOR[raider.faction]);
+          raider.attackCooldownRemaining = stats.attackCooldown;
+          if (died) {
+            addPoints(pointsLedger, raider.faction, 5);
+          }
+          continue;
+        }
+        // Retaliate target out of range — fall through to nearest.
+      }
+    }
+
+    // -- Nearest enemy targeting --
+    // Pool: workers, then defenders, then HQ. All within attack range.
+    // Tiebreaker: workers first (appended first), then defenders, then HQ.
     type RaiderTarget =
       | { kind: 'worker'; unit: CombatWorker; dist: number }
+      | { kind: 'defender'; unit: CombatUnit; dist: number }
       | { kind: 'hq'; hq: CombatHq; dist: number };
     const candidates: RaiderTarget[] = [];
 
@@ -248,6 +333,12 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
         candidates.push({ kind: 'worker', unit: w, dist });
       }
     }
+    for (const d of enemyDefenders) {
+      const dist = chebyshev(raider.tileX, raider.tileY, d.tileX, d.tileY);
+      if (dist <= stats.range) {
+        candidates.push({ kind: 'defender', unit: d, dist });
+      }
+    }
     const hqDist = chebyshev(raider.tileX, raider.tileY, hqTarget.tileX, hqTarget.tileY);
     if (hqDist <= stats.range) {
       candidates.push({ kind: 'hq', hq: hqTarget, dist: hqDist });
@@ -255,6 +346,7 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
 
     if (candidates.length === 0) continue;
 
+    // Sort by distance; stable on equal dist due to append order (worker < defender < hq).
     candidates.sort((a, b) => a.dist - b.dist);
     const target = candidates[0]!;
 
@@ -263,6 +355,7 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
     if (target.kind === 'hq') {
       const { damageDealt } = target.hq.takeDamage(stats.damage);
       targetPos = target.hq.mesh.position.clone();
+      target.hq.triggerDamagePulse?.();
       target.hq.damageAccumulator += damageDealt;
       const pts = Math.floor(target.hq.damageAccumulator / 10);
       if (pts > 0) {
@@ -270,8 +363,10 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
         target.hq.damageAccumulator -= pts * 10;
       }
     } else {
-      const { died } = target.unit.takeDamage(stats.damage);
-      targetPos = target.unit.mesh.position.clone();
+      const unit = target.kind === 'worker' ? target.unit : target.unit;
+      const { died } = unit.takeDamage(stats.damage);
+      targetPos = unit.mesh.position.clone();
+      unit.triggerDamagePulse?.();
       if (died) {
         addPoints(pointsLedger, raider.faction, 5);
       }
@@ -308,4 +403,17 @@ export function tickCombat({ units, hqs, pointsLedger, dt, scene }: TickCombatAr
   removeDead(workers as unknown as DeadUnit[]);
   removeDead(defenders);
   removeDead(raiders);
+}
+
+/**
+ * Expose the retaliation WeakMap for use by advance.ts — pure read, no mutations.
+ * Returns the retaliation state for the given raider object, or undefined.
+ */
+export function getRaiderRetaliation(raider: object): RaiderRetaliationState | undefined {
+  return raiderRetaliation.get(raider);
+}
+
+/** Expose combatTickCounter for retaliation window checks in advance.ts. */
+export function getCombatTickCounter(): number {
+  return combatTickCounter;
 }

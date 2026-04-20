@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { tickCombat, type CombatUnit, type CombatWorker, type CombatHq, type PointsLedger } from './combat';
-import { UNIT_STATS, HQ_MAX_HP } from './units-config';
+import { UNIT_STATS, HQ_MAX_HP, RETALIATE_WINDOW_TICKS } from './units-config';
 import type * as THREE from 'three';
 
 // Minimal mock Three.js types sufficient for combat logic.
@@ -127,6 +127,199 @@ function makeHq(faction: 'blue' | 'red', tileX: number, tileY: number): CombatHq
   return h;
 }
 
+describe('combat — balance: fights last ≥3 hits', () => {
+  it('raider needs ≥3 hits to kill a worker (worker is not 1-shot)', () => {
+    // Worker HP = 80, raider damage = 20 → needs 4 hits.
+    const hitsNeeded = Math.ceil(UNIT_STATS.worker.maxHp / UNIT_STATS.raider.damage);
+    expect(hitsNeeded).toBeGreaterThanOrEqual(3);
+  });
+
+  it('defender needs ≥3 hits to kill a raider (raider does not evaporate)', () => {
+    // Raider HP = 60, defender damage = 15 → needs 4 hits.
+    const hitsNeeded = Math.ceil(UNIT_STATS.raider.maxHp / UNIT_STATS.defender.damage);
+    expect(hitsNeeded).toBeGreaterThanOrEqual(3);
+  });
+
+  it('raider takes ≥3 combat ticks before worker dies', () => {
+    const scene = makeScene();
+    const pl = makePointsLedger();
+    const bHq = makeHq('blue', 0, 0);
+    const rHq = makeHq('red', 19, 19);
+
+    const blueRaider = makeRaider('blue', 5, 5);
+    const redWorker = makeWorker('red', 5, 6); // dist 1 — in range
+
+    const workers: CombatWorker[] = [redWorker];
+    const defenders: CombatUnit[] = [];
+    const raiders: CombatUnit[] = [blueRaider];
+
+    let ticksUntilDead = 0;
+    for (let i = 0; i < 20; i++) {
+      if (redWorker.hp <= 0) break;
+      blueRaider.attackCooldownRemaining = 0;
+      tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: bHq, red: rHq }, pointsLedger: pl, dt: 0.016, scene });
+      ticksUntilDead++;
+    }
+
+    expect(ticksUntilDead).toBeGreaterThanOrEqual(3);
+  });
+
+  it('defender takes ≥3 combat ticks before raider dies', () => {
+    const scene = makeScene();
+    const pl = makePointsLedger();
+    const bHq = makeHq('blue', 0, 0);
+    const rHq = makeHq('red', 19, 19);
+
+    const blueDef = makeDefender('blue', 5, 5);
+    const redRaider = makeRaider('red', 5, 6); // dist 1 — in range
+
+    const workers: CombatWorker[] = [];
+    const defenders: CombatUnit[] = [blueDef];
+    const raiders: CombatUnit[] = [redRaider];
+
+    let ticksUntilDead = 0;
+    for (let i = 0; i < 20; i++) {
+      if (redRaider.hp <= 0) break;
+      blueDef.attackCooldownRemaining = 0;
+      tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: bHq, red: rHq }, pointsLedger: pl, dt: 0.016, scene });
+      ticksUntilDead++;
+    }
+
+    expect(ticksUntilDead).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('combat — raider damage pipeline against defenders + HQ', () => {
+  it('raider damages defender on each hit when in range', () => {
+    const scene = makeScene();
+    const pl = makePointsLedger();
+    const bHq = makeHq('blue', 0, 0);
+    const rHq = makeHq('red', 19, 19);
+
+    const blueRaider = makeRaider('blue', 5, 5);
+    const redDef = makeDefender('red', 5, 6); // dist 1
+
+    const defenders: CombatUnit[] = [redDef];
+    const workers: CombatWorker[] = [];
+    const raiders: CombatUnit[] = [blueRaider];
+
+    const initialHp = redDef.hp;
+    blueRaider.attackCooldownRemaining = 0;
+    tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: bHq, red: rHq }, pointsLedger: pl, dt: 0.016, scene });
+
+    expect(redDef.hp).toBe(initialHp - UNIT_STATS.raider.damage);
+  });
+
+  it('raider damages HQ on each hit when in range', () => {
+    const scene = makeScene();
+    const pl = makePointsLedger();
+    const bHq = makeHq('blue', 0, 0);
+    // Red HQ at (5,6) — raider at (5,5), dist 1
+    const rHq = makeHq('red', 5, 6);
+
+    const blueRaider = makeRaider('blue', 5, 5);
+    const workers: CombatWorker[] = [];
+    const defenders: CombatUnit[] = [];
+    const raiders: CombatUnit[] = [blueRaider];
+
+    const initialHp = rHq.hp;
+    blueRaider.attackCooldownRemaining = 0;
+    tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: bHq, red: rHq }, pointsLedger: pl, dt: 0.016, scene });
+
+    expect(rHq.hp).toBe(initialHp - UNIT_STATS.raider.damage);
+  });
+
+  it('raider kills defender eventually (sustained fire)', () => {
+    const scene = makeScene();
+    const pl = makePointsLedger();
+    const bHq = makeHq('blue', 0, 0);
+    const rHq = makeHq('red', 19, 19);
+
+    const blueRaider = makeRaider('blue', 5, 5);
+    const redDef = makeDefender('red', 5, 6);
+
+    const defenders: CombatUnit[] = [redDef];
+    const workers: CombatWorker[] = [];
+    const raiders: CombatUnit[] = [blueRaider];
+
+    for (let i = 0; i < 50; i++) {
+      blueRaider.attackCooldownRemaining = 0;
+      tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: bHq, red: rHq }, pointsLedger: pl, dt: 0.016, scene });
+      if (defenders.length === 0) break;
+    }
+
+    // Defender should be dead and spliced out.
+    expect(defenders).toHaveLength(0);
+  });
+});
+
+describe('combat — retaliation targeting', () => {
+  it('raider retaliates on the defender that hit it within RETALIATE_WINDOW_TICKS', () => {
+    const scene = makeScene();
+    const pl = makePointsLedger();
+    const bHq = makeHq('blue', 0, 0);
+    const rHq = makeHq('red', 19, 19);
+
+    // Blue defender (will hit red raider) at (5,5), red raider at (5,6), dist 1.
+    // Red worker is out of range at (0,0) — raider should retaliate on defender, not target worker.
+    const blueDef = makeDefender('blue', 5, 5);
+    // Give the defender a unitId so retaliation can match it.
+    (blueDef as unknown as { unitId: number }).unitId = 9001;
+
+    const redRaider = makeRaider('red', 5, 6);
+    // Seed retaliation state: raider was hit by defender 9001 on tick 1.
+    (redRaider as unknown as { lastHitByDefenderTick: number }).lastHitByDefenderTick = 1;
+    (redRaider as unknown as { lastHitByDefenderId: number }).lastHitByDefenderId = 9001;
+
+    const workers: CombatWorker[] = [];
+    const defenders: CombatUnit[] = [blueDef];
+    const raiders: CombatUnit[] = [redRaider];
+
+    const initialDefHp = blueDef.hp;
+    redRaider.attackCooldownRemaining = 0;
+
+    // Tick 2: within RETALIATE_WINDOW_TICKS of tick 1.
+    tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: bHq, red: rHq }, pointsLedger: pl, dt: 0.016, scene });
+
+    // Raider should have retaliated on the defender.
+    expect(blueDef.hp).toBe(initialDefHp - UNIT_STATS.raider.damage);
+  });
+
+  it('raider falls back to nearest targeting after retaliation window expires', () => {
+    const scene = makeScene();
+    const pl = makePointsLedger();
+    const bHq = makeHq('blue', 0, 0);
+    const rHq = makeHq('red', 19, 19);
+
+    const blueDef = makeDefender('blue', 5, 5);
+    (blueDef as unknown as { unitId: number }).unitId = 8002;
+
+    const redRaider = makeRaider('red', 5, 6);
+    // Seed with stale retaliation state — well outside window.
+    (redRaider as unknown as { lastHitByDefenderTick: number }).lastHitByDefenderTick = 1;
+    (redRaider as unknown as { lastHitByDefenderId: number }).lastHitByDefenderId = 8002;
+
+    // Also place a worker that is closer to the raider.
+    const blueWorker = makeWorker('blue', 5, 7); // dist 1 — same as defender to raider
+    const workers: CombatWorker[] = [blueWorker];
+    const defenders: CombatUnit[] = [blueDef];
+    const raiders: CombatUnit[] = [redRaider];
+
+    // Advance time so the retaliation window expires (RETALIATE_WINDOW_TICKS+1 more ticks).
+    for (let i = 0; i < RETALIATE_WINDOW_TICKS + 2; i++) {
+      tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: bHq, red: rHq }, pointsLedger: pl, dt: 0.016, scene });
+    }
+
+    // After window expired: raider should now target nearest (worker at dist 1 comes first).
+    // Reset cooldown and fire once more.
+    redRaider.attackCooldownRemaining = 0;
+    const workerHpBefore = blueWorker.hp;
+    tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: bHq, red: rHq }, pointsLedger: pl, dt: 0.016, scene });
+
+    expect(blueWorker.hp).toBe(workerHpBefore - UNIT_STATS.raider.damage);
+  });
+});
+
 describe('combat — defender attacks', () => {
   let scene: THREE.Scene;
   let pointsLedger: PointsLedger;
@@ -166,10 +359,10 @@ describe('combat — defender attacks', () => {
     expect(redDef.hp).toBe(initialRedHp - damage * 2);
   });
 
-  it('raider ignores enemy defenders when a closer worker is present', () => {
+  it('raider targets worker over defender when worker is at equal distance', () => {
     const blueRaider = makeRaider('blue', 5, 5);
     const redDef = makeDefender('red', 5, 6); // dist 1
-    const redWorker = makeWorker('red', 5, 6); // same dist — worker takes priority (sort stable, workers checked first)
+    const redWorker = makeWorker('red', 5, 6); // same dist — worker takes priority (appended first in candidates)
 
     const defenders: CombatUnit[] = [redDef];
     const workers: CombatWorker[] = [redWorker];
@@ -180,12 +373,12 @@ describe('combat — defender attacks', () => {
 
     tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: blueHq, red: redHq }, pointsLedger, dt: 0.016, scene });
 
-    // Raider should have attacked the worker, not the defender.
+    // Raider should have attacked the worker (appended first, wins equal-dist sort).
     expect(redWorker.hp).toBe(initialWorkerHp - UNIT_STATS.raider.damage);
     expect(redDef.hp).toBe(initialDefHp);
   });
 
-  it('raider with only defenders in range does not attack', () => {
+  it('raider attacks defender when in range and no workers present', () => {
     const blueRaider = makeRaider('blue', 5, 5);
     const redDef = makeDefender('red', 5, 6); // dist 1 — in range
 
@@ -197,9 +390,8 @@ describe('combat — defender attacks', () => {
 
     tickCombat({ units: { workers, defenders, raiders }, hqs: { blue: blueHq, red: redHq }, pointsLedger, dt: 0.016, scene });
 
-    // Raider cannot target defenders — so no attack happens.
-    expect(redDef.hp).toBe(initialDefHp);
-    expect(blueRaider.attackCooldownRemaining).toBeLessThanOrEqual(0);
+    // Raider can now target defenders — damage should land.
+    expect(redDef.hp).toBe(initialDefHp - UNIT_STATS.raider.damage);
   });
 
   it('HP <= 0 splices unit from the array', () => {

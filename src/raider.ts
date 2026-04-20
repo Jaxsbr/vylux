@@ -10,6 +10,8 @@ import {
   eventPulseIntensity,
   DEATH_PULSE_DURATION,
   DEATH_PULSE_PEAK_DELTA,
+  DAMAGE_PULSE_DURATION,
+  DAMAGE_PULSE_PEAK_DELTA,
 } from './event-pulse';
 
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
@@ -76,6 +78,13 @@ export type RaiderBundle = {
   triggerDeathPulse: () => void;
   tickDeathPulse: (dt: number) => boolean;
   readonly deathPulseActive: boolean;
+  /** Fire the damage-taken emissive flash. Called by combat.ts on each hit. */
+  triggerDamagePulse: () => void;
+  tickDamagePulse: (dt: number) => void;
+  /** Tick counter tracking last frame this raider was hit by a defender (for retaliation). */
+  lastHitByDefenderTick: number;
+  /** Id of the defender that last hit this raider (for retaliation targeting). */
+  lastHitByDefenderId: number;
 };
 
 function clampTile(v: number): number {
@@ -187,6 +196,7 @@ export function buildRaider(faction: FactionId, tileX: number, tileY: number): R
   let placementPulseElapsedInternal = -1;
   let deathPulseElapsedInternal = -1;
   let deathPulseActiveInternal = false;
+  let damagePulseElapsedInternal = -1;
 
   const maxHp = UNIT_STATS.raider.maxHp;
 
@@ -202,6 +212,8 @@ export function buildRaider(faction: FactionId, tileX: number, tileY: number): R
     maxHp,
     hpBar,
     attackCooldownRemaining: 0,
+    lastHitByDefenderTick: -1,
+    lastHitByDefenderId: -1,
     get placementPulseElapsed(): number { return placementPulseElapsedInternal; },
     get deathPulseActive(): boolean { return deathPulseActiveInternal; },
 
@@ -314,6 +326,25 @@ export function buildRaider(faction: FactionId, tileX: number, tileY: number): R
         return false;
       }
       return true;
+    },
+
+    triggerDamagePulse(): void {
+      damagePulseElapsedInternal = 0;
+    },
+
+    tickDamagePulse(dt: number): void {
+      if (damagePulseElapsedInternal < 0) return;
+      damagePulseElapsedInternal += dt;
+      tipMat.emissiveIntensity = eventPulseIntensity(
+        RAIDER_CONSTANTS.accentEmissiveIntensity,
+        DAMAGE_PULSE_PEAK_DELTA,
+        damagePulseElapsedInternal,
+        DAMAGE_PULSE_DURATION,
+      );
+      if (damagePulseElapsedInternal >= DAMAGE_PULSE_DURATION) {
+        damagePulseElapsedInternal = -1;
+        tipMat.emissiveIntensity = RAIDER_CONSTANTS.accentEmissiveIntensity;
+      }
     },
   };
 

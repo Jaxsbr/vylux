@@ -15,6 +15,8 @@ import {
   eventPulseIntensity,
   DEATH_PULSE_DURATION,
   DEATH_PULSE_PEAK_DELTA,
+  DAMAGE_PULSE_DURATION,
+  DAMAGE_PULSE_PEAK_DELTA,
 } from './event-pulse';
 
 // Monotonically-increasing ID counter for worker identity in task system.
@@ -153,6 +155,9 @@ export type WorkerBundle = {
    * Read-only: current harvest fill progress (0–1).
    */
   readonly harvestFillProgress: number;
+  /** Fire the damage-taken emissive flash. Called by combat.ts on each hit. */
+  triggerDamagePulse: () => void;
+  tickDamagePulse: (dt: number) => void;
 };
 
 function clampTile(v: number): number {
@@ -308,6 +313,9 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   // Death pulse state.
   let deathPulseElapsedInternal = -1;
   let deathPulseActiveInternal = false;
+
+  // Damage pulse state.
+  let damagePulseElapsedInternal = -1;
 
   // Harvest fill progress (0–1).
   let harvestFillProgressInternal = 0;
@@ -479,6 +487,25 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
         return false;
       }
       return true;
+    },
+
+    triggerDamagePulse(): void {
+      damagePulseElapsedInternal = 0;
+    },
+
+    tickDamagePulse(dt: number): void {
+      if (damagePulseElapsedInternal < 0) return;
+      damagePulseElapsedInternal += dt;
+      accentMat.emissiveIntensity = eventPulseIntensity(
+        WORKER_CONSTANTS.accentEmissiveIntensity,
+        DAMAGE_PULSE_PEAK_DELTA,
+        damagePulseElapsedInternal,
+        DAMAGE_PULSE_DURATION,
+      );
+      if (damagePulseElapsedInternal >= DAMAGE_PULSE_DURATION) {
+        damagePulseElapsedInternal = -1;
+        accentMat.emissiveIntensity = WORKER_CONSTANTS.accentEmissiveIntensity;
+      }
     },
   };
 

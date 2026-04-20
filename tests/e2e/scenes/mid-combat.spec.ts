@@ -28,8 +28,8 @@ test('mid-combat scene snapshot', async ({ page }) => {
   // Dismiss onboarding cue — match is clearly underway.
   await page.evaluate(() => window.__vylux!.dismissOnboardingCue!());
 
-  // Advance briefly so HP bars update and attack beams fire.
-  await page.evaluate(() => window.__vylux!.advanceTime!(1.0));
+  // Advance enough for several hits — HP bars should be mid-value, beams firing.
+  await page.evaluate(() => window.__vylux!.advanceTime!(2.0));
 
   await page.evaluate(() => window.__vylux!.ready!());
 

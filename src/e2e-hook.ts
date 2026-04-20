@@ -668,6 +668,7 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           'blue',
           bundle.raiders,
           bundle.workers.filter((w) => w.faction === 'red'),
+          bundle.defenders.filter((d) => d.faction === 'red'),
           bundle.hqs.red,
           raiderRange,
         );
@@ -675,6 +676,7 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           'red',
           bundle.raiders,
           bundle.workers.filter((w) => w.faction === 'blue'),
+          bundle.defenders.filter((d) => d.faction === 'blue'),
           bundle.hqs.blue,
           raiderRange,
         );

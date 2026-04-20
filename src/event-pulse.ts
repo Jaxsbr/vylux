@@ -9,10 +9,12 @@ export const PLACEMENT_PULSE_DURATION = 0.2;  // 200ms scale-in
 export const DEATH_PULSE_DURATION = 0.15;     // 150ms emissive spike
 export const CAPTURE_PULSE_DURATION = 0.25;   // 250ms rim emissive spike
 export const POINT_FLASH_DURATION = 0.18;     // 180ms CSS class (matches harvest)
+export const DAMAGE_PULSE_DURATION = 0.12;    // 120ms emissive flash on damage taken
 
 /** Peak emissive delta for death and capture pulses. */
 export const DEATH_PULSE_PEAK_DELTA = 4.0;
 export const CAPTURE_PULSE_PEAK_DELTA = 3.5;
+export const DAMAGE_PULSE_PEAK_DELTA = 5.0;   // bright flash on hit — more intense than death
 export const PLACEMENT_PULSE_SCALE_START = 0.4;
 
 /**
