@@ -135,7 +135,7 @@ taken flash/particle cue on the unit itself.
 
 ## Handoff
 
-Commit SHA: (see below — filled after commit)
+Commit SHA: 0ba7459
 
 ### What changed
 
