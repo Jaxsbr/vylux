@@ -744,11 +744,16 @@ function animate(): void {
     // ── Worker task loop ──────────────────────────────────────────────────────
     // Tick each worker's task state machine before movement ticks so that
     // moveTo commands issued by the task take effect this frame.
+    //
+    // One-per-node invariant: when a worker transitions to walking-to-node,
+    // we eagerly mark that node as occupied so subsequent workers processed
+    // in the same frame see it as taken and retarget correctly.
     {
       const liveNodeList = buildLiveNodeList();
       for (const w of bundle.workers) {
         const task = getWorkerTask(w);
         const prevPhase: string = task.phase;
+        // Skip purely idle workers — hq-idle workers must be ticked to walk back to HQ.
         if (prevPhase === 'idle') continue;
 
         const nodeIdx = task.nodeIndex;
@@ -780,10 +785,29 @@ function animate(): void {
           w.moveTo(result.moveTo.tileX, result.moveTo.tileY);
         }
 
+        // One-per-node: eagerly claim occupancy when transitioning to walking-to-node.
+        // This ensures subsequent workers in the same frame see the node as occupied.
+        if (result.task.phase === 'walking-to-node' && result.task.nodeIndex >= 0) {
+          const claimBundle = bundle.energyNodes[result.task.nodeIndex];
+          if (claimBundle !== undefined && claimBundle.occupiedBy !== w.id) {
+            // Release previous node if switching nodes mid-walk.
+            if (nodeBundle !== undefined && nodeBundle !== claimBundle && nodeBundle.occupiedBy === w.id) {
+              nodeBundle.occupiedBy = null;
+              nodeBundle.setHarvestingTint(null);
+            }
+            claimBundle.occupiedBy = w.id;
+            // Update liveNodeList entry in place so later workers in this frame see it.
+            const liveEntry = liveNodeList.find((n) => n.index === result.task.nodeIndex);
+            if (liveEntry !== undefined) {
+              liveEntry.occupiedBy = w.id;
+            }
+          }
+        }
+
         // Update node occupancy and visual tint.
         if (nodeBundle !== undefined) {
           if (result.task.phase === 'harvesting') {
-            // Claim occupancy.
+            // Claim occupancy (already set eagerly above if walking, confirm here for harvesting).
             if (nodeBundle.occupiedBy !== w.id) {
               nodeBundle.occupiedBy = w.id;
             }

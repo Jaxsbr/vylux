@@ -35,7 +35,8 @@ export type WorkerTaskPhase =
   | 'walking-to-node'
   | 'harvesting'
   | 'walking-to-hq'
-  | 'offloading';
+  | 'offloading'
+  | 'hq-idle';
 
 export type WorkerTask = {
   phase: WorkerTaskPhase;
@@ -152,13 +153,13 @@ export function tickWorkerTask(
 
     case 'walking-to-node': {
       if (node === null) {
-        // Node gone — retarget or idle.
+        // Node gone — retarget or HQ-idle.
         const retarget = findNearestLiveUnoccupied(worker, liveNodes, null);
         if (retarget !== null) {
           const newTask = assignWorkerToNode(task, retarget.index);
           return { task: newTask, moveTo: { tileX: retarget.tileX, tileY: retarget.tileY }, offloaded: false, harvestProgress: 0 };
         }
-        return { task: { ...task, phase: 'idle', nodeIndex: -1 }, moveTo: null, offloaded: false, harvestProgress: 0 };
+        return { task: { ...task, phase: 'hq-idle', nodeIndex: -1 }, moveTo: null, offloaded: false, harvestProgress: 0 };
       }
 
       if (node.reserve < MIN_REGEN_THRESHOLD) {
@@ -168,7 +169,7 @@ export function tickWorkerTask(
           const newTask = assignWorkerToNode(task, retarget.index);
           return { task: newTask, moveTo: { tileX: retarget.tileX, tileY: retarget.tileY }, offloaded: false, harvestProgress: 0 };
         }
-        return { task: { ...task, phase: 'idle', nodeIndex: -1 }, moveTo: null, offloaded: false, harvestProgress: 0 };
+        return { task: { ...task, phase: 'hq-idle', nodeIndex: -1 }, moveTo: null, offloaded: false, harvestProgress: 0 };
       }
 
       // Check if occupied by another worker.
@@ -178,7 +179,7 @@ export function tickWorkerTask(
           const newTask = assignWorkerToNode(task, retarget.index);
           return { task: newTask, moveTo: { tileX: retarget.tileX, tileY: retarget.tileY }, offloaded: false, harvestProgress: 0 };
         }
-        return { task: { ...task, phase: 'idle', nodeIndex: -1 }, moveTo: null, offloaded: false, harvestProgress: 0 };
+        return { task: { ...task, phase: 'hq-idle', nodeIndex: -1 }, moveTo: null, offloaded: false, harvestProgress: 0 };
       }
 
       const distToNode = tileDist(worker.tileX, worker.tileY, node.tileX, node.tileY);
@@ -194,13 +195,13 @@ export function tickWorkerTask(
 
     case 'harvesting': {
       if (node === null || node.reserve < MIN_REGEN_THRESHOLD) {
-        // Node exhausted/ineligible mid-harvest — retarget.
+        // Node exhausted/ineligible mid-harvest — retarget or HQ-idle.
         const retarget = findNearestLiveUnoccupied(worker, liveNodes, null);
         if (retarget !== null) {
           const newTask = assignWorkerToNode(task, retarget.index);
           return { task: newTask, moveTo: { tileX: retarget.tileX, tileY: retarget.tileY }, offloaded: false, harvestProgress: 0 };
         }
-        return { task: { ...task, phase: 'idle', nodeIndex: -1 }, moveTo: null, offloaded: false, harvestProgress: 0 };
+        return { task: { ...task, phase: 'hq-idle', nodeIndex: -1 }, moveTo: null, offloaded: false, harvestProgress: 0 };
       }
 
       const newProgress = Math.min(1, task.harvestProgress + dt / HARVEST_DURATION);
@@ -236,16 +237,32 @@ export function tickWorkerTask(
           const newTask: WorkerTask = { ...task, phase: 'walking-to-node', harvestProgress: 0, offloadTimer: 0 };
           return { task: newTask, moveTo: { tileX: node.tileX, tileY: node.tileY }, offloaded: false, harvestProgress: 0 };
         }
-        // Node gone — retarget.
+        // Node gone — retarget or HQ-idle.
         const retarget = findNearestLiveUnoccupied(worker, liveNodes, null);
         if (retarget !== null) {
           const newTask = assignWorkerToNode(task, retarget.index);
           return { task: newTask, moveTo: { tileX: retarget.tileX, tileY: retarget.tileY }, offloaded: false, harvestProgress: 0 };
         }
-        return { task: { ...task, phase: 'idle', nodeIndex: -1, harvestProgress: 0, offloadTimer: 0 }, moveTo: null, offloaded: false, harvestProgress: 0 };
+        return { task: { ...task, phase: 'hq-idle', nodeIndex: -1, harvestProgress: 0, offloadTimer: 0 }, moveTo: null, offloaded: false, harvestProgress: 0 };
       }
       const newTask: WorkerTask = { ...task, offloadTimer: remaining };
       return { task: newTask, moveTo: null, offloaded: false, harvestProgress: task.harvestProgress };
+    }
+
+    case 'hq-idle': {
+      // Check if a live unoccupied node has become available — if so, re-assign immediately.
+      const retarget = findNearestLiveUnoccupied(worker, liveNodes, null);
+      if (retarget !== null) {
+        const newTask = assignWorkerToNode(task, retarget.index);
+        return { task: newTask, moveTo: { tileX: retarget.tileX, tileY: retarget.tileY }, offloaded: false, harvestProgress: 0 };
+      }
+      // No node available — walk to HQ and idle there.
+      const distToHq = tileDist(worker.tileX, worker.tileY, hq.tileX, hq.tileY);
+      if (distToHq >= 0.6) {
+        return { task, moveTo: { tileX: hq.tileX, tileY: hq.tileY }, offloaded: false, harvestProgress: 0 };
+      }
+      // Already at HQ — stay put.
+      return { task, moveTo: null, offloaded: false, harvestProgress: 0 };
     }
 
     default: {

@@ -142,10 +142,11 @@ export function tickAi(params: TickAiParams): void {
       .filter((n) => n.reserve > 0);
 
     for (const w of redWorkers) {
-      // Only assign workers that are truly idle (both physically stopped and no active task).
-      if (!isIdle(w)) continue;
       const phase = getWorkerTaskPhase(w);
-      if (phase !== 'idle') continue;
+      // Assign idle workers or hq-idle workers waiting for a node.
+      if (phase !== 'idle' && phase !== 'hq-idle') continue;
+      // Physical idle check only for purely idle workers (hq-idle already walks to HQ).
+      if (phase === 'idle' && !isIdle(w)) continue;
       if (liveNodes.length === 0) break;
       // Find nearest live unoccupied node.
       const best = findNearestLiveUnoccupied(w, liveNodes, null);

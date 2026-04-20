@@ -522,6 +522,7 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
           for (const w of bundle.workers) {
             const task = e2eGetWorkerTask(w);
             const prevPhase: string = task.phase;
+            // Skip purely idle — hq-idle must be ticked so workers walk back to HQ.
             if (prevPhase === 'idle') continue;
 
             const nodeIdx = task.nodeIndex;
@@ -549,6 +550,22 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
 
             if (result.moveTo !== null) {
               w.moveTo(result.moveTo.tileX, result.moveTo.tileY);
+            }
+
+            // One-per-node: eagerly claim occupancy when transitioning to walking-to-node.
+            if (result.task.phase === 'walking-to-node' && result.task.nodeIndex >= 0) {
+              const claimBundle = bundle.energyNodes[result.task.nodeIndex];
+              if (claimBundle !== undefined && claimBundle.occupiedBy !== w.id) {
+                if (nodeBundle !== undefined && nodeBundle !== claimBundle && nodeBundle.occupiedBy === w.id) {
+                  nodeBundle.occupiedBy = null;
+                  nodeBundle.setHarvestingTint(null);
+                }
+                claimBundle.occupiedBy = w.id;
+                const liveEntry = liveNodeList.find((n) => n.index === result.task.nodeIndex);
+                if (liveEntry !== undefined) {
+                  liveEntry.occupiedBy = w.id;
+                }
+              }
             }
 
             if (nodeBundle !== undefined) {

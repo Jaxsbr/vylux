@@ -128,10 +128,10 @@ function makeHq(faction: 'blue' | 'red', tileX: number, tileY: number): CombatHq
 }
 
 describe('combat — balance: fights last ≥3 hits', () => {
-  it('raider needs ≥3 hits to kill a worker (worker is not 1-shot)', () => {
-    // Worker HP = 80, raider damage = 20 → needs 4 hits.
+  it('raider needs ≥5 hits to kill a worker (worker is not 1-shot, ≥5 floor)', () => {
+    // Worker HP = 80, raider damage = 15 → ceil(80/15)=6 hits. Floor is ≥5.
     const hitsNeeded = Math.ceil(UNIT_STATS.worker.maxHp / UNIT_STATS.raider.damage);
-    expect(hitsNeeded).toBeGreaterThanOrEqual(3);
+    expect(hitsNeeded).toBeGreaterThanOrEqual(5);
   });
 
   it('defender needs ≥3 hits to kill a raider (raider does not evaporate)', () => {

@@ -190,15 +190,24 @@ test.describe('directive 5 — retaliate-then-nearest targeting', () => {
   test('raider with no defender or worker present targets HQ (valid target)', async ({ page }) => {
     await setupE2E(page);
 
-    // Spawn a single blue raider at (10,9) — no workers or defenders in range.
-    // Red HQ at (16,9).
+    // Kill red starter workers so the raider has no worker targets — goes straight for HQ.
+    // (With higher WORKER_HP the raider would spend too long on workers to reach HQ in time.)
+    await page.evaluate(() => {
+      window.__vylux!.killUnit!({ kind: 'worker', faction: 'red', index: 0 });
+      window.__vylux!.killUnit!({ kind: 'worker', faction: 'red', index: 0 });
+    });
+    // Advance briefly to let death pulses clear.
+    await page.evaluate(() => window.__vylux!.advanceTime!(0.3));
+
+    // Spawn a single blue raider at (10,9) — no workers or defenders remain.
+    // Red HQ at (16,9), distance 6 tiles.
     await page.evaluate(() => {
       window.__vylux!.spawnRaider!('blue', 10, 9);
     });
 
     const initialHqHp = await page.evaluate(() => window.__vylux!.getHqHp!('red'));
 
-    // Advance enough for the raider to travel to HQ and attack.
+    // Advance enough for the raider to travel to HQ (~6 tiles at 2.8 t/s = ~2.1s) and attack.
     await page.evaluate(() => window.__vylux!.advanceTime!(8.0));
 
     const afterHqHp = await page.evaluate(() => window.__vylux!.getHqHp!('red'));

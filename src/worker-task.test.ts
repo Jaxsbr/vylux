@@ -118,14 +118,14 @@ describe('tickWorkerTask — walking-to-node', () => {
     expect(result.moveTo).toEqual({ tileX: 6, tileY: 6 });
   });
 
-  it('goes idle when assigned node is exhausted and no alternatives', () => {
+  it('enters hq-idle when assigned node is exhausted and no alternatives', () => {
     let t = createWorkerTask();
     t = assignWorkerToNode(t, 0);
     const w = makeWorker('w1', 5, 5);
     const exhaustedNode = makeNode(10, 10, 0);
     const hq = makeHq(3, 9);
     const result = tickWorkerTask(t, w, exhaustedNode, hq, 0.016, []);
-    expect(result.task.phase).toBe('idle');
+    expect(result.task.phase).toBe('hq-idle');
   });
 
   it('retargets when node is occupied by another worker', () => {
@@ -254,7 +254,7 @@ describe('tickWorkerTask — offloading', () => {
     expect(result.task.nodeIndex).toBe(1);
   });
 
-  it('goes idle after offload when all nodes are exhausted', () => {
+  it('enters hq-idle after offload when all nodes are exhausted', () => {
     const t: WorkerTask = {
       phase: 'offloading',
       nodeIndex: 0,
@@ -265,7 +265,7 @@ describe('tickWorkerTask — offloading', () => {
     const exhaustedNode = makeNode(10, 10, 0);
     const hq = makeHq(3, 9);
     const result = tickWorkerTask(t, w, exhaustedNode, hq, OFFLOAD_DURATION + 0.1, []);
-    expect(result.task.phase).toBe('idle');
+    expect(result.task.phase).toBe('hq-idle');
   });
 });
 
@@ -378,6 +378,53 @@ describe('tickNodeRegen', () => {
     const timeNeeded = MIN_REGEN_THRESHOLD / NODE_REGEN_RATE;
     const newReserve = tickNodeRegen(0, timeNeeded + 1);
     expect(newReserve).toBeGreaterThanOrEqual(MIN_REGEN_THRESHOLD);
+  });
+});
+
+describe('tickWorkerTask — hq-idle phase', () => {
+  it('walks toward HQ when in hq-idle with no available nodes', () => {
+    const t: WorkerTask = {
+      phase: 'hq-idle',
+      nodeIndex: -1,
+      harvestProgress: 0,
+      offloadTimer: 0,
+    };
+    const w = makeWorker('w1', 10, 10); // far from HQ
+    const hq = makeHq(3, 9);
+    const result = tickWorkerTask(t, w, null, hq, 0.016, []);
+    expect(result.task.phase).toBe('hq-idle');
+    expect(result.moveTo).toEqual({ tileX: 3, tileY: 9 });
+    expect(result.offloaded).toBe(false);
+  });
+
+  it('stays put when already at HQ with no available nodes', () => {
+    const t: WorkerTask = {
+      phase: 'hq-idle',
+      nodeIndex: -1,
+      harvestProgress: 0,
+      offloadTimer: 0,
+    };
+    const w = makeWorker('w1', 3, 9); // at HQ
+    const hq = makeHq(3, 9);
+    const result = tickWorkerTask(t, w, null, hq, 0.016, []);
+    expect(result.task.phase).toBe('hq-idle');
+    expect(result.moveTo).toBeNull();
+  });
+
+  it('immediately re-assigns to nearest live node when one becomes available', () => {
+    const t: WorkerTask = {
+      phase: 'hq-idle',
+      nodeIndex: -1,
+      harvestProgress: 0,
+      offloadTimer: 0,
+    };
+    const w = makeWorker('w1', 3, 9); // at HQ
+    const hq = makeHq(3, 9);
+    const liveNode = makeLiveNode(2, 6, 6); // node just became free
+    const result = tickWorkerTask(t, w, null, hq, 0.016, [liveNode]);
+    expect(result.task.phase).toBe('walking-to-node');
+    expect(result.task.nodeIndex).toBe(2);
+    expect(result.moveTo).toEqual({ tileX: 6, tileY: 6 });
   });
 });
 

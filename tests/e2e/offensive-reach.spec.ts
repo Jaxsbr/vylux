@@ -27,6 +27,15 @@ test('offensive-reach: blue raider placed at blue HQ travels to red side and dam
   // Seed blue energy so we don't need to wait for income.
   await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 500, red: 0 }));
 
+  // Kill red starter workers so the blue raider beelines to red HQ instead of workers.
+  // This keeps the test focused on map traversal + HQ damage regardless of damage tuning.
+  await page.evaluate(() => {
+    window.__vylux!.killUnit!({ kind: 'worker', faction: 'red', index: 0 });
+    window.__vylux!.killUnit!({ kind: 'worker', faction: 'red', index: 0 });
+  });
+  // Advance briefly to let death pulses clear.
+  await page.evaluate(() => window.__vylux!.advanceTime!(0.3));
+
   // Record initial red HQ HP.
   const initialRedHqHp = await page.evaluate(() => window.__vylux!.getHqHp!('red'));
   expect(initialRedHqHp).toBeGreaterThan(0);
@@ -47,7 +56,7 @@ test('offensive-reach: blue raider placed at blue HQ travels to red side and dam
 
   // Advance 12 seconds of simulated time so the raider crosses the map.
   // Distance from (4,9) to red HQ at (16,9) is 12 tiles; at 2.8 t/s that's ~4.3s.
-  // We add buffer to ensure at least one attack fires.
+  // We add buffer to ensure at least one attack fires (no workers to delay the raider).
   await page.evaluate(() => window.__vylux!.advanceTime!(12));
 
   // Assert: raider moved from spawn tile.

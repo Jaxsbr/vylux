@@ -12,16 +12,17 @@ export const UNIT_COSTS: Record<UnitKind, number> = {
 };
 
 // Named HP constants — tuned so fights last ≥3 hits.
-// Worker: 80 HP, raider damage 20 → 4 hits to kill (visible exchange).
-// Raider: 60 HP, defender damage 15 → 4 hits to kill (raiders don't evaporate).
-// Defender: 120 HP, raider damage 20 → 6 hits to kill (tank feel preserved).
+// Worker: 80 HP, raider damage 15 → ceil(80/15)=6 hits to kill (≥5 floor met).
+// Raider: 60 HP, defender damage 15 → 4 hits to kill (raiders don't evaporate; ≥3 ✓).
+// Defender: 120 HP, raider damage 15 → 8 hits to kill (tank feel preserved; ≥3 ✓).
 export const WORKER_HP = 80;
 export const DEFENDER_HP = 120;
 export const RAIDER_HP = 60;
 
 // Named damage constants.
-export const RAIDER_DAMAGE = 20;
-export const RAIDER_VS_HQ_DAMAGE = 20; // same damage path, kept separate for future tuning
+// RAIDER_DAMAGE reduced from 20 → 15 to give workers a ≥5-hit survival floor.
+export const RAIDER_DAMAGE = 15;
+export const RAIDER_VS_HQ_DAMAGE = 15; // same damage path, kept separate for future tuning
 export const DEFENDER_DAMAGE = 15;
 
 // Retaliation window: if a defender hit a raider within this many combat ticks,
