@@ -487,25 +487,20 @@ export function attachE2EHook(bundle: SceneBundle, hudSetters: HudSetters): void
               energyCache = { ...newEnergy };
             },
             onTrained: (kind, tileX, tileY) => {
-              const rsp = bundle.hqs.red.spawnTile;
               if (kind === 'worker') {
                 const w = buildWorker('red', tileX, tileY);
                 bundle.scene.add(w.mesh);
                 bundle.workers.push(w);
-                w.moveTo(rsp.x, rsp.y);
               } else if (kind === 'defender') {
                 const d = buildDefender('red', tileX, tileY);
                 bundle.scene.add(d.mesh);
                 bundle.defenders.push(d);
-                d.moveTo(rsp.x, rsp.y);
               } else {
                 const r = buildRaider('red', tileX, tileY);
                 bundle.scene.add(r.mesh);
                 bundle.raiders.push(r);
                 if (hudSetters.aiState.mustering) {
                   r.moveTo(bundle.hqs.blue.tileX, bundle.hqs.blue.tileY);
-                } else {
-                  r.moveTo(rsp.x, rsp.y);
                 }
               }
             },

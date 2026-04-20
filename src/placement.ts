@@ -154,58 +154,74 @@ export function isInProximityZone(
   return dx <= PROXIMITY_RADIUS && dy <= PROXIMITY_RADIUS;
 }
 
-// ── Spawn-tile helpers ────────────────────────────────────────────────────────
+// ── HQ adjacency helpers ──────────────────────────────────────────────────────
+
+/** The 8-directional neighbour offsets for adjacency checks. */
+const ADJACENT_OFFSETS: [number, number][] = [
+  [1, 0], [0, 1], [-1, 0], [0, -1],
+  [1, 1], [-1, 1], [1, -1], [-1, -1],
+];
 
 /**
- * Default spawn tile for an HQ: one tile toward the map centre from the HQ.
- * Blue HQ (left side) → one tile right; Red HQ (right side) → one tile left.
+ * Returns true if (tileX, tileY) is one of the 8 neighbours of (hqX, hqY)
+ * and within grid bounds.
  */
-export function defaultSpawnTile(
+export function isHqAdjacentTile(
+  tileX: number,
+  tileY: number,
   hqX: number,
   hqY: number,
-  faction: FactionId,
-): { x: number; y: number } {
-  if (faction === 'blue') {
-    return { x: hqX + 1, y: hqY };
+): boolean {
+  for (const [dx, dy] of ADJACENT_OFFSETS) {
+    const nx = hqX + dx;
+    const ny = hqY + dy;
+    if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+    if (nx === tileX && ny === tileY) return true;
   }
-  return { x: hqX - 1, y: hqY };
+  return false;
 }
 
 /**
- * Returns true if a tile is a valid spawn-point relocation target for an HQ:
- *   - inside the proximity zone (not the HQ tile, within PROXIMITY_RADIUS)
- *   - not occupied by a unit or node
- * The `isOccupied` callback should return true for unit tiles and node tiles
- * (but NOT the HQ tile itself, since the proximity zone already excludes that).
+ * Count the number of free (unoccupied) 8-neighbour tiles adjacent to the HQ.
+ * `isOccupied` must return true for anything that blocks a spawn (units, nodes, other HQ).
  */
-export function validateSpawnTile(
+export function countFreeHqAdjacentTiles(
+  hqX: number,
+  hqY: number,
+  isOccupied: (tx: number, ty: number) => boolean,
+): number {
+  let free = 0;
+  for (const [dx, dy] of ADJACENT_OFFSETS) {
+    const nx = hqX + dx;
+    const ny = hqY + dy;
+    if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+    if (!isOccupied(nx, ny)) free++;
+  }
+  return free;
+}
+
+/**
+ * Returns true if placing a unit on (tileX, tileY) would leave the HQ at
+ * (hqX, hqY) with zero free adjacent tiles — i.e. it would fully enclose the HQ.
+ * `isOccupied` must return true for all tiles already occupied (NOT including the
+ * tile being tested).
+ */
+export function wouldEncloseHq(
   tileX: number,
   tileY: number,
   hqX: number,
   hqY: number,
   isOccupied: (tx: number, ty: number) => boolean,
 ): boolean {
-  if (!isInProximityZone(tileX, tileY, hqX, hqY)) return false;
-  if (isOccupied(tileX, tileY)) return false;
-  return true;
+  if (!isHqAdjacentTile(tileX, tileY, hqX, hqY)) return false;
+  const freeAfter = countFreeHqAdjacentTiles(hqX, hqY, (tx, ty) => {
+    if (tx === tileX && ty === tileY) return true;
+    return isOccupied(tx, ty);
+  });
+  return freeAfter === 0;
 }
 
-/**
- * Returns a new spawn tile coordinate if the relocation is valid, or null.
- * Pure transition — no side effects.
- */
-export function relocateSpawnTile(
-  tileX: number,
-  tileY: number,
-  hqX: number,
-  hqY: number,
-  isOccupied: (tx: number, ty: number) => boolean,
-): { x: number; y: number } | null {
-  if (!validateSpawnTile(tileX, tileY, hqX, hqY, isOccupied)) return null;
-  return { x: tileX, y: tileY };
-}
-
-export type TryPlaceReason = 'occupied' | 'out-of-bounds' | 'not-in-placement' | 'out-of-zone';
+export type TryPlaceReason = 'occupied' | 'out-of-bounds' | 'not-in-placement' | 'out-of-zone' | 'hq-enclosure';
 
 export type TryPlaceResult =
   | { ok: true; state: PlacementState }

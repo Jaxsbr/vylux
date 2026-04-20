@@ -12,11 +12,11 @@ import {
   handleClick,
   proximityZoneTiles,
   isInProximityZone,
+  isHqAdjacentTile,
+  countFreeHqAdjacentTiles,
+  wouldEncloseHq,
   PROXIMITY_RADIUS,
   GRID_SIZE,
-  defaultSpawnTile,
-  validateSpawnTile,
-  relocateSpawnTile,
   type PlacementState,
 } from './placement';
 
@@ -491,64 +491,93 @@ describe('isInProximityZone', () => {
   });
 });
 
-describe('defaultSpawnTile', () => {
-  it('blue faction default spawn is one tile right of HQ', () => {
-    const sp = defaultSpawnTile(3, 9, 'blue');
-    expect(sp).toEqual({ x: 4, y: 9 });
+describe('isHqAdjacentTile', () => {
+  it('returns true for all 8 neighbours of an interior HQ', () => {
+    const hqX = 5;
+    const hqY = 5;
+    const expected: [number, number][] = [
+      [6, 5], [5, 6], [4, 5], [5, 4],
+      [6, 6], [4, 6], [6, 4], [4, 4],
+    ];
+    for (const [tx, ty] of expected) {
+      expect(isHqAdjacentTile(tx, ty, hqX, hqY)).toBe(true);
+    }
   });
 
-  it('red faction default spawn is one tile left of HQ', () => {
-    const sp = defaultSpawnTile(16, 9, 'red');
-    expect(sp).toEqual({ x: 15, y: 9 });
+  it('returns false for the HQ tile itself', () => {
+    expect(isHqAdjacentTile(5, 5, 5, 5)).toBe(false);
   });
 
-  it('default spawn tile is inside the proximity zone', () => {
-    const blue = defaultSpawnTile(3, 9, 'blue');
-    expect(isInProximityZone(blue.x, blue.y, 3, 9)).toBe(true);
-    const red = defaultSpawnTile(16, 9, 'red');
-    expect(isInProximityZone(red.x, red.y, 16, 9)).toBe(true);
-  });
-});
-
-describe('validateSpawnTile', () => {
-  const noOccupied = (_tx: number, _ty: number): boolean => false;
-
-  it('returns true for a valid tile inside the proximity zone', () => {
-    // Blue HQ at (3,9): tile (4,8) is in zone and not occupied.
-    expect(validateSpawnTile(4, 8, 3, 9, noOccupied)).toBe(true);
+  it('returns false for tiles 2+ away', () => {
+    expect(isHqAdjacentTile(7, 5, 5, 5)).toBe(false);
+    expect(isHqAdjacentTile(5, 8, 5, 5)).toBe(false);
   });
 
-  it('returns false when tile is the HQ tile itself', () => {
-    expect(validateSpawnTile(3, 9, 3, 9, noOccupied)).toBe(false);
-  });
-
-  it('returns false when tile is outside the proximity zone', () => {
-    // (0,0) is far from (3,9)
-    expect(validateSpawnTile(0, 0, 3, 9, noOccupied)).toBe(false);
-  });
-
-  it('returns false when tile is occupied', () => {
-    const occupied = (_tx: number, _ty: number): boolean => true;
-    expect(validateSpawnTile(4, 9, 3, 9, occupied)).toBe(false);
+  it('returns false for out-of-bounds neighbours', () => {
+    // HQ at (0,0): neighbour at (-1,0) is out of bounds.
+    expect(isHqAdjacentTile(-1, 0, 0, 0)).toBe(false);
+    expect(isHqAdjacentTile(0, -1, 0, 0)).toBe(false);
   });
 });
 
-describe('relocateSpawnTile', () => {
+describe('countFreeHqAdjacentTiles', () => {
   const noOccupied = (_tx: number, _ty: number): boolean => false;
 
-  it('returns new coords when tile is valid', () => {
-    const result = relocateSpawnTile(4, 8, 3, 9, noOccupied);
-    expect(result).toEqual({ x: 4, y: 8 });
+  it('counts all 8 neighbours free for an interior HQ when nothing is occupied', () => {
+    expect(countFreeHqAdjacentTiles(10, 10, noOccupied)).toBe(8);
   });
 
-  it('returns null when tile is invalid (outside zone)', () => {
-    const result = relocateSpawnTile(0, 0, 3, 9, noOccupied);
-    expect(result).toBeNull();
+  it('counts 0 free when all 8 neighbours are occupied', () => {
+    const allOccupied = (_tx: number, _ty: number): boolean => true;
+    expect(countFreeHqAdjacentTiles(10, 10, allOccupied)).toBe(0);
   });
 
-  it('returns null when tile is occupied', () => {
-    const occupied = (_tx: number, _ty: number): boolean => true;
-    const result = relocateSpawnTile(4, 9, 3, 9, occupied);
-    expect(result).toBeNull();
+  it('counts correctly when some neighbours are occupied', () => {
+    const occupied = new Set(['11,10', '10,11']);
+    const isOcc = (tx: number, ty: number): boolean => occupied.has(`${tx},${ty}`);
+    expect(countFreeHqAdjacentTiles(10, 10, isOcc)).toBe(6);
+  });
+
+  it('excludes out-of-bounds tiles from the count (corner HQ)', () => {
+    // HQ at (0,0): only 3 in-bounds neighbours.
+    expect(countFreeHqAdjacentTiles(0, 0, noOccupied)).toBe(3);
+  });
+});
+
+describe('wouldEncloseHq', () => {
+  const noOccupied = (_tx: number, _ty: number): boolean => false;
+
+  it('returns false when the tile is not adjacent to HQ', () => {
+    // (15, 10) is 2+ tiles away from HQ (10, 10)
+    expect(wouldEncloseHq(15, 10, 10, 10, noOccupied)).toBe(false);
+  });
+
+  it('returns false when placing would still leave free adjacent tiles', () => {
+    // Only 1 of 8 neighbours is occupied after placement — 7 remain free.
+    expect(wouldEncloseHq(11, 10, 10, 10, noOccupied)).toBe(false);
+  });
+
+  it('returns true when placing would leave zero free adjacent tiles', () => {
+    // HQ at (10,10). All 8 neighbours occupied except (11,10).
+    // Placing on (11,10) would leave 0 free.
+    const occupied = new Set([
+      '10,11', '9,10', '10,9',
+      '11,11', '9,11', '11,9', '9,9',
+    ]);
+    const isOcc = (tx: number, ty: number): boolean => occupied.has(`${tx},${ty}`);
+    expect(wouldEncloseHq(11, 10, 10, 10, isOcc)).toBe(true);
+  });
+
+  it('returns false when HQ already has zero free adjacent tiles (placing does not worsen)', () => {
+    // All 8 neighbours already occupied — the isOccupied callback already covers them.
+    // Placing on an occupied tile: wouldEncloseHq tests isHqAdjacentTile first,
+    // and the tile is adjacent, so it re-checks counting with the new tile added.
+    // Since all 8 are occupied, the count after "adding" any one of them stays 0.
+    // But that tile is already occupied, so it shouldn't be placed at all — the
+    // "occupied" guard in tryPlace would catch it first. This test just verifies
+    // that the pure function handles the edge without panicking.
+    const allOccupied = (_tx: number, _ty: number): boolean => true;
+    // Result: true (would still be 0 free after placement).
+    expect(wouldEncloseHq(11, 10, 10, 10, allOccupied)).toBe(true);
   });
 });

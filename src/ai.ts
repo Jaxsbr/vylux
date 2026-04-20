@@ -13,8 +13,7 @@ import type { RaiderBundle } from './raider';
 import type { EnergyNodeBundle } from './energy-node';
 import type { HQBundle } from './hq';
 import { UNIT_COSTS, UNIT_STATS, type UnitKind } from './units-config';
-import { trainUnit } from './training';
-import { GRID_CONSTANTS } from './grid';
+import { trainUnit, buildOccupiedSet } from './training';
 import { advanceRaiders, type AdvanceTarget } from './advance';
 import { findNearestLiveUnoccupied } from './worker-task';
 
@@ -76,12 +75,6 @@ export type TickAiParams = {
   getWorkerTaskPhase: (w: WorkerBundle) => import('./worker-task').WorkerTaskPhase;
 };
 
-function tileDist(ax: number, ay: number, bx: number, by: number): number {
-  const dx = ax - bx;
-  const dy = ay - by;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
 function isIdle(w: WorkerBundle): boolean {
   // Workers with a target different from their current tile are still moving.
   return w.tileX === w.targetTileX && w.tileY === w.targetTileY;
@@ -91,7 +84,7 @@ export function tickAi(params: TickAiParams): void {
   const {
     state, dt,
     energy, redWorkers, redDefenders, redRaiders,
-    allWorkers,
+    allWorkers, allDefenders, allRaiders,
     energyNodes, redHq, blueHq,
     onTrained, onEnergyChanged, assignWorkerTask, getWorkerTaskPhase,
   } = params;
@@ -105,17 +98,21 @@ export function tickAi(params: TickAiParams): void {
     const kind = state.buildQueue[0];
     const cost = UNIT_COSTS[kind];
     if (energy.red >= cost) {
+      const allUnits = [...allWorkers, ...allDefenders, ...allRaiders];
+      const occupied = buildOccupiedSet(allUnits, [redHq, blueHq]);
+      const isOccupied = (tx: number, ty: number): boolean => occupied.has(`${tx},${ty}`);
+
       const result = trainUnit(
         energy,
         'red',
         kind,
         redHq.tileX,
         redHq.tileY,
+        isOccupied,
       );
 
       if (result.ok) {
         onEnergyChanged(result.newEnergy);
-        // Units spawn at HQ tile; onTrained handler issues moveTo(spawnPoint) for red.
         onTrained(kind, result.spawnTile.tileX, result.spawnTile.tileY);
         state.buildQueue.shift();
         // Refill queue from loop pattern when exhausted.
@@ -159,14 +156,12 @@ export function tickAi(params: TickAiParams): void {
   }
 
   // --- Raider advance pass ---
-  // Replace ad-hoc muster/send-at-blue-HQ with the shared advance primitive so
-  // red raiders use the same auto-path logic as blue raiders (advance.ts).
+  // Red raiders use the shared advance primitive (same logic as blue raiders).
   const livingRedRaiders = redRaiders.filter((r) => r.hp > 0);
   if (!state.mustering && livingRedRaiders.length >= AI_RAIDER_MUSTER) {
     state.mustering = true;
   }
   if (state.mustering) {
-    // Delegate targeting to the shared advance primitive.
     const blueWorkers = allWorkers.filter((w) => w.faction === 'blue');
     const enemyWorkerTargets: AdvanceTarget[] = blueWorkers.map((w) => ({
       tileX: w.tileX, tileY: w.tileY, hp: w.hp,
@@ -175,32 +170,8 @@ export function tickAi(params: TickAiParams): void {
       tileX: blueHq.tileX, tileY: blueHq.tileY, hp: blueHq.hp,
     };
     advanceRaiders(livingRedRaiders, enemyWorkerTargets, hqTarget, UNIT_STATS.raider.range);
-  } else {
-    // Pre-muster: park idle raiders that are too close to HQ so spawn tile clears.
-    for (const r of livingRedRaiders) {
-      if (r.tileX !== r.targetTileX || r.tileY !== r.targetTileY) continue;
-      const dist = tileDist(r.tileX, r.tileY, redHq.tileX, redHq.tileY);
-      if (dist <= 1) {
-        // Park 2 tiles left and 1 below HQ — different spot from defenders to avoid pile-up.
-        const parkX = Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, redHq.tileX - 2));
-        const parkY = Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, redHq.tileY - 1));
-        r.moveTo(parkX, parkY);
-      }
-    }
   }
 
-  // --- Defender parking pass ---
-  // Defenders spawn at HQ direct neighbors (dist ≤ 1). Move them 2 tiles away
-  // so they free the spawn tile for the next training. Target: tiles at dist
-  // exactly 2 from HQ (not direct neighbors that would re-block spawn).
-  for (const d of redDefenders) {
-    if (d.hp <= 0) continue;
-    const dist = tileDist(d.tileX, d.tileY, redHq.tileX, redHq.tileY);
-    if (dist <= 1 && d.tileX === d.targetTileX && d.tileY === d.targetTileY) {
-      // Park 2 tiles left of HQ — always in-bounds given PROXIMITY_RADIUS=3 clearance.
-      const parkX = Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, redHq.tileX - 2));
-      const parkY = Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, redHq.tileY));
-      d.moveTo(parkX, parkY);
-    }
-  }
+  // Suppress unused warnings — redDefenders is passed in for future use.
+  void redDefenders;
 }

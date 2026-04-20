@@ -98,28 +98,6 @@ describe('buildHQ', () => {
     expect(hq.selectionRing.visible).toBe(false);
   });
 
-  it('blue HQ has a spawnTile defaulting one tile right of HQ', () => {
-    const hq = buildHQ('blue', 3, 9);
-    expect(hq.spawnTile).toEqual({ x: 4, y: 9 });
-  });
-
-  it('red HQ has a spawnTile defaulting one tile left of HQ', () => {
-    const hq = buildHQ('red', 16, 9);
-    expect(hq.spawnTile).toEqual({ x: 15, y: 9 });
-  });
-
-  it('spawnTile is mutable (relocation test)', () => {
-    const hq = buildHQ('blue', 3, 9);
-    hq.spawnTile = { x: 5, y: 9 };
-    expect(hq.spawnTile).toEqual({ x: 5, y: 9 });
-  });
-
-  it('HQ bundle has a spawnRing that starts invisible', () => {
-    const hq = buildHQ('blue', 0, 0);
-    expect(hq.spawnRing).toBeInstanceOf(THREE.Mesh);
-    expect(hq.spawnRing.visible).toBe(false);
-  });
-
   it('group world position matches tileToWorld(0, 0) for tile (0, 0)', () => {
     const hq = buildHQ('blue', 0, 0);
     // tileToWorld(0,0) = (-9.5, 0, -9.5)

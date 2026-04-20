@@ -51,17 +51,17 @@ describe('trainUnit', () => {
   const poorEnergy: FactionEnergy = { blue: 5, red: 5 };
 
   it('returns ok=true and deducts cost for worker when energy >= 20', () => {
-    const result = trainUnit(richEnergy, 'blue', 'worker', 0, 0);
+    const result = trainUnit(richEnergy, 'blue', 'worker', 5, 5, noOccupied);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.blue).toBe(200 - 20);
-      // Unit always spawns at HQ tile.
-      expect(result.spawnTile).toEqual({ tileX: 0, tileY: 0 });
+      // Unit spawns on a free adjacent tile — not the HQ tile itself.
+      expect(result.spawnTile.tileX).not.toBe(5);
     }
   });
 
   it('returns ok=true and deducts cost for defender when energy >= 60', () => {
-    const result = trainUnit(richEnergy, 'blue', 'defender', 0, 0);
+    const result = trainUnit(richEnergy, 'blue', 'defender', 5, 5, noOccupied);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.blue).toBe(200 - 60);
@@ -69,7 +69,7 @@ describe('trainUnit', () => {
   });
 
   it('returns ok=true and deducts cost for raider when energy >= 100', () => {
-    const result = trainUnit(richEnergy, 'blue', 'raider', 0, 0);
+    const result = trainUnit(richEnergy, 'blue', 'raider', 5, 5, noOccupied);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.blue).toBe(200 - 100);
@@ -77,7 +77,7 @@ describe('trainUnit', () => {
   });
 
   it('returns ok=false (insufficient-energy) when energy < cost', () => {
-    const result = trainUnit(poorEnergy, 'blue', 'worker', 0, 0);
+    const result = trainUnit(poorEnergy, 'blue', 'worker', 5, 5, noOccupied);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toBe('insufficient-energy');
@@ -85,22 +85,32 @@ describe('trainUnit', () => {
   });
 
   it('does not deduct energy on insufficient-energy failure', () => {
-    const result = trainUnit(poorEnergy, 'blue', 'defender', 0, 0);
+    const result = trainUnit(poorEnergy, 'blue', 'defender', 5, 5, noOccupied);
     expect(result.ok).toBe(false);
-    // Energy is unchanged — no side effects on failure.
   });
 
-  it('always spawns at HQ tile even when neighbours would be occupied', () => {
-    // Walled HQ: training never fails due to blocked neighbours — only energy matters.
-    const result = trainUnit(richEnergy, 'blue', 'worker', 5, 5);
+  it('returns ok=false (no-free-adjacent-tile) when all 8 neighbours are blocked', () => {
+    const result = trainUnit(richEnergy, 'blue', 'worker', 5, 5, allOccupied);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('no-free-adjacent-tile');
+    }
+  });
+
+  it('spawnTile is always one of the 8 HQ neighbours, not the HQ tile itself', () => {
+    const result = trainUnit(richEnergy, 'blue', 'worker', 5, 5, noOccupied);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.spawnTile).toEqual({ tileX: 5, tileY: 5 });
+      const { tileX, tileY } = result.spawnTile;
+      const dx = Math.abs(tileX - 5);
+      const dy = Math.abs(tileY - 5);
+      expect(dx <= 1 && dy <= 1).toBe(true);
+      expect(tileX === 5 && tileY === 5).toBe(false);
     }
   });
 
   it('red faction energy is unchanged when blue trains', () => {
-    const result = trainUnit(richEnergy, 'blue', 'raider', 0, 0);
+    const result = trainUnit(richEnergy, 'blue', 'raider', 5, 5, noOccupied);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.red).toBe(200);
@@ -109,7 +119,7 @@ describe('trainUnit', () => {
 
   it('checks energy >= cost (exact boundary: blue = cost)', () => {
     const exactEnergy: FactionEnergy = { blue: 60, red: 0 };
-    const result = trainUnit(exactEnergy, 'blue', 'defender', 0, 0);
+    const result = trainUnit(exactEnergy, 'blue', 'defender', 5, 5, noOccupied);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.newEnergy.blue).toBe(0);
@@ -118,7 +128,7 @@ describe('trainUnit', () => {
 
   it('one below boundary: blue = cost - 1 fails', () => {
     const nearEnergy: FactionEnergy = { blue: 59, red: 0 };
-    const result = trainUnit(nearEnergy, 'blue', 'defender', 0, 0);
+    const result = trainUnit(nearEnergy, 'blue', 'defender', 5, 5, noOccupied);
     expect(result.ok).toBe(false);
   });
 });

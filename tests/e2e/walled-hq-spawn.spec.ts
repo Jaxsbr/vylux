@@ -18,20 +18,63 @@ async function waitForHook(page: Page): Promise<void> {
   );
 }
 
-test('walled-HQ: raider trains when HQ is surrounded by defenders; walks to spawn point', async ({
+test('single-click raider training: unit appears adjacent to HQ, no spawn-marker step', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/?e2e=1');
   await waitForHook(page);
 
-  // Disable AI to keep the scene deterministic.
   await page.evaluate(() => window.__vylux!.setAiEnabled!(false));
+  await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 500, red: 0 }));
 
-  // Seed energy so we can afford 4 defenders (60 each = 240) + 1 raider (100).
-  await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 800, red: 0 }));
+  // Move starter workers out of the way.
+  await page.evaluate(() => {
+    window.__vylux!.moveWorker!(0, 10, 10);
+    window.__vylux!.moveWorker!(1, 11, 10);
+  });
 
-  // Move the 2 starter workers out of the proximity zone so they don't block tile checks.
+  const raidersBefore = await page.evaluate(() =>
+    window.__vylux!.getUnitCount!({ faction: 'blue', kind: 'raider' }),
+  );
+
+  // Single action: open panel, arm raider, click a proximity-zone tile.
+  // This is ALL it should take — no spawn-marker step required.
+  await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
+  await page.evaluate(() => window.__vylux!.armBuildable!('raider'));
+  const placed = await page.evaluate(() =>
+    window.__vylux!.mouseTrainUnit!('raider', 4, 9),
+  );
+  expect(placed).toBe(true);
+
+  const raidersAfter = await page.evaluate(() =>
+    window.__vylux!.getUnitCount!({ faction: 'blue', kind: 'raider' }),
+  );
+  expect(raidersAfter).toBe(raidersBefore + 1);
+
+  // The raider must be on a tile adjacent to the blue HQ (3,9), not on the HQ tile itself.
+  const raiderTile = await page.evaluate(() =>
+    window.__vylux!.getRaiderTile!('blue', 0),
+  );
+  expect(raiderTile).not.toBeNull();
+  const dx = Math.abs(raiderTile!.tileX - 3);
+  const dy = Math.abs(raiderTile!.tileY - 9);
+  expect(dx <= 1 && dy <= 1).toBe(true);
+  // Must not be at the HQ tile itself.
+  expect(raiderTile!.tileX === 3 && raiderTile!.tileY === 9).toBe(false);
+});
+
+test('HQ-enclosure guard: placing on last free adjacent tile is rejected with cue', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/?e2e=1');
+  await waitForHook(page);
+
+  await page.evaluate(() => window.__vylux!.setAiEnabled!(false));
+  await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 2000, red: 0 }));
+
+  // Move starter workers away.
   await page.evaluate(() => {
     window.__vylux!.moveWorker!(0, 10, 10);
     window.__vylux!.moveWorker!(1, 11, 10);
@@ -39,14 +82,16 @@ test('walled-HQ: raider trains when HQ is surrounded by defenders; walks to spaw
 
   // Blue HQ is at (3,9). The 8 adjacent tiles are:
   // (4,9),(3,10),(2,9),(3,8),(4,10),(2,10),(4,8),(2,8)
-  // Train 4 defenders to fill all 4 cardinal adjacents (the most important ones).
-  // Use mouseTrainUnit which validates proximity zone, then spawns at HQ and walks to spawn.
-  // We place tiles within the proximity zone that surround the HQ.
+  // Fill 7 of the 8 adjacents by training defenders onto them.
+  // We use proximity-zone tiles that are also adjacent to HQ.
   const wallTiles: [number, number][] = [
-    [4, 9],  // right
-    [3, 10], // below
-    [2, 9],  // left
-    [3, 8],  // above
+    [4, 9],
+    [3, 10],
+    [2, 9],
+    [3, 8],
+    [4, 10],
+    [2, 10],
+    [4, 8],
   ];
 
   for (const [tx, ty] of wallTiles) {
@@ -59,46 +104,88 @@ test('walled-HQ: raider trains when HQ is surrounded by defenders; walks to spaw
     expect(placed).toBe(true);
   }
 
-  // 4 defenders should now be trained.
+  // At this point 7 of 8 HQ-adjacent tiles are occupied.
+  // The only remaining free adjacent tile is (2,8).
+  // Attempting to place on (2,8) should be REJECTED (would seal HQ).
+  await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
+  await page.evaluate(() => window.__vylux!.armBuildable!('defender'));
+  const lastPlaced = await page.evaluate(() =>
+    window.__vylux!.mouseTrainUnit!('defender', 2, 8),
+  );
+  expect(lastPlaced).toBe(false);
+
+  // Confirm defender count is still 7 (not 8).
   const defCount = await page.evaluate(() =>
     window.__vylux!.getUnitCount!({ faction: 'blue', kind: 'defender' }),
   );
-  expect(defCount).toBe(4);
+  expect(defCount).toBe(7);
 
-  // Now the 4 cardinal tiles are "occupied" by defenders walking to them.
-  // Training a Raider should still succeed — unit spawns at HQ tile (3,9)
-  // and walks to the spawn point regardless of adjacency.
-  const raiderCountBefore = await page.evaluate(() =>
+  await page.screenshot({ path: 'pm/screenshots/hq-enclosure-rejected.png' });
+});
+
+test('walled-HQ guard ensures Raider can still train after 7 defenders placed', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/?e2e=1');
+  await waitForHook(page);
+
+  await page.evaluate(() => window.__vylux!.setAiEnabled!(false));
+  await page.evaluate(() => window.__vylux!.setEnergy!({ blue: 2000, red: 0 }));
+
+  // Move starter workers away.
+  await page.evaluate(() => {
+    window.__vylux!.moveWorker!(0, 10, 10);
+    window.__vylux!.moveWorker!(1, 11, 10);
+  });
+
+  // Fill 7 of 8 adjacents — enclosure guard prevents filling the last one.
+  const wallTiles: [number, number][] = [
+    [4, 9],
+    [3, 10],
+    [2, 9],
+    [3, 8],
+    [4, 10],
+    [2, 10],
+    [4, 8],
+  ];
+  for (const [tx, ty] of wallTiles) {
+    await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
+    await page.evaluate(() => window.__vylux!.armBuildable!('defender'));
+    await page.evaluate(
+      ([x, y]) => window.__vylux!.mouseTrainUnit!('defender', x, y),
+      [tx, ty],
+    );
+  }
+
+  // HQ still has 1 free adjacent tile (the one that was blocked by the enclosure guard).
+  // Train a Raider — it must succeed and spawn on that last free tile.
+  const raidersBefore = await page.evaluate(() =>
     window.__vylux!.getUnitCount!({ faction: 'blue', kind: 'raider' }),
   );
 
   await page.evaluate(() => window.__vylux!.openBuildablesPanel!());
   await page.evaluate(() => window.__vylux!.armBuildable!('raider'));
+  // Use any proximity-zone tile as the "click" — spawn location is determined by
+  // findFreeNeighbour, not by the clicked tile.
   const raiderPlaced = await page.evaluate(() =>
-    // Place within proximity zone — any valid tile in zone
     window.__vylux!.mouseTrainUnit!('raider', 5, 9),
   );
   expect(raiderPlaced).toBe(true);
 
-  const raiderCountAfter = await page.evaluate(() =>
+  const raidersAfter = await page.evaluate(() =>
     window.__vylux!.getUnitCount!({ faction: 'blue', kind: 'raider' }),
   );
-  expect(raiderCountAfter).toBe(raiderCountBefore + 1);
+  expect(raidersAfter).toBe(raidersBefore + 1);
 
-  // Advance a few seconds so the raider walks toward the spawn point (4,9 default for blue HQ).
-  await page.evaluate(() => window.__vylux!.advanceTime!(2.0));
-
-  // Raider should have moved away from the HQ tile (3,9) toward the spawn tile.
-  // Default spawn for blue HQ at (3,9) is (4,9) — raider may land near there.
+  // Raider must be adjacent to HQ.
   const raiderTile = await page.evaluate(() =>
     window.__vylux!.getRaiderTile!('blue', 0),
   );
   expect(raiderTile).not.toBeNull();
-  // After 2s the raider should not still be exactly at the HQ tile.
-  // (It's a 1-tile move so it should reach the spawn point quickly.)
-  const notAtHqTile =
-    raiderTile!.tileX !== 3 || raiderTile!.tileY !== 9;
-  expect(notAtHqTile).toBe(true);
+  const dx = Math.abs(raiderTile!.tileX - 3);
+  const dy = Math.abs(raiderTile!.tileY - 9);
+  expect(dx <= 1 && dy <= 1).toBe(true);
 
   await page.screenshot({ path: 'pm/screenshots/walled-hq-spawn.png' });
 });
