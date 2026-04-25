@@ -1,6 +1,11 @@
 # Vylux
 
-A 3D isometric real-time strategy game — an Age of Empires-like builder inspired by *Tron*. Players compete for resources on a neon-contrasting grid (red-orange vs. blue on dark), building, gathering, sabotaging opponents, and racing toward supremacy.
+A Tron-inspired isometric real-time strategy game, designed from the ground up to be **deterministic, replayable, and competitively spectated** — a 1v1 RTS aimed at Steam release with a credible esport footprint.
+
+- **Product direction:** [`docs/product/PRD.md`](docs/product/PRD.md)
+- **Active investigation:** [`docs/investigation/00-determinism-and-netcode.md`](docs/investigation/00-determinism-and-netcode.md)
+- **Aesthetic references:** [`docs/concepts/`](docs/concepts/)
+- **Module layout (current code):** [`AGENTS.md`](AGENTS.md)
 
 ## Quick start
 
@@ -16,14 +21,14 @@ npm run build
 npm run preview    # http://localhost:5181/
 ```
 
-Run the full verify command (matches the build-loop gate):
+## Verify
 
 ```bash
 npx tsc --noEmit && npm run test && npm run test:e2e
 ```
 
-User manual: [docs/manual/foundation.md](docs/manual/foundation.md).
+This is the same gate used locally and in CI — no CI-only variants.
 
-<!-- build-loop -->
----
-*Built with [build-loop](docs/plan/) — init v13*
+## Status
+
+The repository currently contains a working prototype (single map, three unit types, one scripted AI). It is being **rebuilt around a deterministic simulation core** before further feature work — see the investigation doc above for the gating spike.
