@@ -37,11 +37,29 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
   // Decision cadence — only act every AI_TICK_INTERVAL ticks.
   if (state.tick % AI_TICK_INTERVAL !== 0) return [];
 
-  const commands: Command[] = [];
+  const commands: Command[] = autoAssignIdleWorkers(state, faction);
   const counts = countOwnedUnits(state, faction);
 
-  // 1. Always assign idle workers to nearest node before considering training,
-  //    so newly-trained workers start contributing immediately.
+  // Build order — train one unit per AI tick (avoids draining the entire
+  // energy bank in a single decision). Workers → defenders → raiders.
+  const fs = state.factions[faction];
+  const trainCommand = pickTrainTarget(counts, fs.energy);
+  if (trainCommand !== null) {
+    commands.push({
+      kind: CommandKind.TrainUnit,
+      faction,
+      unitKind: trainCommand,
+    });
+  }
+
+  return commands;
+}
+
+// Player-controlled factions get the same idle-worker convenience the
+// AI does. Phase 3 may revisit if "select worker → click node" becomes
+// part of the design; for Phase 1 mouse-only play it would be busywork.
+export function autoAssignIdleWorkers(state: SimState, faction: Faction): Command[] {
+  const commands: Command[] = [];
   for (let i = 0; i < state.units.length; i++) {
     const u = state.units[i];
     if (!u.alive || u.faction !== faction || u.kind !== 'worker') continue;
@@ -55,19 +73,6 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
       });
     }
   }
-
-  // 2. Build order — train one unit per AI tick (avoids draining the entire
-  //    energy bank in a single decision). Workers → defenders → raiders.
-  const fs = state.factions[faction];
-  const trainCommand = pickTrainTarget(counts, fs.energy);
-  if (trainCommand !== null) {
-    commands.push({
-      kind: CommandKind.TrainUnit,
-      faction,
-      unitKind: trainCommand,
-    });
-  }
-
   return commands;
 }
 

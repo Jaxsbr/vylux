@@ -1,21 +1,28 @@
-// Entry point for the sim-driven game (Phase 1.4+).
+// Entry point for the sim-driven game (Phase 1.4 + 1.5).
 //
-// Wires up: scene + renderer + Match + driver + AI commands for both
-// factions. No mouse input yet — that's Phase 1.5. For now this is a
-// fast way to watch the new sim run live, against a real renderer.
-//
-// The prototype's main.ts is untouched. Reach this entry by visiting
+// Wires up: scene + renderer + Match + driver + AI for faction 1 +
+// player input for faction 0. Reach this entry by visiting
 // /index-v2.html on the dev server.
+//
+// Player faction = 0 (cyan). AI faction = 1 (red-orange). The player
+// trains units via the buildables panel; their workers auto-assign
+// to nearest live nodes, matching AI behaviour. Match-end overlay
+// shows VICTORY/DEFEAT with a Play Again button (reload).
 
-import { tickAi } from './sim/ai';
+import { autoAssignIdleWorkers, tickAi } from './sim/ai';
 import { Match } from './sim/replay';
 import type { InitialMatchSpec } from './sim/state';
+import type { Faction } from './sim/types';
 import { createScene } from './render/scene-v2';
 import { SimRenderer } from './render/sim-renderer';
 import { startSimDriver, TICK_HZ } from './render/sim-driver';
+import { MatchEndOverlay, PlayerInput } from './render/player-input';
+
+const PLAYER_FACTION: Faction = 0;
+const AI_FACTION: Faction = 1;
 
 const SPEC: InitialMatchSpec = {
-  seed: 99,
+  seed: 42,
   hqs: {
     faction0: { x: 3, y: 3 },
     faction1: { x: 16, y: 16 },
@@ -35,7 +42,6 @@ function bootstrap(): void {
   const canvas = document.getElementById('canvas') as HTMLCanvasElement | null;
   if (!canvas) throw new Error('main-v2: #canvas not found');
 
-  // Size canvas to viewport.
   function resizeCanvas(): void {
     canvas!.style.width = '100vw';
     canvas!.style.height = '100vh';
@@ -48,19 +54,29 @@ function bootstrap(): void {
 
   const match = new Match(SPEC);
   const renderer = new SimRenderer(match.sim, scene.entitiesGroup);
-  const driver = startSimDriver(match, renderer, scene, (m) => [
-    ...tickAi(m.sim.state, 0),
-    ...tickAi(m.sim.state, 1),
-  ]);
+  const playerInput = new PlayerInput(PLAYER_FACTION, document.body);
+  const matchEnd = new MatchEndOverlay(document.body);
 
-  // Tiny corner HUD: tick / winner / dropped steps.
+  const driver = startSimDriver(match, renderer, scene, (m) => {
+    // Each tick, merge player input + AI commands + auto-assignments
+    // for both factions. Order: player commands first (they were queued
+    // before this tick), then per-faction tickAi for AI, then
+    // auto-assign for the player.
+    return [
+      ...playerInput.takeQueued(),
+      ...autoAssignIdleWorkers(m.sim.state, PLAYER_FACTION),
+      ...tickAi(m.sim.state, AI_FACTION),
+    ];
+  });
+
+  // HUD overlay.
   const hud = document.createElement('div');
   hud.style.cssText = [
     'position:fixed', 'top:8px', 'left:8px',
     'font-family:ui-monospace,Menlo,monospace',
     'font-size:11px', 'color:#9ad', 'pointer-events:none',
     'background:rgba(0,0,0,0.4)', 'padding:6px 10px', 'border-radius:4px',
-    'border:1px solid #234',
+    'border:1px solid #234', 'white-space:pre',
   ].join(';');
   document.body.appendChild(hud);
 
@@ -68,13 +84,16 @@ function bootstrap(): void {
     requestAnimationFrame(tickHud);
     const s = match.sim.state;
     hud.textContent = [
-      `vylux sim-v2 · ${TICK_HZ} Hz`,
+      `vylux sim-v2 · ${TICK_HZ} Hz · you = cyan`,
       `tick ${s.tick}  winner ${s.winner ?? '–'}`,
-      `f0  hp ${(s.factions[0].hqHp / 65536).toFixed(0)}  pts ${s.factions[0].points}  e ${(s.factions[0].energy / 65536).toFixed(0)}`,
-      `f1  hp ${(s.factions[1].hqHp / 65536).toFixed(0)}  pts ${s.factions[1].points}  e ${(s.factions[1].energy / 65536).toFixed(0)}`,
+      `you  hp ${(s.factions[0].hqHp / 65536).toFixed(0)}  pts ${s.factions[0].points}  e ${(s.factions[0].energy / 65536).toFixed(0)}`,
+      `ai   hp ${(s.factions[1].hqHp / 65536).toFixed(0)}  pts ${s.factions[1].points}  e ${(s.factions[1].energy / 65536).toFixed(0)}`,
       `units ${s.units.filter((u) => u.alive).length}  dropped ${driver.droppedSteps}`,
     ].join('\n');
-    hud.style.whiteSpace = 'pre';
+
+    playerInput.refresh(match.sim);
+
+    if (s.winner !== null) matchEnd.show(PLAYER_FACTION, s.winner);
   }
   requestAnimationFrame(tickHud);
 
