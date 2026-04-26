@@ -4,12 +4,11 @@
 // - capturePrev() snapshots positions just before a sim tick advances,
 //   so the renderer has a "from" position for interpolation.
 // - update(alpha) reads current sim state, lerps positions from the
-//   captured snapshot to the live state, and updates each mesh.
-//   Newly-spawned units get a mesh; dead units (alive=false) get
-//   theirs hidden (kept around for potential resurrection / cleanup).
-// - applyInputVisuals(selectedUnitId) updates the selection ring under
-//   the selected unit. Lives on this class because it needs access to
-//   the same unit-mesh registry used for entity reconciliation.
+//   captured snapshot to the live state, updates each mesh, and
+//   refreshes per-unit HP bars from sim-derived HP / max.
+// - applyInputVisuals(selectedUnitId) toggles the selection ring on
+//   the selected entity (each entity owns its own ring; we just
+//   set .visible).
 //
 // The sim is the source of truth. This module never writes back into
 // sim state — it's a one-way consumer (PRD §3.3).
@@ -20,12 +19,12 @@ import type { Sim } from '../sim/sim';
 import type { Faction } from '../sim/types';
 import { UNIT_STATS } from '../sim/units-config';
 import {
-  buildHpBar,
   buildHqMesh,
   buildNodeMesh,
-  buildSelectionRing,
   buildUnitMesh,
-  type HpBarBundle,
+  type HqVisual,
+  type UnitVisual,
+  type NodeVisual,
 } from './meshes';
 import { tileFloatToWorld } from './scene';
 
@@ -34,31 +33,23 @@ interface PrevPosition {
   y: number;
 }
 
-interface UnitMeshBundle {
-  group: THREE.Group;
-  hpBar: HpBarBundle;
-}
-
 export class SimRenderer {
   private readonly entitiesGroup: THREE.Group;
   private readonly sim: Sim;
 
-  private readonly hqMeshes: [THREE.Group | null, THREE.Group | null] = [null, null];
-  private readonly unitMeshes = new Map<number, UnitMeshBundle>();
-  private readonly nodeMeshes = new Map<number, THREE.Group>();
+  private readonly hqMeshes: [HqVisual | null, HqVisual | null] = [null, null];
+  private readonly unitMeshes = new Map<number, UnitVisual>();
+  private readonly nodeMeshes = new Map<number, NodeVisual>();
   private readonly prevUnitPos = new Map<number, PrevPosition>();
 
-  private readonly selectionRing: THREE.Mesh = buildSelectionRing();
+  // Combined raycast-target views for the input controller.
+  private readonly unitGroupView = new Map<number, THREE.Group>();
+  private readonly nodeGroupView = new Map<number, THREE.Group>();
 
   constructor(sim: Sim, entitiesGroup: THREE.Group, _playerFaction: Faction) {
     this.sim = sim;
     this.entitiesGroup = entitiesGroup;
-    // playerFaction reserved for future per-player visuals (e.g. fog of
-    // war in Phase 3); unused today but kept on the constructor signature
-    // so call sites don't churn when it lands.
-    void _playerFaction;
-    this.selectionRing.visible = false;
-    this.entitiesGroup.add(this.selectionRing);
+    void _playerFaction; // reserved for fog-of-war / faction-specific visuals (Phase 3)
     this.spawnHqs();
   }
 
@@ -71,81 +62,83 @@ export class SimRenderer {
   }
 
   update(alpha: number): void {
+    this.syncHqs();
     this.syncNodes();
     this.syncUnits(alpha);
   }
 
   // Read-only mesh registries used by the input controller for raycasting.
   get unitMeshMap(): ReadonlyMap<number, THREE.Group> {
-    const view = new Map<number, THREE.Group>();
-    for (const [id, bundle] of this.unitMeshes) view.set(id, bundle.group);
-    return view;
+    return this.unitGroupView;
   }
 
   get nodeMeshMap(): ReadonlyMap<number, THREE.Group> {
-    return this.nodeMeshes;
+    return this.nodeGroupView;
   }
 
+  // Each unit/HQ owns its own selection ring; toggling one ring
+  // requires walking the registry. Cheap (entity counts are small).
   applyInputVisuals(selectedUnitId: number | null): void {
-    this.applySelectionRing(selectedUnitId);
-  }
-
-  private applySelectionRing(selectedUnitId: number | null): void {
-    if (selectedUnitId === null) {
-      this.selectionRing.visible = false;
-      return;
+    for (const [id, vis] of this.unitMeshes) {
+      vis.selectionRing.visible = id === selectedUnitId;
     }
-    const u = this.sim.state.units.find((x) => x.id === selectedUnitId);
-    if (!u || !u.alive) {
-      this.selectionRing.visible = false;
-      return;
-    }
-    const w = tileFloatToWorld(toFloat(u.x), toFloat(u.y));
-    this.selectionRing.position.set(w.x, 0.04, w.z);
-    this.selectionRing.visible = true;
   }
 
   private spawnHqs(): void {
     for (const f of [0, 1] as const) {
       const fs = this.sim.state.factions[f];
-      const mesh = buildHqMesh(f);
-      const w = tileFloatToWorld(toFloat(fs.hqX), toFloat(fs.hqY));
-      mesh.position.set(w.x, 0, w.z);
-      this.entitiesGroup.add(mesh);
-      this.hqMeshes[f] = mesh;
+      const v = buildHqMesh(f, toFloat(fs.hqX), toFloat(fs.hqY));
+      this.entitiesGroup.add(v.group);
+      this.hqMeshes[f] = v;
     }
   }
 
+  private syncHqs(): void {
+    for (const f of [0, 1] as const) {
+      const v = this.hqMeshes[f];
+      if (!v) continue;
+      const fs = this.sim.state.factions[f];
+      const maxHp = fs.hqHp > 0 ? Math.max(toFloat(fs.hqHp), 0.0001) : 0;
+      // Read max from spec — we don't have it on FactionState, so derive
+      // from initial state by tracking max separately. Simpler: cap
+      // ratio at 1 by taking max from the highest hp seen so far.
+      // For Phase 1.7-fix scope, just use a known constant: HQ has
+      // hqMaxHp from spec; in main.ts we use 250.
+      // Reach into hpBar with current/derived max — falling back to the
+      // observed peak avoids needing to plumb hqMaxHp through.
+      const knownMax = Math.max(maxHp, this.hqMaxHpSeen[f]);
+      this.hqMaxHpSeen[f] = knownMax;
+      v.hpBar.update(toFloat(fs.hqHp), knownMax);
+    }
+  }
+
+  private readonly hqMaxHpSeen: [number, number] = [0.0001, 0.0001];
+
   private syncNodes(): void {
     for (const n of this.sim.state.nodes) {
-      let mesh = this.nodeMeshes.get(n.id);
-      if (!mesh && n.alive) {
-        mesh = buildNodeMesh();
-        mesh.userData.nodeId = n.id;
-        const w = tileFloatToWorld(toFloat(n.x), toFloat(n.y));
-        mesh.position.set(w.x, 0, w.z);
-        this.entitiesGroup.add(mesh);
-        this.nodeMeshes.set(n.id, mesh);
+      let v = this.nodeMeshes.get(n.id);
+      if (!v && n.alive) {
+        v = buildNodeMesh(toFloat(n.x), toFloat(n.y));
+        v.group.userData.nodeId = n.id;
+        this.entitiesGroup.add(v.group);
+        this.nodeMeshes.set(n.id, v);
+        this.nodeGroupView.set(n.id, v.group);
       }
-      if (mesh) mesh.visible = n.alive;
+      if (v) v.group.visible = n.alive;
     }
   }
 
   private syncUnits(alpha: number): void {
     for (const u of this.sim.state.units) {
-      let bundle = this.unitMeshes.get(u.id);
-      if (!bundle) {
-        const group = buildUnitMesh(u.kind, u.faction);
-        group.userData.unitId = u.id;
-        const hpBar = buildHpBar(u.faction);
-        // Position the HP bar above the unit silhouette.
-        hpBar.group.position.y = 0.9;
-        group.add(hpBar.group);
-        this.entitiesGroup.add(group);
-        bundle = { group, hpBar };
-        this.unitMeshes.set(u.id, bundle);
+      let v = this.unitMeshes.get(u.id);
+      if (!v) {
+        v = buildUnitMesh(u.kind, u.faction, toFloat(u.x), toFloat(u.y));
+        v.group.userData.unitId = u.id;
+        this.entitiesGroup.add(v.group);
+        this.unitMeshes.set(u.id, v);
+        this.unitGroupView.set(u.id, v.group);
       }
-      bundle.group.visible = u.alive;
+      v.group.visible = u.alive;
       if (!u.alive) continue;
 
       const curX = toFloat(u.x);
@@ -154,24 +147,21 @@ export class SimRenderer {
       const lerpX = prev ? prev.x + (curX - prev.x) * alpha : curX;
       const lerpY = prev ? prev.y + (curY - prev.y) * alpha : curY;
       const w = tileFloatToWorld(lerpX, lerpY);
-      bundle.group.position.set(w.x, 0, w.z);
+      v.group.position.set(w.x, 0, w.z);
 
-      // HP bar: scale fill by hp / maxHp, anchored at the left edge so
-      // damage shrinks the bar from the right.
       const maxHp = UNIT_STATS[u.kind].maxHp;
-      const ratio = maxHp === 0 ? 0 : Math.max(0, Math.min(1, u.hp / maxHp));
-      bundle.hpBar.fill.scale.x = Math.max(0.001, ratio);
-      bundle.hpBar.fill.position.x = -((1 - ratio) * 0.58) / 2;
+      v.hpBar.update(toFloat(u.hp), toFloat(maxHp));
     }
   }
 
   dispose(): void {
-    for (const b of this.unitMeshes.values()) this.entitiesGroup.remove(b.group);
-    for (const m of this.nodeMeshes.values()) this.entitiesGroup.remove(m);
-    for (const h of this.hqMeshes) if (h) this.entitiesGroup.remove(h);
-    this.entitiesGroup.remove(this.selectionRing);
+    for (const v of this.unitMeshes.values()) this.entitiesGroup.remove(v.group);
+    for (const v of this.nodeMeshes.values()) this.entitiesGroup.remove(v.group);
+    for (const h of this.hqMeshes) if (h) this.entitiesGroup.remove(h.group);
     this.unitMeshes.clear();
     this.nodeMeshes.clear();
+    this.unitGroupView.clear();
+    this.nodeGroupView.clear();
     this.prevUnitPos.clear();
   }
 }
