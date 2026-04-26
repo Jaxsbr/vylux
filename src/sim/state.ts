@@ -7,9 +7,10 @@
 // a parallel index array, not a Map.
 
 import { Rng } from './rng';
-import type { EnergyNode, FactionState, SimState, Worker } from './types';
+import type { Defender, EnergyNode, FactionState, Raider, SimState, Unit, UnitKind, Worker } from './types';
 import type { Fixed } from './fixed';
 import { fromInt } from './fixed';
+import { UNIT_STATS } from './units-config';
 
 export interface InitialMatchSpec {
   seed: number | bigint;
@@ -45,20 +46,26 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
     tick: 0,
     rngState: rng.snapshot(),
     factions,
-    workers: [],
+    units: [],
     nodes,
     nextEntityId: nodes.length + 1,
+    winner: null,
   };
 
   return { state, rng };
 }
 
-export function findWorker(state: SimState, id: number): Worker | null {
-  for (let i = 0; i < state.workers.length; i++) {
-    const w = state.workers[i];
-    if (w.id === id && w.alive) return w;
+export function findUnit(state: SimState, id: number): Unit | null {
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (u.id === id && u.alive) return u;
   }
   return null;
+}
+
+export function findWorker(state: SimState, id: number): Worker | null {
+  const u = findUnit(state, id);
+  return u && u.kind === 'worker' ? u : null;
 }
 
 export function findNode(state: SimState, id: number): EnergyNode | null {
@@ -69,23 +76,66 @@ export function findNode(state: SimState, id: number): EnergyNode | null {
   return null;
 }
 
-export function spawnWorker(
+export function spawnUnit(
   state: SimState,
+  kind: UnitKind,
   faction: 0 | 1,
   x: Fixed,
   y: Fixed,
-): Worker {
-  const w: Worker = {
-    id: state.nextEntityId++,
-    alive: true,
-    faction,
-    x,
-    y,
-    phase: 'idle',
-    targetNodeId: 0,
-    carrying: 0,
-    harvestTicksRemaining: 0,
-  };
-  state.workers.push(w);
-  return w;
+): Unit {
+  const stats = UNIT_STATS[kind];
+  const id = state.nextEntityId++;
+  let unit: Unit;
+
+  switch (kind) {
+    case 'worker': {
+      const w: Worker = {
+        id,
+        alive: true,
+        kind: 'worker',
+        faction,
+        x,
+        y,
+        hp: stats.maxHp,
+        attackCooldown: 0,
+        phase: 'idle',
+        targetNodeId: 0,
+        carrying: 0,
+        harvestTicksRemaining: 0,
+      };
+      unit = w;
+      break;
+    }
+    case 'defender': {
+      const d: Defender = {
+        id,
+        alive: true,
+        kind: 'defender',
+        faction,
+        x,
+        y,
+        hp: stats.maxHp,
+        attackCooldown: 0,
+      };
+      unit = d;
+      break;
+    }
+    case 'raider': {
+      const r: Raider = {
+        id,
+        alive: true,
+        kind: 'raider',
+        faction,
+        x,
+        y,
+        hp: stats.maxHp,
+        attackCooldown: 0,
+      };
+      unit = r;
+      break;
+    }
+  }
+
+  state.units.push(unit);
+  return unit;
 }

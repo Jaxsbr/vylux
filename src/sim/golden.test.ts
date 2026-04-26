@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { runScriptedMatch } from './scripted-match';
+import { runCombatMatch, runScriptedMatch } from './scripted-match';
 
 // Two fixtures: a short match for fast feedback and a long match for the
 // real determinism gate. Both checked into git. Long match equals 10
@@ -65,5 +65,16 @@ describe('Sim — golden fixture (cross-machine determinism gate)', () => {
     const long = runScriptedMatch(LONG_TICKS);
     const short = runScriptedMatch(SHORT_TICKS);
     expect(long.slice(0, SHORT_TICKS + 1)).toEqual(short);
+  });
+
+  // The combat fixture exercises the Phase 1.0 sim additions:
+  // Defender + Raider, range checks, cooldowns, damage, death. Long
+  // enough to run combat to its conclusion (one or both units dead).
+  const COMBAT_TICKS = 1500;
+  it('reproduces the combat scenario (1500 ticks)', () => {
+    const hashes = runCombatMatch(COMBAT_TICKS);
+    const expected = loadOrRecord(fixturePath('combat-match-1500.hashes.json'), hashes);
+    expect(hashes).toEqual(expected);
+    expect(hashes).toHaveLength(COMBAT_TICKS + 1);
   });
 });

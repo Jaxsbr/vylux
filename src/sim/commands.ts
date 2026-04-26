@@ -8,12 +8,12 @@
 // later. Adding a command is an additive change — never reuse an ID, even
 // after removal.
 
-import type { Faction } from './types';
+import type { Faction, UnitKind } from './types';
 
 export const enum CommandKind {
   Noop = 0,
   AssignWorkerToNode = 1,
-  SpawnWorker = 2, // dev-only entrypoint for tests; lobby uses initial state
+  SpawnUnit = 2, // dev-only entrypoint for tests; production lobby uses initial state + TrainUnit
 }
 
 export interface NoopCommand {
@@ -26,15 +26,16 @@ export interface AssignWorkerToNodeCommand {
   nodeId: number;
 }
 
-export interface SpawnWorkerCommand {
-  kind: CommandKind.SpawnWorker;
+export interface SpawnUnitCommand {
+  kind: CommandKind.SpawnUnit;
+  unitKind: UnitKind;
   faction: Faction;
   // Tile coords (will be converted to Fixed at apply time).
   x: number;
   y: number;
 }
 
-export type Command = NoopCommand | AssignWorkerToNodeCommand | SpawnWorkerCommand;
+export type Command = NoopCommand | AssignWorkerToNodeCommand | SpawnUnitCommand;
 
 // One frame's worth of commands across both players. The sim consumes
 // these in the order given, deterministically.
