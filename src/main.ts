@@ -4,12 +4,12 @@
 // player input for faction 0. Player faction = 0 (cyan). AI faction =
 // 1 (red-orange).
 //
-// Player interaction (Phase 1.7):
-//   - Click a buildables button → enter placement mode → click a tile
-//     to spawn the unit there.
+// Player interaction:
+//   - Click WORKER / DEFENDER / RAIDER → unit trains and spawns at HQ
+//     on the next sim tick (standard RTS macro).
 //   - Click your own worker → selection ring appears → click a node
-//     to assign that worker to harvest there.
-//   - Esc / right-click cancels placement and clears selection.
+//     to assign that worker to harvest there (standard RTS micro).
+//   - Esc / right-click clears selection.
 // Match-end overlay shows VICTORY/DEFEAT with a Play Again button
 // (page reload).
 
@@ -62,7 +62,6 @@ function bootstrap(): void {
   const input = new InputController({
     canvas,
     camera: scene.camera,
-    tileMeshes: scene.grid.tileMeshes,
     unitMeshes: renderer.unitMeshMap,
     nodeMeshes: renderer.nodeMeshMap,
     sim: match.sim,
@@ -70,7 +69,7 @@ function bootstrap(): void {
   });
 
   const panel = new BuildablesPanel(PLAYER_FACTION, {
-    onTrainKindSelected: (kind) => input.enterPlacement(kind),
+    onTrainKindSelected: (kind) => input.trainUnit(kind),
   }, document.body);
 
   const matchEnd = new MatchEndOverlay(document.body);
@@ -104,7 +103,7 @@ function bootstrap(): void {
     ].join('\n');
 
     panel.refresh(match.sim);
-    renderer.applyInputVisuals(input.getPlacement(), input.getSelectedUnitId());
+    renderer.applyInputVisuals(input.getSelectedUnitId());
 
     if (s.winner !== null) matchEnd.show(PLAYER_FACTION, s.winner);
   }

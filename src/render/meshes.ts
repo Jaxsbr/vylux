@@ -175,24 +175,6 @@ export function buildHpBar(faction: Faction): HpBarBundle {
   return { group, fill, fillMat, background };
 }
 
-// Ghost mesh used during placement mode — semi-transparent preview at the
-// hovered tile.
-export function buildGhostMesh(kind: UnitKind, faction: Faction): THREE.Group {
-  const group = buildUnitMesh(kind, faction);
-  group.traverse((obj) => {
-    if (obj instanceof THREE.Mesh) {
-      const mat = obj.material as THREE.Material;
-      if ('transparent' in mat) (mat as THREE.MeshStandardMaterial).transparent = true;
-      if ('opacity' in mat) (mat as THREE.MeshStandardMaterial).opacity = 0.35;
-    } else if (obj instanceof THREE.LineSegments) {
-      const mat = obj.material as THREE.LineBasicMaterial;
-      mat.transparent = true;
-      mat.opacity = 0.5;
-    }
-  });
-  return group;
-}
-
 // Energy node — squat glowing cylinder.
 export function buildNodeMesh(): THREE.Group {
   const group = new THREE.Group();

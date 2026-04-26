@@ -7,10 +7,9 @@
 //   captured snapshot to the live state, and updates each mesh.
 //   Newly-spawned units get a mesh; dead units (alive=false) get
 //   theirs hidden (kept around for potential resurrection / cleanup).
-// - applyInputVisuals(placement, selectedUnitId) updates the placement
-//   ghost and the selection ring — these live on this class because
-//   they need access to the same mesh registries used for entity
-//   reconciliation.
+// - applyInputVisuals(selectedUnitId) updates the selection ring under
+//   the selected unit. Lives on this class because it needs access to
+//   the same unit-mesh registry used for entity reconciliation.
 //
 // The sim is the source of truth. This module never writes back into
 // sim state — it's a one-way consumer (PRD §3.3).
@@ -18,10 +17,9 @@
 import * as THREE from 'three';
 import { toFloat } from '../sim/fixed';
 import type { Sim } from '../sim/sim';
-import type { Faction, UnitKind } from '../sim/types';
+import type { Faction } from '../sim/types';
 import { UNIT_STATS } from '../sim/units-config';
 import {
-  buildGhostMesh,
   buildHpBar,
   buildHqMesh,
   buildNodeMesh,
@@ -30,7 +28,6 @@ import {
   type HpBarBundle,
 } from './meshes';
 import { tileFloatToWorld } from './scene';
-import type { PlacementState } from './placement';
 
 interface PrevPosition {
   x: number;
@@ -45,21 +42,21 @@ interface UnitMeshBundle {
 export class SimRenderer {
   private readonly entitiesGroup: THREE.Group;
   private readonly sim: Sim;
-  private readonly playerFaction: Faction;
 
   private readonly hqMeshes: [THREE.Group | null, THREE.Group | null] = [null, null];
   private readonly unitMeshes = new Map<number, UnitMeshBundle>();
   private readonly nodeMeshes = new Map<number, THREE.Group>();
   private readonly prevUnitPos = new Map<number, PrevPosition>();
 
-  private ghostMesh: THREE.Group | null = null;
-  private ghostKind: UnitKind | null = null;
   private readonly selectionRing: THREE.Mesh = buildSelectionRing();
 
-  constructor(sim: Sim, entitiesGroup: THREE.Group, playerFaction: Faction) {
+  constructor(sim: Sim, entitiesGroup: THREE.Group, _playerFaction: Faction) {
     this.sim = sim;
     this.entitiesGroup = entitiesGroup;
-    this.playerFaction = playerFaction;
+    // playerFaction reserved for future per-player visuals (e.g. fog of
+    // war in Phase 3); unused today but kept on the constructor signature
+    // so call sites don't churn when it lands.
+    void _playerFaction;
     this.selectionRing.visible = false;
     this.entitiesGroup.add(this.selectionRing);
     this.spawnHqs();
@@ -89,29 +86,8 @@ export class SimRenderer {
     return this.nodeMeshes;
   }
 
-  applyInputVisuals(placement: PlacementState, selectedUnitId: number | null): void {
-    this.applyGhost(placement);
+  applyInputVisuals(selectedUnitId: number | null): void {
     this.applySelectionRing(selectedUnitId);
-  }
-
-  private applyGhost(placement: PlacementState): void {
-    if (
-      placement.mode !== 'placement' ||
-      placement.unitKind === null ||
-      placement.hoveredTile === null
-    ) {
-      if (this.ghostMesh) this.ghostMesh.visible = false;
-      return;
-    }
-    if (this.ghostMesh === null || this.ghostKind !== placement.unitKind) {
-      if (this.ghostMesh) this.entitiesGroup.remove(this.ghostMesh);
-      this.ghostMesh = buildGhostMesh(placement.unitKind, this.playerFaction);
-      this.ghostKind = placement.unitKind;
-      this.entitiesGroup.add(this.ghostMesh);
-    }
-    const w = tileFloatToWorld(placement.hoveredTile.x, placement.hoveredTile.y);
-    this.ghostMesh.position.set(w.x, 0, w.z);
-    this.ghostMesh.visible = true;
   }
 
   private applySelectionRing(selectedUnitId: number | null): void {
@@ -193,7 +169,6 @@ export class SimRenderer {
     for (const b of this.unitMeshes.values()) this.entitiesGroup.remove(b.group);
     for (const m of this.nodeMeshes.values()) this.entitiesGroup.remove(m);
     for (const h of this.hqMeshes) if (h) this.entitiesGroup.remove(h);
-    if (this.ghostMesh) this.entitiesGroup.remove(this.ghostMesh);
     this.entitiesGroup.remove(this.selectionRing);
     this.unitMeshes.clear();
     this.nodeMeshes.clear();
