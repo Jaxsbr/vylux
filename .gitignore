@@ -5,12 +5,11 @@
 *.pem
 credentials.json
 
-# Build loop
-.build-loop.lock
-docs/plan/.build-loop.lock
+# Local Claude Code config (agents, slash commands)
+.claude/
 
-# PM loop
-pm/.lock
+# Bulky binary references (kept locally only)
+docs/concepts/*.mp4
 
 # OS
 .DS_Store
