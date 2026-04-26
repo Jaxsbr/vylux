@@ -57,6 +57,21 @@ export function applyCommand(state: SimState, cmd: Command): void {
       spawnUnit(state, cmd.unitKind, cmd.faction, fromInt(cmd.x), fromInt(cmd.y));
       return;
     }
+    case CommandKind.TrainUnit: {
+      const stats = UNIT_STATS[cmd.unitKind];
+      const fs = state.factions[cmd.faction];
+      if (fs.energy < stats.trainCost) {
+        // Silent reject. UI surfaces "not enough energy"; sim treats it
+        // as a no-op so a misfired AI/player command can't crash a match.
+        return;
+      }
+      fs.energy = sub(fs.energy, stats.trainCost);
+      // Spawn at HQ. Multi-unit overlap is allowed by the sim — the
+      // renderer disambiguates with small visual offsets, and Phase 1.4+
+      // can introduce real spawn-tile selection if the design needs it.
+      spawnUnit(state, cmd.unitKind, cmd.faction, fs.hqX, fs.hqY);
+      return;
+    }
   }
 }
 

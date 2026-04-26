@@ -14,6 +14,7 @@ export const enum CommandKind {
   Noop = 0,
   AssignWorkerToNode = 1,
   SpawnUnit = 2, // dev-only entrypoint for tests; production lobby uses initial state + TrainUnit
+  TrainUnit = 3, // production training: cost-deducts faction energy, spawns at HQ
 }
 
 export interface NoopCommand {
@@ -35,7 +36,17 @@ export interface SpawnUnitCommand {
   y: number;
 }
 
-export type Command = NoopCommand | AssignWorkerToNodeCommand | SpawnUnitCommand;
+export interface TrainUnitCommand {
+  kind: CommandKind.TrainUnit;
+  faction: Faction;
+  unitKind: UnitKind;
+}
+
+export type Command =
+  | NoopCommand
+  | AssignWorkerToNodeCommand
+  | SpawnUnitCommand
+  | TrainUnitCommand;
 
 // One frame's worth of commands across both players. The sim consumes
 // these in the order given, deterministically.

@@ -13,7 +13,8 @@
 //
 // before committing.
 
-import { CommandKind, type InputFrame } from './commands';
+import { tickAi } from './ai';
+import { CommandKind, type Command, type InputFrame } from './commands';
 import { Sim } from './sim';
 import type { InitialMatchSpec } from './state';
 
@@ -114,6 +115,49 @@ export function runCombatMatch(durationTicks: number): string[] {
   const sim = new Sim(COMBAT_MATCH_SPEC);
   const frames = buildCombatFrames(durationTicks);
   return collectHashes(sim, frames);
+}
+
+// ---------------------------------------------------------------------------
+// AI-vs-AI scenario — Phase 1.1 fixture.
+//
+// Both factions are driven by the scripted AI in src/sim/ai.ts. Each
+// faction starts with enough energy to train two workers immediately;
+// after that the AI keeps the build order alive with harvest income.
+// Runs long enough that workers, defenders, and raiders all spawn,
+// raiders march, and combat happens organically.
+// ---------------------------------------------------------------------------
+
+export const AI_VS_AI_SPEC: InitialMatchSpec = {
+  seed: 99,
+  hqs: {
+    faction0: { x: 3, y: 3 },
+    faction1: { x: 17, y: 17 },
+  },
+  nodes: [
+    { x: 6, y: 6, energy: 200 },
+    { x: 14, y: 14, energy: 200 },
+    { x: 10, y: 10, energy: 200 },
+    { x: 6, y: 14, energy: 200 },
+    { x: 14, y: 6, energy: 200 },
+  ],
+  initialEnergy: 100,
+};
+
+// AI-driven match: both factions get their commands generated from
+// `tickAi` each tick, no scripted human input.
+export function runAiVsAiMatch(durationTicks: number): string[] {
+  const sim = new Sim(AI_VS_AI_SPEC);
+  const hashes: string[] = [];
+  hashes.push(sim.stateHash());
+  for (let t = 0; t < durationTicks; t++) {
+    const aiCommands: Command[] = [
+      ...tickAi(sim.state, 0),
+      ...tickAi(sim.state, 1),
+    ];
+    sim.step({ tick: t, commands: aiCommands });
+    hashes.push(sim.stateHash());
+  }
+  return hashes;
 }
 
 // ---------------------------------------------------------------------------

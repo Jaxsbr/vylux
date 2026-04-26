@@ -16,21 +16,25 @@ export interface InitialMatchSpec {
   seed: number | bigint;
   hqs: { faction0: { x: number; y: number }; faction1: { x: number; y: number } };
   nodes: Array<{ x: number; y: number; energy: number }>;
+  // Energy each faction starts with. 0 by default. Used to bootstrap AI
+  // build orders that need to train before any worker has harvested.
+  initialEnergy?: number;
 }
 
 export function createInitialState(spec: InitialMatchSpec): { state: SimState; rng: Rng } {
   const rng = new Rng(spec.seed);
+  const initialEnergy = fromInt(spec.initialEnergy ?? 0);
 
   const factions: [FactionState, FactionState] = [
     {
       hqX: fromInt(spec.hqs.faction0.x),
       hqY: fromInt(spec.hqs.faction0.y),
-      energy: fromInt(0),
+      energy: initialEnergy,
     },
     {
       hqX: fromInt(spec.hqs.faction1.x),
       hqY: fromInt(spec.hqs.faction1.y),
-      energy: fromInt(0),
+      energy: initialEnergy,
     },
   ];
 

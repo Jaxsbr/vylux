@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { runCombatMatch, runScriptedMatch } from './scripted-match';
+import { runAiVsAiMatch, runCombatMatch, runScriptedMatch } from './scripted-match';
 
 // Two fixtures: a short match for fast feedback and a long match for the
 // real determinism gate. Both checked into git. Long match equals 10
@@ -76,5 +76,16 @@ describe('Sim — golden fixture (cross-machine determinism gate)', () => {
     const expected = loadOrRecord(fixturePath('combat-match-1500.hashes.json'), hashes);
     expect(hashes).toEqual(expected);
     expect(hashes).toHaveLength(COMBAT_TICKS + 1);
+  });
+
+  // Phase 1.1: AI-vs-AI. Both factions driven by tickAi, exercises
+  // training cost-deducts, AI build order, worker assignment, and the
+  // emergent combat that results when raiders march into the enemy base.
+  const AI_VS_AI_TICKS = 3000;
+  it('reproduces the AI-vs-AI scenario (3000 ticks)', () => {
+    const hashes = runAiVsAiMatch(AI_VS_AI_TICKS);
+    const expected = loadOrRecord(fixturePath('ai-vs-ai-3000.hashes.json'), hashes);
+    expect(hashes).toEqual(expected);
+    expect(hashes).toHaveLength(AI_VS_AI_TICKS + 1);
   });
 });
