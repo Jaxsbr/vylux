@@ -1,10 +1,13 @@
 # Investigation 00 — Determinism & Netcode Spike
 
-> **Status:** Open — not started
+> **Status:** ✅ Closed — Phase 1 unblocked
 > **Phase:** 0 (gates Phase 1)
 > **Owner:** Jaco
 > **Created:** 2026-04-25
+> **Closed:** 2026-04-26
 > **Time-box:** 2 weeks of focused work
+> **Actual:** 1 day (single focused session)
+> **Outcome:** All 5 success criteria met; the JS-with-fixed-point path holds across Linux + macOS + Windows V8 builds. No pivot to WASM required.
 
 ---
 
@@ -130,8 +133,67 @@ When this spike closes, the repo contains:
 
 ## Decision log
 
-(Append as the spike progresses.)
-
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-04-25 | Spike opened, time-boxed to 2 weeks. | PRD §3.1 makes determinism load-bearing; cannot start Phase 1 without this answered. |
+| 2026-04-26 | TypeScript-with-fixed-point sim layer is the chosen path. | All five success criteria met across Linux + macOS + Windows V8 builds. WASM/Rust pivot is deferred indefinitely; revisit only if a future cross-OS regression surfaces. |
+| 2026-04-26 | Spike closed. Phase 1 unblocked. | Cross-OS golden fixture validates on every push via `.github/workflows/determinism.yml`. |
+
+---
+
+## Outcome (closed 2026-04-26)
+
+### Success criteria — final status
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Bit-identical state hashes on same machine, 10-min match | ✅ `src/sim/sim.test.ts` runs 12,000 ticks twice, asserts identical hash sequences |
+| 2 | Replay round-trip — recorded log replays to same final hash | ✅ `src/sim/sim.test.ts > 'replay round-trip'` |
+| 3 | Desync detected within one tick | ✅ Corrupted command at tick 50 produces divergent hash at tick 51 |
+| 4 | Cross-OS stability (Linux + macOS + Windows on x86_64 / arm64) | ✅ `.github/workflows/determinism.yml` matrix passes on all three OSes against the committed `tests/determinism/scripted-match-12000.hashes.json` golden fixture |
+| 5 | Sim performance ≥10× real-time | ✅ ~5000× real-time on dev laptop (12,000 ticks in ~150ms) |
+
+### What worked
+
+- **Q16.16 fixed-point with BigInt-backed mul/div.** No engine quirks observed. The BigInt route protects against the int32-truncation hazard that plain `Number` bitwise math would hit on intermediate products. Performance is fine — modern V8 BigInts are not the bottleneck for our scale.
+- **splitmix64 PRNG with BigInt state.** Reference sequence matches the canonical seed-0 output; cross-OS reproducible.
+- **FNV-1a 64-bit hashing, sync, BigInt-backed.** Sufficient for desync detection; SHA-256 not needed for tick hashes.
+- **`Math.round` in `fromFloat`.** No cross-OS divergence observed on the float-to-fixed conversion. The audit's caveat about platform-dependent rounding turned out to be paranoia — IEEE-754 `roundTiesToEven` is consistent across V8 builds.
+- **Step-1 audit was load-bearing.** Knowing in advance that the prototype had no `Math.random()` and only five `Math.sqrt` sites scoped the rewrite tightly. The new sim avoids sqrt entirely (squared-distance comparisons) and no engine-specific math intrinsics are touched.
+- **Golden fixture as the cross-OS gate.** A 264 KB JSON of 12,001 expected hashes, committed to git, validated by CI on every push. This is the single artifact that makes "is this still deterministic on Windows?" a one-line CI question forever.
+
+### What didn't happen (and why that's fine)
+
+- **Step 5 (two-tab BroadcastChannel sanity).** Skipped. The in-process `sim.test.ts` and the cross-OS CI matrix together prove the same property — that two runs of the same input log produce the same hash stream — at higher fidelity than a same-browser two-tab test would. If a future bug suggests browser-specific non-determinism (e.g. a setTimeout ordering issue), we add it then.
+- **Standalone CLI replay harness (`tools/replay.ts`).** Deferred to Phase 1 (where the replay format becomes a real product feature, not just a determinism artifact). The in-process golden test gives us 95% of the value — the headless CLI matters for server-side validation later.
+
+### Cross-OS findings
+
+V8 across Linux x86_64, macOS arm64, and Windows x86_64 produces **bit-identical sim state** for the full 12,000-tick scripted match. No fixups required. Specifically:
+
+- IEEE-754 floating-point operations on the input data (only `Math.round` in `fromFloat`) match across all three platforms.
+- BigInt arithmetic matches.
+- JS Map/Set insertion-order iteration is consistent across all three (we don't rely on it for sim, but the test code uses Sets and they don't drift).
+- Line-ending differences in fixture JSONs do not affect parsed values, so the hash equality holds even though Windows checks out files with CRLF.
+
+### Architectural takeaways for Phase 1+
+
+- **The sim/render boundary is real and works.** Sim has no Three.js dependency; renderer hasn't been built yet but the contract is enforced by file structure (`src/sim/` imports nothing from `src/scene.ts` etc.). Phase 1 will exercise this when the new renderer is wired.
+- **Entity storage as arrays with stable IDs + tombstones is correct.** Iteration is deterministic, removals don't shift live indices, hashing is straightforward. Stick with this pattern.
+- **No global mutable state in sim.** `Sim` instance owns everything. This is what makes "two sims, same input log, same hash" a trivial property.
+- **Renderer builds on top, not into.** The renderer in Phase 1 reads `sim.state` between ticks and never writes back. If a renderer change ever needs to write sim state, that's a sign the API boundary is wrong.
+
+### Deliverables shipped
+
+- `src/sim/fixed.ts`, `rng.ts`, `hash.ts` — primitives.
+- `src/sim/types.ts`, `commands.ts`, `state.ts`, `step.ts`, `sim.ts` — sim core.
+- `src/sim/scripted-match.ts` — reusable test fixture generator.
+- `src/sim/{fixed,rng,hash,sim,golden}.test.ts` — 49 tests including the 12,000-tick determinism gate.
+- `tests/determinism/scripted-match-{200,12000}.hashes.json` — committed golden fixtures.
+- `.github/workflows/determinism.yml` — cross-OS CI gate.
+- `docs/investigation/01-nondeterminism-audit.md` — Step 1 audit findings.
+- This document, closed.
+
+### Next
+
+`docs/investigation/02-phase-1-sim-rewrite.md` — Phase 1 scoping.
