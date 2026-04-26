@@ -201,3 +201,34 @@ Phase 1 closes — and Phase 2 (multiplayer alpha) is unblocked — when **all**
 - **Should the renderer be its own scene?** Almost certainly yes (`src/render/` as a sibling to `src/sim/`), but the right granularity (one big module vs. per-entity render adapters) is a question that gets answered by writing the first version.
 - **Worker harvest model in Phase 1: prototype's "stand on node" or PRD §6.3's "deposit-based"?** The prototype was stand-on-node; the deterministic sim already implements deposit-based (Phase 0 work). Phase 1 keeps deposit-based — it's already there, it's already tested, and PRD §11 explicitly cuts the stand-on-node model. This is the one tiny way Phase 1 _is_ the new game already.
 - **AI difficulty?** Prototype was a single fixed AI. PRD §5 promises 3–4 difficulty tiers at launch. Phase 1 ships **one** difficulty (medium-ish, matching the prototype). The other tiers are content work for Phase 3 onward.
+
+## Lessons from Phase 1
+
+Two real mistakes in this phase. Capturing them so a fresh session reading this doc doesn't repeat them.
+
+### 1. Don't rebuild visuals when rewriting the sim
+
+I treated the renderer rewrite as part of the deterministic-sim work and wrote `src/render/meshes.ts` from scratch with minimal Tron-style geometry — a single-cube HQ, small cylinders for workers, etc. The owner's actual prototype had been through six review cycles of visual polish: multi-tier HQ silhouettes with antenna spires + accent caps, faceted unit shapes, hex energy nodes with rim glow, white-pill-backed HP bars. **All of that was the concrete instance of the PRD §3.5 readability pillar**, and I deleted it in sub-phase 1.6 thinking I was retiring "prototype state machines" when I was also retiring the actual art.
+
+Recovery was straightforward (legacy mesh files preserved in git, restored as `src/render/legacy/` with thin shims for missing imports), but the lesson is structural:
+
+- **Sim rewrite ≠ renderer rewrite.** Phase 1's mandate was the deterministic sim. The renderer's job is to read sim state and draw — the _visuals themselves_ should carry over from whatever was working.
+- **Reuse the existing mesh code, don't rewrite it.** When the next renderer-adjacent change comes, look at the existing mesh files first and ask "can I drive these from the new state model?" before writing new geometry.
+- **PRD §11's "art direction carries over" was the right call.** I read it as "concept may be re-implemented" and underestimated how much of the look-and-feel was in the actual mesh code. It is.
+
+### 2. Units come from buildings; you tile-place buildings, not units
+
+Sub-phase 1.7's first cut shipped click-to-place training: click WORKER, click a tile, worker spawns at that tile. **That's not how RTS games work.** AoE, StarCraft, every game in the genre: units spawn at their production building and walk out. The player tile-places _buildings_, and units come out of buildings. Vylux currently has no buildings (only HQ), so every train should just spawn the unit at the HQ.
+
+The mistake came from re-reading the prototype's spec literally. The prototype had "click tile to place a unit" — and that prototype design was wrong about it, but I shipped the same wrong pattern on the new sim instead of catching it from first principles.
+
+- **Genre conventions are load-bearing.** Vylux is targeting esports — not just any game, but a game that has to feel like the genre. Diverging from "units come from buildings" requires a strong design reason; absent one, default to the convention.
+- **Click-to-place is for buildings.** That UX pattern returns when production buildings arrive (Phase 3). The placement state machine + ghost mesh code from 1.7 was deleted in the fix, and that's correct — those primitives belong with buildings, not unit training.
+
+### 3. The cross-OS CI gate works; trust it
+
+The determinism workflow caught zero regressions across all of Phase 1's seven sub-phases. That doesn't mean it's untested noise — it means the discipline (extend the golden fixture per sub-phase, regenerate when state-hash format changes, never push a sub-phase whose fixture wasn't regenerated) actually held. Phase 2 should follow the same pattern: every protocol-level change extends the gate before the change ships.
+
+### 4. Be specific about exit criteria, then check them honestly
+
+The original Phase 1 success-criterion #1 said "_the player can train **+ place** units mouse-only_." Sub-phase 1.5 shipped "train" without "place" and I called Phase 1 done at 1.6. The owner caught the gap. Re-reading my own scoping doc would have caught it earlier. Going forward: when claiming a phase closed, walk the criteria one by one and require ✅ on each, not "mostly green."
