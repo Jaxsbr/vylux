@@ -53,6 +53,32 @@ describe('Sim — training', () => {
     const owned = sim.state.units.filter((u) => u.faction === 0 && u.alive);
     expect(owned).toHaveLength(5);
   });
+
+  it('TrainUnit with tile coords spawns at the given tile, not at HQ', () => {
+    const sim = new Sim(TRAIN_SPEC);
+    sim.step({
+      tick: 0,
+      commands: [
+        { kind: CommandKind.TrainUnit, faction: 0, unitKind: 'worker', x: 7, y: 9 },
+      ],
+    });
+    const w = sim.state.units.find((u) => u.kind === 'worker' && u.faction === 0);
+    expect(w).toBeTruthy();
+    // Compare in fixed-point: tile 7 = 7 << 16.
+    expect(w!.x).toBe(7 * 65536);
+    expect(w!.y).toBe(9 * 65536);
+  });
+
+  it('TrainUnit without tile coords still spawns at HQ', () => {
+    const sim = new Sim(TRAIN_SPEC);
+    sim.step({
+      tick: 0,
+      commands: [{ kind: CommandKind.TrainUnit, faction: 0, unitKind: 'worker' }],
+    });
+    const w = sim.state.units.find((u) => u.kind === 'worker' && u.faction === 0);
+    expect(w!.x).toBe(sim.state.factions[0].hqX);
+    expect(w!.y).toBe(sim.state.factions[0].hqY);
+  });
 });
 
 describe('Sim — AI', () => {

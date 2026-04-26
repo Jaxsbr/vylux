@@ -120,6 +120,79 @@ export function buildUnitMesh(kind: UnitKind, faction: Faction): THREE.Group {
   }
 }
 
+// Selection ring — sits flush on the grid under a selected unit.
+export function buildSelectionRing(): THREE.Mesh {
+  const geo = new THREE.RingGeometry(0.4, 0.5, 24);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: 0xffffff,
+    emissiveIntensity: 1.2,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const m = new THREE.Mesh(geo, mat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = 0.04;
+  return m;
+}
+
+// HP bar — thin emissive strip floating above the unit. Scale x by hp/max.
+export interface HpBarBundle {
+  group: THREE.Group;
+  fill: THREE.Mesh;
+  fillMat: THREE.MeshStandardMaterial;
+  background: THREE.Mesh;
+}
+
+export function buildHpBar(faction: Faction): HpBarBundle {
+  const group = new THREE.Group();
+  const colour = FACTION_COLOR[faction];
+
+  const bgGeo = new THREE.PlaneGeometry(0.6, 0.08);
+  const bgMat = new THREE.MeshBasicMaterial({
+    color: 0x111417,
+    transparent: true,
+    opacity: 0.7,
+    side: THREE.DoubleSide,
+  });
+  const background = new THREE.Mesh(bgGeo, bgMat);
+  background.rotation.x = -Math.PI / 2;
+  group.add(background);
+
+  const fillGeo = new THREE.PlaneGeometry(0.58, 0.06);
+  const fillMat = new THREE.MeshStandardMaterial({
+    color: 0x111417,
+    emissive: colour,
+    emissiveIntensity: 0.9,
+    side: THREE.DoubleSide,
+  });
+  const fill = new THREE.Mesh(fillGeo, fillMat);
+  fill.rotation.x = -Math.PI / 2;
+  fill.position.y = 0.001; // sit above background to avoid z-fighting
+  group.add(fill);
+
+  return { group, fill, fillMat, background };
+}
+
+// Ghost mesh used during placement mode — semi-transparent preview at the
+// hovered tile.
+export function buildGhostMesh(kind: UnitKind, faction: Faction): THREE.Group {
+  const group = buildUnitMesh(kind, faction);
+  group.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) {
+      const mat = obj.material as THREE.Material;
+      if ('transparent' in mat) (mat as THREE.MeshStandardMaterial).transparent = true;
+      if ('opacity' in mat) (mat as THREE.MeshStandardMaterial).opacity = 0.35;
+    } else if (obj instanceof THREE.LineSegments) {
+      const mat = obj.material as THREE.LineBasicMaterial;
+      mat.transparent = true;
+      mat.opacity = 0.5;
+    }
+  });
+  return group;
+}
+
 // Energy node — squat glowing cylinder.
 export function buildNodeMesh(): THREE.Group {
   const group = new THREE.Group();

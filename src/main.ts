@@ -2,10 +2,16 @@
 //
 // Wires up: scene + renderer + Match + driver + AI for faction 1 +
 // player input for faction 0. Player faction = 0 (cyan). AI faction =
-// 1 (red-orange). The player trains units via the buildables panel;
-// their workers auto-assign to nearest live nodes, matching AI
-// behaviour. Match-end overlay shows VICTORY/DEFEAT with a Play
-// Again button (reload).
+// 1 (red-orange).
+//
+// Player interaction (Phase 1.7):
+//   - Click a buildables button → enter placement mode → click a tile
+//     to spawn the unit there.
+//   - Click your own worker → selection ring appears → click a node
+//     to assign that worker to harvest there.
+//   - Esc / right-click cancels placement and clears selection.
+// Match-end overlay shows VICTORY/DEFEAT with a Play Again button
+// (page reload).
 
 import { autoAssignIdleWorkers, tickAi } from './sim/ai';
 import { Match } from './sim/replay';
@@ -14,7 +20,8 @@ import type { Faction } from './sim/types';
 import { createScene } from './render/scene';
 import { SimRenderer } from './render/sim-renderer';
 import { startSimDriver, TICK_HZ } from './render/sim-driver';
-import { MatchEndOverlay, PlayerInput } from './render/player-input';
+import { BuildablesPanel, MatchEndOverlay } from './render/player-input';
+import { InputController } from './render/input-controller';
 
 const PLAYER_FACTION: Faction = 0;
 const AI_FACTION: Faction = 1;
@@ -49,23 +56,30 @@ function bootstrap(): void {
   resizeCanvas();
 
   const scene = createScene(canvas);
-
   const match = new Match(SPEC);
-  const renderer = new SimRenderer(match.sim, scene.entitiesGroup);
-  const playerInput = new PlayerInput(PLAYER_FACTION, document.body);
+  const renderer = new SimRenderer(match.sim, scene.entitiesGroup, PLAYER_FACTION);
+
+  const input = new InputController({
+    canvas,
+    camera: scene.camera,
+    tileMeshes: scene.grid.tileMeshes,
+    unitMeshes: renderer.unitMeshMap,
+    nodeMeshes: renderer.nodeMeshMap,
+    sim: match.sim,
+    playerFaction: PLAYER_FACTION,
+  });
+
+  const panel = new BuildablesPanel(PLAYER_FACTION, {
+    onTrainKindSelected: (kind) => input.enterPlacement(kind),
+  }, document.body);
+
   const matchEnd = new MatchEndOverlay(document.body);
 
-  const driver = startSimDriver(match, renderer, scene, (m) => {
-    // Each tick, merge player input + AI commands + auto-assignments
-    // for both factions. Order: player commands first (they were queued
-    // before this tick), then per-faction tickAi for AI, then
-    // auto-assign for the player.
-    return [
-      ...playerInput.takeQueued(),
-      ...autoAssignIdleWorkers(m.sim.state, PLAYER_FACTION),
-      ...tickAi(m.sim.state, AI_FACTION),
-    ];
-  });
+  const driver = startSimDriver(match, renderer, scene, (m) => [
+    ...input.takeQueued(),
+    ...autoAssignIdleWorkers(m.sim.state, PLAYER_FACTION),
+    ...tickAi(m.sim.state, AI_FACTION),
+  ]);
 
   // HUD overlay.
   const hud = document.createElement('div');
@@ -89,7 +103,8 @@ function bootstrap(): void {
       `units ${s.units.filter((u) => u.alive).length}  dropped ${driver.droppedSteps}`,
     ].join('\n');
 
-    playerInput.refresh(match.sim);
+    panel.refresh(match.sim);
+    renderer.applyInputVisuals(input.getPlacement(), input.getSelectedUnitId());
 
     if (s.winner !== null) matchEnd.show(PLAYER_FACTION, s.winner);
   }

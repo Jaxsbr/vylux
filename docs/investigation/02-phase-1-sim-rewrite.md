@@ -1,9 +1,10 @@
 # Investigation 02 — Phase 1 Sim Rewrite
 
-> **Status:** ⚠️ Open — sub-phases 1.0–1.6 landed; **1.7 (input depth) outstanding before Phase 1 truly closes**
+> **Status:** ✅ Closed — sub-phases 1.0–1.7 landed
 > **Phase:** 1 (Sim Rewrite)
 > **Owner:** Jaco
 > **Created:** 2026-04-26
+> **Closed:** 2026-04-26
 > **Time-box:** target 4–8 weeks of focused work; revisit if it slips past Phase 0+1 ≤ ~2 quarters (PRD §2)
 
 ---
@@ -168,12 +169,12 @@ Phase 1 closes — and Phase 2 (multiplayer alpha) is unblocked — when **all**
 
 | # | Criterion | Status |
 |---|---|---|
-| 1 | Playable end-to-end on the dev server: fresh match opens with the Tron grid + both HQs, the player can **train + place** units mouse-only, AI plays back, combat happens, someone wins, "Play Again" resets in place. | ⚠️ Partial — train works, place does not (closed by 1.7). |
+| 1 | Playable end-to-end on the dev server: fresh match opens with the Tron grid + both HQs, the player can **train + place** units mouse-only, AI plays back, combat happens, someone wins, "Play Again" resets in place. | ✅ |
 | 2 | Cross-OS determinism gate stays green on Linux + macOS + Windows. | ✅ |
 | 3 | Replay round-trip via `tools/replay.ts` reaches the same final hash. | ✅ |
 | 4 | Sim runs at 20 Hz with full visuals, no dropped ticks. | ✅ |
 | 5 | Prototype code retired; only the sim-driven path survives in `src/`. | ✅ |
-| 6 | Player has spatial agency comparable to the prototype: click-to-place trained units, click-to-select a unit, click-to-assign a worker to a node. | ⏳ Pending — sub-phase 1.7. |
+| 6 | Player has spatial agency comparable to the prototype: click-to-place trained units, click-to-select a unit, click-to-assign a worker to a node. | ✅ |
 
 ## Risks — ranked
 
@@ -192,6 +193,7 @@ Phase 1 closes — and Phase 2 (multiplayer alpha) is unblocked — when **all**
 | 2026-04-26 | Build the new sim-driven game path alongside the old one; swap at sub-phase 1.5, retire old at 1.6. | In-place rewrites of tangled prototype code historically slip. Parallel path keeps `main` shippable. |
 | 2026-04-26 | Replay format = `{ version: 1, seed, spec, frames[] }`, JSON, no binary encoding. | Phase 1 needs the format to exist, not to be small. Binary/compressed comes in Phase 4 alongside Steam Cloud + sharing. |
 | 2026-04-26 | Sub-phase 1.7 added; Phase 1 not closed at 1.6 as previously claimed. | 1.5 shipped buildables-panel-only — click-to-place at a tile, click-to-select a unit, and click-to-assign a worker were deferred without a strong-enough flag. The Phase 1 mandate (and the success-criterion #1 in this doc) explicitly required spatial input. Cataloguing the gap as 1.7 here ensures it doesn't get forgotten when Phase 2 work begins. |
+| 2026-04-26 | Phase 1 closed. | 1.7 landed: `TrainUnit` accepts optional tile coords; `src/render/placement.ts` is the new pure placement state machine (12 unit tests); `src/render/input-controller.ts` owns raycasting + click dispatch + queue; renderer adds ghost-mesh, selection-ring, and per-unit HP-bars. Buildables panel is now a delegate that triggers placement mode rather than queuing TrainUnit directly. All six exit criteria green; full verify gate (`tsc + npm test + npm run test:e2e + npm run build`) clean. Phase 2 (multiplayer alpha) unblocked. |
 
 ## Open questions (need decisions during, not before, Phase 1)
 

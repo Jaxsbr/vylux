@@ -11,7 +11,7 @@ export default defineConfig({
   projects: [
     {
       name: 'dev',
-      testMatch: ['smoke.spec.ts', 'mouse.spec.ts'],
+      testMatch: ['smoke.spec.ts', 'mouse.spec.ts', 'select.spec.ts'],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },
     {

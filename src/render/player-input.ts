@@ -1,46 +1,35 @@
-// Mouse input layer for Phase 1.5.
+// Buildables panel + match-end overlay.
 //
-// Builds a buildables panel + match-end overlay. The panel is the
-// player's only required mouse interaction in Phase 1: click a unit
-// kind, that faction's energy is debited next tick, and the unit
-// spawns at the HQ. Worker assignment to nodes is auto-handled by
-// autoAssignIdleWorkers (matching AI behaviour) — the player just
-// trains.
-//
-// Phase 3+ likely splits this into "always-visible HUD" and "popup
-// panel triggered by clicking the HQ", and adds click-to-place for
-// units. Keeping it as a single static panel here so the load-bearing
-// work for 1.5 stays "wiring sim commands to a clickable surface."
+// Clicking a button no longer queues a TrainUnit command directly.
+// Instead it enters placement mode on the input controller; the player
+// then clicks a tile to actually spawn the unit there. This is what
+// PRD §3.8 mechanical-mastery calls "no hidden APM tax" — the click is
+// the action that matters, not a deferred consequence.
 
-import { CommandKind, type Command } from '../sim/commands';
 import type { Faction, UnitKind } from '../sim/types';
 import { UNIT_STATS } from '../sim/units-config';
 import type { Sim } from '../sim/sim';
 
-export class PlayerInput {
+export interface BuildablesPanelDelegate {
+  // Called when the player clicks a unit-kind button.
+  onTrainKindSelected(kind: UnitKind): void;
+}
+
+export class BuildablesPanel {
   private readonly faction: Faction;
-  private readonly queue: Command[] = [];
+  private readonly delegate: BuildablesPanelDelegate;
   private readonly panel: HTMLDivElement;
   private readonly buttons = new Map<UnitKind, HTMLButtonElement>();
 
-  constructor(faction: Faction, root: HTMLElement) {
+  constructor(faction: Faction, delegate: BuildablesPanelDelegate, root: HTMLElement) {
     this.faction = faction;
+    this.delegate = delegate;
     this.panel = this.buildPanel();
     root.appendChild(this.panel);
   }
 
-  // Pull queued commands. Called by the driver each tick — clears the
-  // queue so each command runs exactly once.
-  takeQueued(): Command[] {
-    if (this.queue.length === 0) return [];
-    const out = this.queue.slice();
-    this.queue.length = 0;
-    return out;
-  }
-
   // Reflect current affordability on the buttons (greys out unaffordable
-  // options). Called from the render loop, cheap enough to run every
-  // frame.
+  // options). Called from the render loop, cheap enough to run every frame.
   refresh(sim: Sim): void {
     const energy = sim.state.factions[this.faction].energy;
     for (const [kind, btn] of this.buttons) {
@@ -92,11 +81,7 @@ export class PlayerInput {
     ].join('');
     btn.addEventListener('click', () => {
       if (btn.disabled) return;
-      this.queue.push({
-        kind: CommandKind.TrainUnit,
-        faction: this.faction,
-        unitKind: kind,
-      });
+      this.delegate.onTrainKindSelected(kind);
     });
     return btn;
   }

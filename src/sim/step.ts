@@ -71,10 +71,11 @@ export function applyCommand(state: SimState, cmd: Command): void {
         return;
       }
       fs.energy = sub(fs.energy, stats.trainCost);
-      // Spawn at HQ. Multi-unit overlap is allowed by the sim — the
-      // renderer disambiguates with small visual offsets, and Phase 1.4+
-      // can introduce real spawn-tile selection if the design needs it.
-      spawnUnit(state, cmd.unitKind, cmd.faction, fs.hqX, fs.hqY);
+      // Spawn at the given tile if provided (player click-to-place);
+      // otherwise at HQ (AI / tests / no-input-layer paths).
+      const spawnX = cmd.x !== undefined ? fromInt(cmd.x) : fs.hqX;
+      const spawnY = cmd.y !== undefined ? fromInt(cmd.y) : fs.hqY;
+      spawnUnit(state, cmd.unitKind, cmd.faction, spawnX, spawnY);
       return;
     }
   }

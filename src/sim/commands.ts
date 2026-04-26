@@ -40,6 +40,13 @@ export interface TrainUnitCommand {
   kind: CommandKind.TrainUnit;
   faction: Faction;
   unitKind: UnitKind;
+  // Optional spawn tile. When omitted, the unit spawns at the faction's
+  // HQ position (back-compat: tests + AI continue to work unchanged).
+  // When provided, the unit spawns at the given integer tile coords —
+  // sim does not validate range; the input layer is expected to clamp
+  // to grid bounds.
+  x?: number;
+  y?: number;
 }
 
 export type Command =
