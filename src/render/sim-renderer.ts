@@ -16,7 +16,7 @@ import { toFloat } from '../sim/fixed';
 import type { Sim } from '../sim/sim';
 import type { EnergyNode, Unit } from '../sim/types';
 import { buildHqMesh, buildNodeMesh, buildUnitMesh } from './meshes';
-import { tileFloatToWorld } from './scene-v2';
+import { tileFloatToWorld } from './scene';
 
 interface PrevPosition {
   x: number;

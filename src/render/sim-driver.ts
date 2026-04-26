@@ -19,7 +19,7 @@
 import type { Match } from '../sim/replay';
 import type { Command } from '../sim/commands';
 import type { SimRenderer } from './sim-renderer';
-import type { SceneBundle } from './scene-v2';
+import type { SceneBundle } from './scene';
 
 export const TICK_HZ = 20;
 export const TICK_MS = 1000 / TICK_HZ;
