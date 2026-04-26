@@ -8,48 +8,10 @@ import { describe, expect, it } from 'vitest';
 import { Sim } from './sim';
 import type { InitialMatchSpec } from './state';
 import { CommandKind, type InputFrame } from './commands';
+import { SCRIPTED_MATCH_SPEC, buildScriptedFrames } from './scripted-match';
 
-function defaultSpec(seed = 42): InitialMatchSpec {
-  return {
-    seed,
-    hqs: {
-      faction0: { x: 2, y: 2 },
-      faction1: { x: 18, y: 18 },
-    },
-    nodes: [
-      { x: 8, y: 5, energy: 100 },
-      { x: 12, y: 14, energy: 100 },
-      { x: 5, y: 12, energy: 100 },
-    ],
-  };
-}
-
-// Build a synthetic match: spawn a worker on each side at tick 0, point
-// them at a node on tick 1, and let them harvest/return forever.
-function scriptedMatch(durationTicks: number): InputFrame[] {
-  const frames: InputFrame[] = [];
-  for (let t = 0; t < durationTicks; t++) {
-    if (t === 0) {
-      frames.push({
-        tick: 0,
-        commands: [
-          { kind: CommandKind.SpawnWorker, faction: 0, x: 2, y: 2 },
-          { kind: CommandKind.SpawnWorker, faction: 1, x: 18, y: 18 },
-        ],
-      });
-    } else if (t === 1) {
-      frames.push({
-        tick: 1,
-        commands: [
-          { kind: CommandKind.AssignWorkerToNode, workerId: 4, nodeId: 1 },
-          { kind: CommandKind.AssignWorkerToNode, workerId: 5, nodeId: 2 },
-        ],
-      });
-    } else {
-      frames.push({ tick: t, commands: [] });
-    }
-  }
-  return frames;
+function specWithSeed(seed: number): InitialMatchSpec {
+  return { ...SCRIPTED_MATCH_SPEC, seed };
 }
 
 function runMatch(spec: InitialMatchSpec, frames: InputFrame[]): string[] {
@@ -67,9 +29,9 @@ describe('Sim — determinism gate', () => {
   it('two runs with identical inputs produce identical hash sequences (10s of sim)', () => {
     // 10 seconds at 20 Hz = 200 ticks. Smaller than the spike's 10-min
     // target but enough to catch any first-order non-determinism.
-    const frames = scriptedMatch(200);
-    const a = runMatch(defaultSpec(), frames);
-    const b = runMatch(defaultSpec(), frames);
+    const frames = buildScriptedFrames(200);
+    const a = runMatch(SCRIPTED_MATCH_SPEC, frames);
+    const b = runMatch(SCRIPTED_MATCH_SPEC, frames);
     expect(a).toEqual(b);
     expect(a).toHaveLength(201);
   });
@@ -78,9 +40,9 @@ describe('Sim — determinism gate', () => {
     // 10 minutes at 20 Hz = 12,000 ticks. This is the actual spike
     // duration target. A real cross-machine run would do this against
     // a recorded log; here we prove it on a single machine.
-    const frames = scriptedMatch(12000);
-    const a = runMatch(defaultSpec(), frames);
-    const b = runMatch(defaultSpec(), frames);
+    const frames = buildScriptedFrames(12000);
+    const a = runMatch(SCRIPTED_MATCH_SPEC, frames);
+    const b = runMatch(SCRIPTED_MATCH_SPEC, frames);
     expect(a).toEqual(b);
   });
 
@@ -89,9 +51,9 @@ describe('Sim — determinism gate', () => {
     // but it's mixed into stateHash via rngState and bumped via the Rng
     // owned by Sim. Different seeds → different snapshots immediately.
     // If this fails it means seed is being ignored — caught here.
-    const frames = scriptedMatch(50);
-    const a = runMatch(defaultSpec(1), frames);
-    const b = runMatch(defaultSpec(2), frames);
+    const frames = buildScriptedFrames(50);
+    const a = runMatch(specWithSeed(1), frames);
+    const b = runMatch(specWithSeed(2), frames);
     expect(a[0]).not.toBe(b[0]);
   });
 
@@ -102,15 +64,15 @@ describe('Sim — determinism gate', () => {
     // *pre-step* hash, and disagree at tick 51's hash (after the divergent
     // command is applied).
     const N = 100;
-    const baseFrames = scriptedMatch(N);
+    const baseFrames = buildScriptedFrames(N);
     const corruptedFrames = baseFrames.map((f) => ({ ...f, commands: [...f.commands] }));
     corruptedFrames[50] = {
       tick: 50,
       commands: [{ kind: CommandKind.AssignWorkerToNode, workerId: 4, nodeId: 3 }],
     };
 
-    const goodHashes = runMatch(defaultSpec(), baseFrames);
-    const badHashes = runMatch(defaultSpec(), corruptedFrames);
+    const goodHashes = runMatch(SCRIPTED_MATCH_SPEC, baseFrames);
+    const badHashes = runMatch(SCRIPTED_MATCH_SPEC, corruptedFrames);
 
     // Hashes 0..50 are computed pre-step or after non-divergent steps.
     // The divergent command applies during step(50→51); hash[51] is the
@@ -126,9 +88,9 @@ describe('Sim — determinism gate', () => {
     // the replay contract: an input log + seed deterministically
     // reconstructs a final state. This is the property that makes
     // shareable replays viable.
-    const frames = scriptedMatch(500);
-    const liveRun = runMatch(defaultSpec(), frames);
-    const replayRun = runMatch(defaultSpec(), frames);
+    const frames = buildScriptedFrames(500);
+    const liveRun = runMatch(SCRIPTED_MATCH_SPEC, frames);
+    const replayRun = runMatch(SCRIPTED_MATCH_SPEC, frames);
     expect(replayRun.at(-1)).toBe(liveRun.at(-1));
   });
 
@@ -137,8 +99,8 @@ describe('Sim — determinism gate', () => {
     // pass trivially. This guards against that degenerate case by
     // confirming the system actually evolves: at least one mid-match
     // hash differs from the tick-0 hash.
-    const frames = scriptedMatch(50);
-    const hashes = runMatch(defaultSpec(), frames);
+    const frames = buildScriptedFrames(50);
+    const hashes = runMatch(SCRIPTED_MATCH_SPEC, frames);
     const distinct = new Set(hashes);
     expect(distinct.size).toBeGreaterThan(5);
   });
@@ -149,8 +111,8 @@ describe('Sim — determinism gate', () => {
     // returned, and deposited. If this fails the sim is broken in some
     // way that the hash-equality tests can't detect (deterministic but
     // wrong).
-    const frames = scriptedMatch(500);
-    const sim = new Sim(defaultSpec());
+    const frames = buildScriptedFrames(500);
+    const sim = new Sim(SCRIPTED_MATCH_SPEC);
     for (const f of frames) sim.step(f);
     expect(sim.state.factions[0].energy).toBeGreaterThan(0);
   });
