@@ -1,6 +1,6 @@
 # Investigation 02 — Phase 1 Sim Rewrite
 
-> **Status:** Open — scoping
+> **Status:** ⚠️ Open — sub-phases 1.0–1.6 landed; **1.7 (input depth) outstanding before Phase 1 truly closes**
 > **Phase:** 1 (Sim Rewrite)
 > **Owner:** Jaco
 > **Created:** 2026-04-26
@@ -87,11 +87,13 @@ This is the make-or-break sub-phase for the render/sim split. Keep `src/sim/` un
 
 **Exit:** `npm run dev` shows a live game running on the deterministic sim, visually equivalent to the prototype.
 
-### 1.5 — Mouse input layer
+### 1.5 — Mouse input layer (partial — see 1.7)
 
 Pointer events → input frames. Click HQ → buildables panel → click tile → `TrainUnit` + `PlaceUnit` commands queued for the next tick. Reuse the prototype's `placement.ts` state machine pattern (which is already pure and renderer-agnostic) where it cleanly fits.
 
 **Exit:** a fresh match is playable mouse-only against the AI, end to end, on the dev server.
+
+**What actually shipped in commit `bb465f5`:** the buildables panel exists at the bottom of the screen and clicking a button trains the unit at the player's HQ. **Click-to-place at a tile, click-to-select a unit, and click-to-move a worker were deferred** without a strong-enough flag at the time. The result: the player can pick _what_ to train but has no spatial agency. This is a real shortfall against the criterion above and is closed by sub-phase 1.7 below — Phase 1 is **not** closed until that lands.
 
 ### 1.6 — Retire prototype code
 
@@ -101,15 +103,77 @@ Rewrite `AGENTS.md` to describe the new module layout: `src/sim/` (deterministic
 
 **Exit:** repo has only the new sim-driven code path. `npx tsc --noEmit && npm test && npm run test:e2e` passes.
 
+### 1.7 — Restore input depth (the actual Phase 1 close)
+
+This sub-phase exists because 1.5 shipped a partial input surface. The criterion in §"Success criteria" #1 explicitly says "the player can train **+ place** units mouse-only." That second half didn't land; this is where it does.
+
+**Goal:** the player has the same spatial agency they had in the prototype — pick a tile to spawn at, pick a worker, pick a node — running on the deterministic sim.
+
+**Concrete additions:**
+
+1. **Click-to-place training.**
+   - Click a panel button → renderer enters _placement mode_ (cursor changes, ghost mesh appears at the hovered tile in the player's faction colour).
+   - Click a valid tile → `TrainUnit { faction, kind, x, y }` command queued. Insufficient energy or invalid tile (occupied, out of bounds, enemy territory if the design ever calls for it) → silent reject + visual flash.
+   - Press Esc / right-click / click off-grid → exit placement mode.
+   - Reuse the **shape** of the prototype's `placement.ts` state machine (the file itself was deleted in 1.6, but the pattern — pure transitions, discriminated-union outcomes, identity-preserving no-ops — is the right one). Build a fresh, smaller version that knows about the new `Faction = 0 | 1` types and the sim's tile-coord conventions.
+   - Sim change: `TrainUnit` command gains optional `x, y` fields. When provided, spawn at the given tile instead of the HQ. When absent, current behaviour (spawn at HQ) is preserved so AI/test paths don't break.
+
+2. **Click-to-select a unit.**
+   - Raycast canvas pointer → tile or unit mesh.
+   - Click on a unit you own → unit becomes "selected" (renderer-only state, not sim state — selection is per-player and doesn't affect determinism).
+   - Selection ring mesh appears under the selected unit.
+   - Esc / click empty space → deselect.
+
+3. **Click-to-move/assign a selected worker.**
+   - With a worker selected, click on a live energy node → `AssignWorkerToNode { workerId, nodeId }` command queued. (This command already exists in the sim from 1.0.)
+   - With a worker selected, click on an empty tile → for now, no-op (Phase 3 may add free movement). Document the choice.
+   - The auto-assign helper from 1.1 stays as a fallback for _idle_ workers (`phase=='idle'` with no target). The player's manual assignment overrides it for the duration of that worker's task; auto-assign only fires again when the worker becomes idle without a target. This matches PRD §6.3's "assignment matters and idle workers are a real problem."
+
+4. **HQ click → contextual panel** (stretch).
+   - The always-visible bottom panel becomes contextual: hidden by default, opened by clicking your own HQ. Closed by clicking off the HQ or pressing Esc.
+   - Defer if running tight on time — always-visible works, this is UX polish, not depth.
+
+5. **Visible HP bars on units + selection ring.**
+   - Small thin mesh attached above each unit, scaled by `hp / maxHp`, coloured by faction.
+   - Selection ring: ring/torus around the selected unit's base.
+
+**Sim-layer changes (small, additive):**
+
+- `TrainUnit` command grows `x?: number; y?: number` for tile-targeted spawns.
+- No new commands for selection/move-worker — `AssignWorkerToNode` already covers it.
+- Possibly a `MoveUnit { unitId, targetX, targetY }` if Phase 3 design ever calls for free movement; Phase 1.7 deliberately scopes that out.
+- All four golden fixtures regenerate (state hash format changes when `TrainUnit` grows fields that flow into spawn coords).
+
+**Renderer-layer changes:**
+
+- New `src/render/input.ts` (or extend `player-input.ts`) with the placement state machine + selection state.
+- Raycaster setup against tile meshes + entity meshes.
+- Ghost-mesh rendering during placement mode.
+- Selection-ring mesh + HP-bar mesh per unit.
+- Cursor management (`canvas.style.cursor` flips during placement).
+
+**Tests:**
+
+- Vitest unit tests for the placement state machine (pure transitions, identity-preserving no-ops — the prototype's `placement.test.ts` is the model).
+- Vitest unit tests for `TrainUnit` with tile coords (spawn at tile, occupancy reject, out-of-bounds reject).
+- E2E: extend `mouse.spec.ts` (or split into `place.spec.ts` + `select.spec.ts`) to click-to-place a worker on a specific tile and assert it spawned there, then click-select-and-assign a worker to a node.
+
+**Exit (the real Phase 1 close):**
+
+A fresh match is playable mouse-only against the AI, **with full prototype-equivalent spatial agency**: click train → click tile → unit appears there. Click worker → click node → worker harvests there. Match plays through to victory/defeat. Cross-OS determinism gate stays green.
+
 ## Success criteria — the Phase 1 exit gate
 
 Phase 1 closes — and Phase 2 (multiplayer alpha) is unblocked — when **all** of the following hold:
 
-1. **Playable end-to-end on the dev server.** A fresh match opens with the Tron grid + both HQs, the player can train + place units mouse-only, the AI plays back, combat happens, someone wins, "Play Again" resets in place.
-2. **Cross-OS determinism gate stays green.** The committed golden fixture (extended by sub-phase 1.0+) reproduces bit-identically on Linux + macOS + Windows V8 builds via `.github/workflows/determinism.yml`.
-3. **Replay round-trip.** A match recorded as a JSON replay file replays back via `tools/replay.ts` and reaches the same final state hash. On the same OS and across OSes (CI verifies).
-4. **Sim runs at 20 Hz with full visuals.** No dropped ticks on the dev laptop, measured via a debug HUD or telemetry counter.
-5. **Prototype code retired.** No surviving file under `src/` mixes sim and rendering. `AGENTS.md` reflects current structure. `npx tsc --noEmit && npm test && npm run test:e2e` passes on a clean checkout.
+| # | Criterion | Status |
+|---|---|---|
+| 1 | Playable end-to-end on the dev server: fresh match opens with the Tron grid + both HQs, the player can **train + place** units mouse-only, AI plays back, combat happens, someone wins, "Play Again" resets in place. | ⚠️ Partial — train works, place does not (closed by 1.7). |
+| 2 | Cross-OS determinism gate stays green on Linux + macOS + Windows. | ✅ |
+| 3 | Replay round-trip via `tools/replay.ts` reaches the same final hash. | ✅ |
+| 4 | Sim runs at 20 Hz with full visuals, no dropped ticks. | ✅ |
+| 5 | Prototype code retired; only the sim-driven path survives in `src/`. | ✅ |
+| 6 | Player has spatial agency comparable to the prototype: click-to-place trained units, click-to-select a unit, click-to-assign a worker to a node. | ⏳ Pending — sub-phase 1.7. |
 
 ## Risks — ranked
 
@@ -127,6 +191,7 @@ Phase 1 closes — and Phase 2 (multiplayer alpha) is unblocked — when **all**
 | 2026-04-26 | Phase 1 scope locked to "prototype-equivalent on new spine," no PRD §6 features. | PRD §8 is explicit; the §6 game design is Phase 3. Mixing scopes here would slip both phases. |
 | 2026-04-26 | Build the new sim-driven game path alongside the old one; swap at sub-phase 1.5, retire old at 1.6. | In-place rewrites of tangled prototype code historically slip. Parallel path keeps `main` shippable. |
 | 2026-04-26 | Replay format = `{ version: 1, seed, spec, frames[] }`, JSON, no binary encoding. | Phase 1 needs the format to exist, not to be small. Binary/compressed comes in Phase 4 alongside Steam Cloud + sharing. |
+| 2026-04-26 | Sub-phase 1.7 added; Phase 1 not closed at 1.6 as previously claimed. | 1.5 shipped buildables-panel-only — click-to-place at a tile, click-to-select a unit, and click-to-assign a worker were deferred without a strong-enough flag. The Phase 1 mandate (and the success-criterion #1 in this doc) explicitly required spatial input. Cataloguing the gap as 1.7 here ensures it doesn't get forgotten when Phase 2 work begins. |
 
 ## Open questions (need decisions during, not before, Phase 1)
 
