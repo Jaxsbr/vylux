@@ -1,0 +1,46 @@
+name: Determinism gate
+
+# The cross-OS determinism check. Runs the same `npm test` on Linux, macOS,
+# and Windows; if the V8 build on any platform produces a different sim
+# state hash than the golden fixture in tests/determinism/, the job fails
+# and the diff in the test output points at the first divergent tick.
+#
+# This workflow is the single load-bearing CI check for Phase 0 of the
+# determinism spike (per docs/investigation/00-determinism-and-netcode.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: determinism-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  determinism:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies (locked)
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests (includes determinism gate against golden fixture)
+        run: npm test
