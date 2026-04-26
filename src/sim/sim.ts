@@ -49,6 +49,8 @@ export class Sim {
       h.writeI32(fs.hqX);
       h.writeI32(fs.hqY);
       h.writeI32(fs.energy);
+      h.writeI32(fs.hqHp);
+      h.writeI32(fs.points);
     }
 
     // Units — array order is the sim's iteration order; tombstones

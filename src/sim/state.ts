@@ -19,22 +19,30 @@ export interface InitialMatchSpec {
   // Energy each faction starts with. 0 by default. Used to bootstrap AI
   // build orders that need to train before any worker has harvested.
   initialEnergy?: number;
+  // Both HQs share the same starting HP, default 500. Lower in tests to
+  // produce shorter match-end scenarios.
+  hqMaxHp?: number;
 }
 
 export function createInitialState(spec: InitialMatchSpec): { state: SimState; rng: Rng } {
   const rng = new Rng(spec.seed);
   const initialEnergy = fromInt(spec.initialEnergy ?? 0);
 
+  const hqMaxHp = fromInt(spec.hqMaxHp ?? 500);
   const factions: [FactionState, FactionState] = [
     {
       hqX: fromInt(spec.hqs.faction0.x),
       hqY: fromInt(spec.hqs.faction0.y),
       energy: initialEnergy,
+      hqHp: hqMaxHp,
+      points: 0,
     },
     {
       hqX: fromInt(spec.hqs.faction1.x),
       hqY: fromInt(spec.hqs.faction1.y),
       energy: initialEnergy,
+      hqHp: hqMaxHp,
+      points: 0,
     },
   ];
 

@@ -40,6 +40,11 @@ export const HARVEST_TICKS = 20; // 1 second at 20 Hz
 export const HARVEST_AMOUNT: Fixed = fromInt(5);
 export const WORKER_CAPACITY: Fixed = fromInt(5);
 
+// Win-condition tuning. Phase 3 will rebalance; numbers are placeholder.
+export const POINTS_PER_KILL = 5;
+export const POINTS_PER_HQ_HIT = 1;
+export const WIN_POINTS = 100;
+
 export function applyCommand(state: SimState, cmd: Command): void {
   switch (cmd.kind) {
     case CommandKind.Noop:
@@ -123,7 +128,8 @@ function findNearestEnemyInRange(
   return best;
 }
 
-function applyDamage(target: Unit, damage: Fixed): void {
+// Apply damage to a unit. Returns true if the target died as a result.
+function applyDamage(target: Unit, damage: Fixed): boolean {
   target.hp = sub(target.hp, damage);
   if (target.hp <= 0) {
     target.alive = false;
@@ -135,6 +141,24 @@ function applyDamage(target: Unit, damage: Fixed): void {
       target.phase = 'idle';
       target.targetNodeId = 0;
     }
+    return true;
+  }
+  return false;
+}
+
+// Award kill points to the attacker's faction.
+function awardKill(state: SimState, attackerFaction: 0 | 1): void {
+  state.factions[attackerFaction].points += POINTS_PER_KILL;
+}
+
+// Award HQ-hit points and check for HQ destruction.
+function damageEnemyHq(state: SimState, attacker: Raider, damage: Fixed): void {
+  const enemyFaction: 0 | 1 = attacker.faction === 0 ? 1 : 0;
+  const target = state.factions[enemyFaction];
+  target.hqHp = sub(target.hqHp, damage);
+  state.factions[attacker.faction].points += POINTS_PER_HQ_HIT;
+  if (target.hqHp <= 0) {
+    target.hqHp = 0;
   }
 }
 
@@ -159,9 +183,30 @@ function tryAttack(state: SimState, attacker: Defender | Raider): AttackOutcome 
   }
   if (!target) return { engaged: false, fired: false };
 
-  applyDamage(target, stats.attackDamage);
+  const killed = applyDamage(target, stats.attackDamage);
+  if (killed) awardKill(state, attacker.faction);
   attacker.attackCooldown = stats.attackCooldownTicks;
   return { engaged: true, fired: true };
+}
+
+// Raiders fall back to attacking the enemy HQ when no enemy unit is in
+// range. Same range / cooldown rules as unit combat.
+function tryAttackHq(state: SimState, raider: Raider): boolean {
+  const stats = UNIT_STATS.raider;
+  const enemyFaction: 0 | 1 = raider.faction === 0 ? 1 : 0;
+  const enemy = state.factions[enemyFaction];
+
+  const inRangeSq = rangeSq(stats.attackRange);
+  const d = distSq(raider.x, raider.y, enemy.hqX, enemy.hqY);
+  if (d > inRangeSq) return false;
+
+  if (raider.attackCooldown > 0) {
+    raider.attackCooldown -= 1;
+    return true; // engaged with HQ; hold position
+  }
+  damageEnemyHq(state, raider, stats.attackDamage);
+  raider.attackCooldown = stats.attackCooldownTicks;
+  return true;
 }
 
 function advanceWorker(state: SimState, w: Worker): void {
@@ -237,11 +282,13 @@ function advanceDefender(state: SimState, d: Defender): void {
 }
 
 function advanceRaider(state: SimState, r: Raider): void {
-  // Engage first. If a target is in range — even if cooldown blocks
-  // firing this tick — the raider holds position. Otherwise marches
-  // toward the enemy HQ.
+  // Priority: enemy unit > enemy HQ > march. Holding position when engaged
+  // (with anything) prevents the raider from walking past its target while
+  // on cooldown.
   const outcome = tryAttack(state, r);
   if (outcome.engaged) return;
+
+  if (tryAttackHq(state, r)) return;
 
   const stats = UNIT_STATS.raider;
   const enemyHq = state.factions[r.faction === 0 ? 1 : 0];
@@ -270,20 +317,39 @@ export function step(state: SimState, rng: Rng, frame: InputFrame): void {
     throw new Error(`step: input frame tick ${frame.tick} != state tick ${state.tick}`);
   }
 
-  // 1. Apply commands in order.
-  for (let i = 0; i < frame.commands.length; i++) {
-    applyCommand(state, frame.commands[i]);
-  }
+  // Once a winner is set, the sim is frozen. step() still bumps tick
+  // and mirrors RNG so replays can run past the end without diverging,
+  // but no commands or unit logic apply. This keeps the contract
+  // "same input → same output" intact even for past-end frames.
+  if (state.winner === null) {
+    // 1. Apply commands in order.
+    for (let i = 0; i < frame.commands.length; i++) {
+      applyCommand(state, frame.commands[i]);
+    }
 
-  // 2. Advance units in array-index order.
-  for (let i = 0; i < state.units.length; i++) {
-    advanceUnit(state, state.units[i]);
-  }
+    // 2. Advance units in array-index order.
+    for (let i = 0; i < state.units.length; i++) {
+      advanceUnit(state, state.units[i]);
+    }
 
-  // 3. (No periodic mechanics yet — node regen, points, AI come in
-  //     Phase 1.1 / 1.2.)
+    // 3. Win-condition checks. Done after units act so a kill / final
+    //    HQ-blow this tick is reflected immediately. Faction-0 wins
+    //    on tied conditions purely so the rule is deterministic; ties
+    //    are unreachable in practice given asymmetric kill timings.
+    state.winner = checkWinner(state);
+  }
 
   // 4. Bump tick + mirror RNG state.
   state.tick += 1;
   state.rngState = rng.snapshot();
+}
+
+function checkWinner(state: SimState): SimState['winner'] {
+  // HQ destruction: enemy HQ at 0 → THIS faction wins.
+  if (state.factions[1].hqHp <= 0) return 0;
+  if (state.factions[0].hqHp <= 0) return 1;
+  // Points threshold: first faction to cross WIN_POINTS wins.
+  if (state.factions[0].points >= WIN_POINTS) return 0;
+  if (state.factions[1].points >= WIN_POINTS) return 1;
+  return null;
 }

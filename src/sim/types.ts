@@ -21,6 +21,11 @@ export interface FactionState {
   hqX: Fixed;
   hqY: Fixed;
   energy: Fixed;
+  // HQ hit-points. Reaching 0 ends the match — the OTHER faction wins.
+  hqHp: Fixed;
+  // Score accumulated from kills + HQ damage. Reaching a threshold also
+  // ends the match (in favour of THIS faction).
+  points: number;
 }
 
 export type WorkerPhase = 'idle' | 'movingToNode' | 'harvesting' | 'returning';
