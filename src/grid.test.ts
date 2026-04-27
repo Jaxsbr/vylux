@@ -1,35 +1,45 @@
 import { describe, it, expect } from 'vitest';
 import { GRID_CONSTANTS, TILE_COUNT, tileToWorld, buildGrid } from './grid';
 
+// Tests are parametric on GRID_CONSTANTS.gridSize so changing the
+// constant in 3.4+ doesn't ripple a dozen hardcoded numbers through
+// this file. The contract being verified is the math + uniqueness
+// shape, not a particular grid size.
+const N = GRID_CONSTANTS.gridSize;
+const NEAR = -GRID_CONSTANTS.worldExtent / 2 + GRID_CONSTANTS.tileSize / 2;
+const FAR = GRID_CONSTANTS.worldExtent / 2 - GRID_CONSTANTS.tileSize / 2;
+const MID_TILE = N / 2;
+const MID_WORLD = NEAR + MID_TILE * GRID_CONSTANTS.tileSize;
+
 describe('GRID_CONSTANTS', () => {
-  it('is a 20x20 grid of unit tiles (400 total)', () => {
-    expect(GRID_CONSTANTS.gridSize).toBe(20);
+  it('is an N×N grid of unit tiles (worldExtent derived from gridSize)', () => {
+    expect(GRID_CONSTANTS.gridSize).toBeGreaterThan(0);
     expect(GRID_CONSTANTS.tileSize).toBe(1);
     expect(GRID_CONSTANTS.worldExtent).toBe(GRID_CONSTANTS.gridSize * GRID_CONSTANTS.tileSize);
-    expect(TILE_COUNT).toBe(400);
+    expect(TILE_COUNT).toBe(N * N);
   });
 });
 
 describe('tileToWorld — determinism', () => {
-  it('(0, 0) centers the near-corner tile at world (-9.5, 0, -9.5)', () => {
+  it('(0, 0) centers the near-corner tile at the worldExtent-derived offset', () => {
     const p = tileToWorld(0, 0);
-    expect(p.x).toBeCloseTo(-9.5);
+    expect(p.x).toBeCloseTo(NEAR);
     expect(p.y).toBe(0);
-    expect(p.z).toBeCloseTo(-9.5);
+    expect(p.z).toBeCloseTo(NEAR);
   });
 
-  it('(19, 19) centers the far-corner tile at world (9.5, 0, 9.5)', () => {
-    const p = tileToWorld(19, 19);
-    expect(p.x).toBeCloseTo(9.5);
+  it('(N-1, N-1) centers the far-corner tile at +(worldExtent/2 - tileSize/2)', () => {
+    const p = tileToWorld(N - 1, N - 1);
+    expect(p.x).toBeCloseTo(FAR);
     expect(p.y).toBe(0);
-    expect(p.z).toBeCloseTo(9.5);
+    expect(p.z).toBeCloseTo(FAR);
   });
 
-  it('(10, 10) returns a mid-grid position at world (0.5, 0, 0.5)', () => {
-    const p = tileToWorld(10, 10);
-    expect(p.x).toBeCloseTo(0.5);
+  it('(N/2, N/2) returns a mid-grid position', () => {
+    const p = tileToWorld(MID_TILE, MID_TILE);
+    expect(p.x).toBeCloseTo(MID_WORLD);
     expect(p.y).toBe(0);
-    expect(p.z).toBeCloseTo(0.5);
+    expect(p.z).toBeCloseTo(MID_WORLD);
   });
 
   it('is pure — repeated calls produce identical results', () => {
@@ -40,7 +50,7 @@ describe('tileToWorld — determinism', () => {
 });
 
 describe('tileToWorld — uniqueness', () => {
-  it('all 400 in-bounds tile positions are unique', () => {
+  it('all in-bounds tile positions are unique', () => {
     const seen = new Set<string>();
     for (let x = 0; x < GRID_CONSTANTS.gridSize; x++) {
       for (let y = 0; y < GRID_CONSTANTS.gridSize; y++) {
@@ -55,8 +65,8 @@ describe('tileToWorld — uniqueness', () => {
 describe('tileToWorld — out-of-bounds', () => {
   it.each<[number, number]>([
     [-1, 0],
-    [0, 20],
-    [20, 20],
+    [0, N],
+    [N, N],
     [NaN, 0],
   ])('throws a descriptive error on (%s, %s)', (x, y) => {
     expect(() => tileToWorld(x, y)).toThrow(/tile coordinates/);
@@ -64,7 +74,7 @@ describe('tileToWorld — out-of-bounds', () => {
 });
 
 describe('buildGrid', () => {
-  it('returns 400 tile meshes with unique (tileX, tileY) userData', () => {
+  it('returns TILE_COUNT tile meshes with unique (tileX, tileY) userData', () => {
     const grid = buildGrid();
     expect(grid.tileMeshes).toHaveLength(TILE_COUNT);
     const seen = new Set<string>();

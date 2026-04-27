@@ -14,42 +14,68 @@
 // sim state — it's a one-way consumer (PRD §3.3).
 
 import * as THREE from 'three';
-import { toFloat } from '../sim/fixed';
+import { distSq, rangeSq, toFloat, type Fixed } from '../sim/fixed';
 import type { Sim } from '../sim/sim';
 import type { Faction } from '../sim/types';
-import { UNIT_STATS } from '../sim/units-config';
+import { HQ_VISION_RADIUS, STRUCTURE_STATS, UNIT_STATS } from '../sim/units-config';
 import {
   buildHqMesh,
   buildNodeMesh,
+  buildProductionMesh,
+  buildPylonMesh,
+  buildSpireMesh,
+  buildTrailSegmentMesh,
   buildUnitMesh,
   type HqVisual,
   type UnitVisual,
   type NodeVisual,
+  type ProductionVisual,
+  type SupplyVisual,
+  type UpgradeVisual,
 } from './meshes';
 import { tileFloatToWorld } from './scene';
+import { TRAIL_SEGMENT_LIFETIME } from '../sim/units-config';
 
 interface PrevPosition {
   x: number;
   y: number;
 }
 
+interface VisionSource { x: Fixed; y: Fixed; radiusSq: Fixed; }
+
 export class SimRenderer {
   private readonly entitiesGroup: THREE.Group;
   private readonly sim: Sim;
+  // Phase 3.8: which faction this renderer presents for. Vision filter
+  // hides enemy entities + undiscovered nodes. Observer mode bypasses
+  // the filter entirely (sees both factions' state).
+  private readonly playerFaction: Faction;
+  private readonly bypassVision: boolean;
 
   private readonly hqMeshes: [HqVisual | null, HqVisual | null] = [null, null];
   private readonly unitMeshes = new Map<number, UnitVisual>();
   private readonly nodeMeshes = new Map<number, NodeVisual>();
+  private readonly structureMeshes = new Map<number, ProductionVisual | UpgradeVisual | SupplyVisual>();
+  // Phase 3.7: per-trail group of segment meshes. Re-built each frame
+  // from the current sim segments (cheap — small counts; correct
+  // because segments enter / leave / age in lockstep with sim time).
+  private readonly trailGroups = new Map<number, THREE.Group>();
   private readonly prevUnitPos = new Map<number, PrevPosition>();
+
+  // Phase 3.8: per-frame friendly vision-source cache. Refilled at the
+  // top of update() so each enemy entity's visibility test is a linear
+  // scan over a small list rather than a re-iteration of state.
+  private readonly visionSources: VisionSource[] = [];
 
   // Combined raycast-target views for the input controller.
   private readonly unitGroupView = new Map<number, THREE.Group>();
   private readonly nodeGroupView = new Map<number, THREE.Group>();
 
-  constructor(sim: Sim, entitiesGroup: THREE.Group, _playerFaction: Faction) {
+  constructor(sim: Sim, entitiesGroup: THREE.Group, playerFaction: Faction, bypassVision = false) {
     this.sim = sim;
     this.entitiesGroup = entitiesGroup;
-    void _playerFaction; // reserved for fog-of-war / faction-specific visuals (Phase 3)
+    this.playerFaction = playerFaction;
+    this.bypassVision = bypassVision;
     this.spawnHqs();
   }
 
@@ -62,9 +88,48 @@ export class SimRenderer {
   }
 
   update(alpha: number): void {
+    this.collectVisionSources();
     this.syncHqs();
     this.syncNodes();
+    this.syncStructures();
     this.syncUnits(alpha);
+    this.syncTrails();
+  }
+
+  // Phase 3.8: rebuild the friendly vision-source cache for this frame.
+  // Observer mode (bypassVision) skips the rebuild + isPositionVisible
+  // returns true for every position; the per-frame cost there is one
+  // branch per call.
+  private collectVisionSources(): void {
+    this.visionSources.length = 0;
+    if (this.bypassVision) return;
+    const fs = this.sim.state.factions[this.playerFaction];
+    this.visionSources.push({ x: fs.hqX, y: fs.hqY, radiusSq: rangeSq(HQ_VISION_RADIUS) });
+    for (const u of this.sim.state.units) {
+      if (!u.alive || u.faction !== this.playerFaction) continue;
+      this.visionSources.push({
+        x: u.x,
+        y: u.y,
+        radiusSq: rangeSq(UNIT_STATS[u.kind].visionRadius),
+      });
+    }
+    for (const s of this.sim.state.structures) {
+      if (!s.alive || s.faction !== this.playerFaction) continue;
+      this.visionSources.push({
+        x: s.x,
+        y: s.y,
+        radiusSq: rangeSq(STRUCTURE_STATS[s.kind].visionRadius),
+      });
+    }
+  }
+
+  private isPositionVisible(x: Fixed, y: Fixed): boolean {
+    if (this.bypassVision) return true;
+    for (let i = 0; i < this.visionSources.length; i++) {
+      const v = this.visionSources[i];
+      if (distSq(v.x, v.y, x, y) <= v.radiusSq) return true;
+    }
+    return false;
   }
 
   // Read-only mesh registries used by the input controller for raycasting.
@@ -76,11 +141,12 @@ export class SimRenderer {
     return this.nodeGroupView;
   }
 
-  // Each unit/HQ owns its own selection ring; toggling one ring
-  // requires walking the registry. Cheap (entity counts are small).
-  applyInputVisuals(selectedUnitId: number | null): void {
+  // Each unit/HQ owns its own selection ring; toggling rings requires
+  // walking the registry. Cheap (entity counts are small). Phase 3.3:
+  // takes a set of selected IDs to support multi-unit selection.
+  applyInputVisuals(selectedUnitIds: ReadonlySet<number>): void {
     for (const [id, vis] of this.unitMeshes) {
-      vis.selectionRing.visible = id === selectedUnitId;
+      vis.selectionRing.visible = selectedUnitIds.has(id);
     }
   }
 
@@ -98,6 +164,10 @@ export class SimRenderer {
       const v = this.hqMeshes[f];
       if (!v) continue;
       const fs = this.sim.state.factions[f];
+      // Phase 3.8: enemy HQ hidden until in the player's vision.
+      // Friendly HQ always visible.
+      const isOwn = f === this.playerFaction;
+      v.group.visible = isOwn || this.bypassVision || this.isPositionVisible(fs.hqX, fs.hqY);
       const maxHp = fs.hqHp > 0 ? Math.max(toFloat(fs.hqHp), 0.0001) : 0;
       // Read max from spec — we don't have it on FactionState, so derive
       // from initial state by tracking max separately. Simpler: cap
@@ -118,13 +188,68 @@ export class SimRenderer {
     for (const n of this.sim.state.nodes) {
       let v = this.nodeMeshes.get(n.id);
       if (!v && n.alive) {
-        v = buildNodeMesh(toFloat(n.x), toFloat(n.y));
+        v = buildNodeMesh(toFloat(n.x), toFloat(n.y), n.kind);
         v.group.userData.nodeId = n.id;
         this.entitiesGroup.add(v.group);
         this.nodeMeshes.set(n.id, v);
         this.nodeGroupView.set(n.id, v.group);
       }
-      if (v) v.group.visible = n.alive;
+      // Phase 3.8: nodes are visible iff alive AND discovered by the
+      // player faction (or in observer mode). Discovery is permanent —
+      // once shown, stays shown even outside current vision. The
+      // input controller's pickLiveNode() iterates over visible
+      // meshes, so this gate doubles as the click-to-assign filter.
+      if (v) {
+        v.group.visible = n.alive
+          && (this.bypassVision || n.discoveredBy[this.playerFaction]);
+      }
+    }
+  }
+
+  private syncStructures(): void {
+    for (const s of this.sim.state.structures) {
+      let v = this.structureMeshes.get(s.id);
+      if (!v && s.alive) {
+        if (s.kind === 'production') {
+          v = buildProductionMesh(s.faction, toFloat(s.x), toFloat(s.y));
+        } else if (s.kind === 'upgrade') {
+          v = buildSpireMesh(s.faction, toFloat(s.x), toFloat(s.y));
+        } else if (s.kind === 'supply') {
+          v = buildPylonMesh(s.faction, toFloat(s.x), toFloat(s.y));
+        }
+        if (v !== undefined) {
+          this.entitiesGroup.add(v.group);
+          this.structureMeshes.set(s.id, v);
+        }
+      }
+      if (!v) continue;
+      // Phase 3.8: friendly structures always visible; enemy structures
+      // hidden until in the player's current vision. Per-tick presence
+      // (no last-known-position memory in v1).
+      const isOwn = s.faction === this.playerFaction;
+      const visible = s.alive
+        && (isOwn || this.bypassVision || this.isPositionVisible(s.x, s.y));
+      v.group.visible = visible;
+      if (!s.alive) continue;
+
+      const stats = STRUCTURE_STATS[s.kind];
+      const buildTotal = stats.buildTicks;
+      const buildRatio = buildTotal === 0 ? 1 : 1 - s.buildTicksRemaining / buildTotal;
+      v.setBuildProgress(buildRatio);
+      v.hpBar.update(toFloat(s.hp), toFloat(stats.maxHp));
+
+      // Upgrade-only: pulse the finial while research is running.
+      if (s.kind === 'upgrade') {
+        const upgradeVis = v as UpgradeVisual;
+        // Pulse intensity tracks fraction-completed so the finial
+        // brightens through the research window. researchTicksRemaining
+        // counts down from TIER2_RESEARCH_TICKS to 0.
+        const total = 80; // TIER2_RESEARCH_TICKS — kept inline to avoid pulling sim constants here
+        const ratio = s.researchTicksRemaining > 0
+          ? 1 - s.researchTicksRemaining / total
+          : 0;
+        upgradeVis.setResearchProgress(ratio);
+      }
     }
   }
 
@@ -138,7 +263,14 @@ export class SimRenderer {
         this.unitMeshes.set(u.id, v);
         this.unitGroupView.set(u.id, v.group);
       }
-      v.group.visible = u.alive;
+      // Phase 3.8: friendly units always visible; enemy units hidden
+      // unless within the player's current vision. The position lerp
+      // below uses the fresh sim coords either way (no need to halt
+      // interpolation when an enemy slips out of vision — the mesh is
+      // simply hidden, not detached).
+      const isOwn = u.faction === this.playerFaction;
+      v.group.visible = u.alive
+        && (isOwn || this.bypassVision || this.isPositionVisible(u.x, u.y));
       if (!u.alive) continue;
 
       const curX = toFloat(u.x);
@@ -154,12 +286,80 @@ export class SimRenderer {
     }
   }
 
+  // Phase 3.7: trail rendering. Per-trail Three.js group containing
+  // one small glowing tile per segment. Re-built each frame because:
+  // (a) segments are cheap (max ~40 per active trail × a few trails);
+  // (b) age determines opacity/intensity, which would otherwise need
+  // per-segment material tracking; (c) per-tick segment add + drop
+  // sequences are simpler to express by full rebuild than by diffing.
+  // If trail counts blow up, switch to InstancedMesh + per-instance
+  // material attributes.
+  private syncTrails(): void {
+    const sim = this.sim.state;
+    // Tear down dead trails first so we can short-circuit alive
+    // iteration. Iterate the renderer's map (not sim.trails) so dead
+    // trails not present in sim get cleaned up too.
+    for (const [trailId, group] of this.trailGroups) {
+      const t = sim.trails.find((x) => x.id === trailId);
+      if (!t || !t.alive) {
+        this.entitiesGroup.remove(group);
+        this.disposeGroup(group);
+        this.trailGroups.delete(trailId);
+      }
+    }
+    for (const t of sim.trails) {
+      if (!t.alive) continue;
+      let group = this.trailGroups.get(t.id);
+      if (!group) {
+        group = new THREE.Group();
+        group.name = `trail-${t.id}`;
+        this.entitiesGroup.add(group);
+        this.trailGroups.set(t.id, group);
+      }
+      // Rebuild segments. Cleanup first so material/geometry don't leak.
+      while (group.children.length > 0) {
+        const child = group.children[0];
+        group.remove(child);
+        if (child instanceof THREE.Mesh) {
+          (child.geometry as THREE.BufferGeometry).dispose();
+          (child.material as THREE.MeshStandardMaterial).dispose();
+        }
+      }
+      const lifetime = sim.factions[t.ownerFaction].trailDurationResearched
+        ? TRAIL_SEGMENT_LIFETIME * 2
+        : TRAIL_SEGMENT_LIFETIME;
+      for (const seg of t.segments) {
+        const fade = Math.max(0, 1 - seg.age / lifetime);
+        const visual = buildTrailSegmentMesh(t.ownerFaction, toFloat(seg.x), toFloat(seg.y));
+        visual.material.opacity = 0.2 + 0.8 * fade;
+        visual.material.emissiveIntensity = 0.4 + 1.4 * fade;
+        group.add(visual.mesh);
+      }
+    }
+  }
+
+  private disposeGroup(group: THREE.Group): void {
+    group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        (obj.geometry as THREE.BufferGeometry).dispose();
+        (obj.material as THREE.MeshStandardMaterial).dispose();
+      }
+    });
+  }
+
   dispose(): void {
     for (const v of this.unitMeshes.values()) this.entitiesGroup.remove(v.group);
     for (const v of this.nodeMeshes.values()) this.entitiesGroup.remove(v.group);
+    for (const v of this.structureMeshes.values()) this.entitiesGroup.remove(v.group);
+    for (const g of this.trailGroups.values()) {
+      this.entitiesGroup.remove(g);
+      this.disposeGroup(g);
+    }
     for (const h of this.hqMeshes) if (h) this.entitiesGroup.remove(h.group);
     this.unitMeshes.clear();
     this.nodeMeshes.clear();
+    this.structureMeshes.clear();
+    this.trailGroups.clear();
     this.unitGroupView.clear();
     this.nodeGroupView.clear();
     this.prevUnitPos.clear();

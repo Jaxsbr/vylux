@@ -7,7 +7,30 @@
 // renderer.
 
 import * as THREE from 'three';
-import { buildGrid, type GridBundle } from '../grid';
+import { GRID_CONSTANTS, buildGrid, type GridBundle } from '../grid';
+
+// Default ortho-camera halfHeight (vertical world-units visible).
+// Sized to comfortably frame the whole grid plus a little margin —
+// derived from gridSize so re-tuning the grid in 3.4+ doesn't leave
+// the default zoom-out clipping the corners.
+//
+// Phase 3.4 adds zoom; the camera controller multiplies this base by a
+// scale in [ZOOM_MIN, ZOOM_MAX]. The base value itself is what we'd
+// show on a fresh load with no zoom applied.
+export const DEFAULT_HALF_HEIGHT = (GRID_CONSTANTS.worldExtent / 2) + 6;
+
+// Zoom bounds. 0.5x = closer in, 2.0x = pulled-back. Picked to keep
+// individual unit meshes legible at the closest zoom and keep the whole
+// map visible at the farthest.
+export const ZOOM_MIN = 0.5;
+export const ZOOM_MAX = 2.0;
+
+// Camera offset from the look-at target — the iso angle. Held constant
+// so panning translates the camera-and-target together without rotating
+// the view. Direction matches the prototype's pulled-back upper-right
+// look, scaled with worldExtent so a bigger grid keeps the same
+// apparent angle and doesn't end up flat.
+const CAMERA_OFFSET_RATIO = { x: 0.9, y: 1.1, z: 0.9 };
 
 export interface SceneBundle {
   scene: THREE.Scene;
@@ -17,8 +40,15 @@ export interface SceneBundle {
   grid: GridBundle;
   // Add/remove entity meshes via this group so they sit above the grid.
   entitiesGroup: THREE.Group;
+  // The iso-camera offset from its look-at target. Pan moves the
+  // target; the camera stays at target + this vector. Read-only —
+  // returned for the camera controller to compose its own state.
+  cameraOffset: THREE.Vector3;
   // Resize handler — call from window 'resize' listener.
   resize(width: number, height: number): void;
+  // Apply a new ortho-camera halfHeight (controls zoom). Width is
+  // recomputed from the current canvas aspect ratio.
+  setHalfHeight(halfHeight: number): void;
   dispose(): void;
 }
 
@@ -28,14 +58,19 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
 
   // Orthographic isometric: pulled-back y-axis, gentle pitch.
   const aspect = canvas.clientWidth / canvas.clientHeight;
-  const halfHeight = 14;
-  const halfWidth = halfHeight * aspect;
+  let currentHalfHeight = DEFAULT_HALF_HEIGHT;
+  const halfWidth = currentHalfHeight * aspect;
   const camera = new THREE.OrthographicCamera(
     -halfWidth, halfWidth,
-    halfHeight, -halfHeight,
+    currentHalfHeight, -currentHalfHeight,
     -100, 100,
   );
-  camera.position.set(18, 22, 18);
+  const cameraOffset = new THREE.Vector3(
+    GRID_CONSTANTS.worldExtent * CAMERA_OFFSET_RATIO.x,
+    GRID_CONSTANTS.worldExtent * CAMERA_OFFSET_RATIO.y,
+    GRID_CONSTANTS.worldExtent * CAMERA_OFFSET_RATIO.z,
+  );
+  camera.position.copy(cameraOffset);
   camera.lookAt(0, 0, 0);
 
   const ambient = new THREE.AmbientLight(0xffffff, 0.4);
@@ -64,16 +99,28 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
     gridGroup,
     grid,
     entitiesGroup,
+    cameraOffset,
     resize(width, height) {
       const a = width / height;
-      const hh = 14;
-      const hw = hh * a;
+      const hw = currentHalfHeight * a;
       camera.left = -hw;
       camera.right = hw;
-      camera.top = hh;
-      camera.bottom = -hh;
+      camera.top = currentHalfHeight;
+      camera.bottom = -currentHalfHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
+    },
+    setHalfHeight(halfHeight) {
+      currentHalfHeight = halfHeight;
+      const w = renderer.domElement.clientWidth;
+      const h = renderer.domElement.clientHeight;
+      const a = w === 0 || h === 0 ? 1 : w / h;
+      const hw = currentHalfHeight * a;
+      camera.left = -hw;
+      camera.right = hw;
+      camera.top = currentHalfHeight;
+      camera.bottom = -currentHalfHeight;
+      camera.updateProjectionMatrix();
     },
     dispose() {
       renderer.dispose();
@@ -83,11 +130,14 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
 
 // Convert a tile-space coordinate (sim's native units, possibly fractional)
 // to a Three.js world-space coordinate. The grid is centred at world origin
-// with each tile = 1 world unit.
+// with each tile = `tileSize` world units. Offset is derived from
+// GRID_CONSTANTS so changing the grid size doesn't strand a hardcoded
+// literal here.
 export function tileFloatToWorld(
   tileX: number,
   tileY: number,
 ): { x: number; z: number } {
-  const offset = -10 + 0.5; // -worldExtent/2 + tileSize/2 from grid.ts
-  return { x: offset + tileX, z: offset + tileY };
+  const { tileSize, worldExtent } = GRID_CONSTANTS;
+  const offset = -worldExtent / 2 + tileSize / 2;
+  return { x: offset + tileX * tileSize, z: offset + tileY * tileSize };
 }

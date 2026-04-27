@@ -1,51 +1,203 @@
 // Game entry point.
 //
-// Wires up: scene + renderer + Match + driver + AI for faction 1 +
-// player input for faction 0. Player faction = 0 (cyan). AI faction =
-// 1 (red-orange).
+// Run modes, picked from the URL:
+//   - default (no params): single-player vs scripted AI. Player is
+//     faction 0 (cyan); AI controls faction 1 (red-orange).
+//   - ?lockstep=host  / ?lockstep=join                — Phase 2.0 local
+//       two-tab lockstep over BroadcastChannel. Same-machine determinism
+//       gate; no network involved. Each tab is one faction; AI off.
+//   - ?lockstep=host&room=ABCDEF / ?lockstep=join&room=ABCDEF
+//                                                       — Phase 2.1 WebRTC
+//       lockstep across the network. The two clients reach each other
+//       via the signaling server (WebSocket); once the datachannel is
+//       open, gameplay traffic is peer-to-peer and the signaling server
+//       is dormant. Same LockstepChannel sits on top — only the
+//       transport substrate changes.
+//   - ?lockstep=observe                                 — Phase 2.5 local
+//       observer prototype. A third tab joins the same BroadcastChannel
+//       as host + join, listens for player frames, runs the sim
+//       read-only. No input, no buildables panel; HUD shows both
+//       factions' state. Proves the technical pattern that broadcast
+//       tooling will eventually need; WebRTC observer through the
+//       signaling relay is a 2.5 follow-up.
 //
-// Player interaction:
+// The signaling server URL defaults to ws://<host>:5182 in dev.
+// Override at runtime with ?signaling=<ws-url> or at build time with
+// VITE_SIGNALING_URL.
+//
+// Player interaction (Phase 3.3):
 //   - Click WORKER / DEFENDER / RAIDER → unit trains and spawns at HQ
 //     on the next sim tick (standard RTS macro).
-//   - Click your own worker → selection ring appears → click a node
-//     to assign that worker to harvest there (standard RTS micro).
-//   - Esc / right-click clears selection.
+//   - Click your own unit → replaces selection.
+//   - Shift+click → toggle a unit in/out of the selection.
+//   - Drag a rect on empty ground → all owned units inside are selected
+//     (shift+drag adds to existing selection).
+//   - With selected workers, click a node → all of them assigned.
+//   - Right-click on empty ground → MoveUnit for every selected unit.
+//   - Esc / right-click clears selection / cancels placement.
 // Match-end overlay shows VICTORY/DEFEAT with a Play Again button
 // (page reload).
 
 import { autoAssignIdleWorkers, tickAi } from './sim/ai';
-import { Match } from './sim/replay';
+import type { Command } from './sim/commands';
+import { Match, serialiseReplay } from './sim/replay';
 import type { InitialMatchSpec } from './sim/state';
 import type { Faction } from './sim/types';
 import { createScene } from './render/scene';
 import { SimRenderer } from './render/sim-renderer';
 import { startSimDriver, TICK_HZ } from './render/sim-driver';
-import { BuildablesPanel, MatchEndOverlay } from './render/player-input';
+import { BuildablesPanel, DesyncOverlay, MatchEndOverlay } from './render/player-input';
 import { InputController } from './render/input-controller';
+import { CameraController } from './render/camera-controller';
+import { LockstepChannel, type BroadcastChannelLike } from './net/lockstep-channel';
+import { LockstepLoop } from './net/lockstep-loop';
+import { ObserverChannel } from './net/observer-channel';
+import { ObserverLoop } from './net/observer-loop';
+import { WebRtcTransport } from './net/webrtc-transport';
+import { isValidRoomCode } from './net/signaling-protocol';
 
-const PLAYER_FACTION: Faction = 0;
-const AI_FACTION: Faction = 1;
-
+// Phase 3.4 re-tuned for the 32×32 grid. HQs in opposite corners with
+// real travel distance between them; Energy nodes near each HQ + a pair
+// of mid-distance "second base" nodes; one contested Flux node at the
+// dead centre, equidistant between HQs (PRD §6.6's "geographically
+// committal third base").
+//
+// Phase 3.5 adds two faction-locked colour nodes per side (blue near
+// F0 HQ, red near F1 HQ). Positioned in the home patch so the owning
+// faction can hold them with light defence, but reachable from the
+// open midfield so a determined raid can deny them — the lockout-by-
+// denial mechanic only matters if the colour nodes are denyable.
 const SPEC: InitialMatchSpec = {
   seed: 42,
   hqs: {
-    faction0: { x: 3, y: 3 },
-    faction1: { x: 16, y: 16 },
+    faction0: { x: 4, y: 4 },
+    faction1: { x: 27, y: 27 },
   },
   nodes: [
-    { x: 6, y: 6, energy: 200 },
-    { x: 13, y: 13, energy: 200 },
-    { x: 10, y: 10, energy: 200 },
-    { x: 6, y: 13, energy: 200 },
-    { x: 13, y: 6, energy: 200 },
+    // Faction 0 home patch (north-west corner).
+    { x: 7, y: 4, energy: 200 },
+    { x: 4, y: 7, energy: 200 },
+    // Faction 1 home patch (south-east corner).
+    { x: 24, y: 27, energy: 200 },
+    { x: 27, y: 24, energy: 200 },
+    // Mid-distance "second base" nodes on the diagonals.
+    { x: 11, y: 20, energy: 200 },
+    { x: 20, y: 11, energy: 200 },
+    // Phase 3.6: two Flux nodes at flank-symmetric positions so the
+    // Flux contest isn't always the same midpoint scrum. The two
+    // positions are equidistant between the HQs but on different
+    // diagonals — taking one commits to defending it instead of
+    // splitting attention across both.
+    { x: 9, y: 16, energy: 100, kind: 'flux' },
+    { x: 22, y: 16, energy: 100, kind: 'flux' },
+    // Faction 0 colour (blue). Forward + flank of HQ.
+    { x: 8, y: 8, energy: 100, kind: 'blue' },
+    { x: 2, y: 10, energy: 100, kind: 'blue' },
+    // Faction 1 colour (red). Mirror placement.
+    { x: 23, y: 23, energy: 100, kind: 'red' },
+    { x: 29, y: 21, energy: 100, kind: 'red' },
   ],
   initialEnergy: 200,
+  initialColor: 50,
   hqMaxHp: 250,
 };
 
-function bootstrap(): void {
+const LOCKSTEP_CHANNEL_NAME = 'vylux-lockstep';
+
+// Reused empty set for the observer view (no input controller exists)
+// so we don't allocate a fresh Set every rAF.
+const EMPTY_SELECTION: ReadonlySet<number> = new Set();
+
+type RunMode =
+  | { kind: 'pva'; playerFaction: Faction }
+  | { kind: 'lockstep-local'; localFaction: Faction }
+  | { kind: 'lockstep-webrtc'; localFaction: Faction; room: string; signalingUrl: string }
+  | { kind: 'observe-local' };
+
+function detectRunMode(): RunMode {
+  const params = new URLSearchParams(window.location.search);
+  const ls = params.get('lockstep');
+  if (ls === 'observe') return { kind: 'observe-local' };
+  if (ls !== 'host' && ls !== 'join') return { kind: 'pva', playerFaction: 0 };
+
+  const localFaction: Faction = ls === 'host' ? 0 : 1;
+  const room = params.get('room');
+  if (room !== null) {
+    if (!isValidRoomCode(room)) {
+      throw new Error(`main: invalid room code "${room}" (6 chars from confusable-free alphabet)`);
+    }
+    return {
+      kind: 'lockstep-webrtc',
+      localFaction,
+      room,
+      signalingUrl: deriveSignalingUrl(params),
+    };
+  }
+  return { kind: 'lockstep-local', localFaction };
+}
+
+// TEST-ONLY: when ?desync-test=N is present in the URL, inject a single
+// state mutation right after the sim crosses tick N. This is the
+// deliberately-corrupted client described in investigation 03 sub-phase
+// 2.3 — it lets the desync-detection gate be exercised end-to-end
+// without needing a real bug. Production play with no URL param is
+// completely unaffected.
+function detectDesyncTestTick(params: URLSearchParams): number | null {
+  const raw = params.get('desync-test');
+  if (raw === null) return null;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+function downloadReplay(match: Match, role: string, label: 'replay' | 'desync' = 'replay'): void {
+  const json = serialiseReplay(match.toReplay());
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `vylux-${label}-tick${match.tick}-${role}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function deriveSignalingUrl(params: URLSearchParams): string {
+  const override = params.get('signaling');
+  if (override !== null) return override;
+  const buildTime = (import.meta.env.VITE_SIGNALING_URL as string | undefined);
+  if (buildTime !== undefined && buildTime.length > 0) return buildTime;
+  return `ws://${window.location.hostname || 'localhost'}:5182`;
+}
+
+interface ConnectingOverlay {
+  set(line: string): void;
+  hide(): void;
+}
+
+function makeConnectingOverlay(): ConnectingOverlay {
+  const el = document.createElement('div');
+  el.style.cssText = [
+    'position:fixed', 'inset:0', 'display:flex',
+    'align-items:center', 'justify-content:center',
+    'background:rgba(7,9,12,0.92)', 'z-index:20',
+    'font-family:ui-monospace,Menlo,monospace',
+    'color:#9ad', 'font-size:13px', 'letter-spacing:0.12em',
+    'white-space:pre', 'text-align:center',
+  ].join(';');
+  document.body.appendChild(el);
+  return {
+    set(line) { el.textContent = line; },
+    hide() { el.remove(); },
+  };
+}
+
+async function bootstrap(): Promise<void> {
   const canvas = document.getElementById('canvas') as HTMLCanvasElement | null;
   if (!canvas) throw new Error('main: #canvas not found');
+
+  const desyncTestTick = detectDesyncTestTick(new URLSearchParams(window.location.search));
 
   function resizeCanvas(): void {
     canvas!.style.width = '100vw';
@@ -55,32 +207,139 @@ function bootstrap(): void {
   }
   resizeCanvas();
 
+  const mode = detectRunMode();
+  const playerFaction: Faction = mode.kind === 'pva' || mode.kind === 'observe-local'
+    ? 0
+    : mode.localFaction;
+  const isObserver = mode.kind === 'observe-local';
+
+  // Build the lockstep substrate before the scene so a connection
+  // failure fails loudly instead of silently leaving us in a stalled
+  // single-player state.
+  let substrate: BroadcastChannelLike | null = null;
+  let webrtc: WebRtcTransport | null = null;
+
+  if (mode.kind === 'lockstep-local' || mode.kind === 'observe-local') {
+    substrate = new BroadcastChannel(LOCKSTEP_CHANNEL_NAME);
+  } else if (mode.kind === 'lockstep-webrtc') {
+    const overlay = makeConnectingOverlay();
+    overlay.set(`connecting · room ${mode.room}\n${mode.signalingUrl}`);
+    try {
+      webrtc = await WebRtcTransport.connect({
+        signalingUrl: mode.signalingUrl,
+        room: mode.room,
+        role: mode.localFaction === 0 ? 'host' : 'join',
+      });
+      substrate = webrtc;
+    } catch (err) {
+      overlay.set(`connection failed\n${(err as Error).message}\nreload to retry`);
+      throw err;
+    }
+    overlay.hide();
+  }
+
   const scene = createScene(canvas);
   const match = new Match(SPEC);
-  const renderer = new SimRenderer(match.sim, scene.entitiesGroup, PLAYER_FACTION);
+  const renderer = new SimRenderer(match.sim, scene.entitiesGroup, playerFaction, isObserver);
 
-  const input = new InputController({
+  // Observer view: no input, no buildables panel. The DOWNLOAD REPLAY
+  // path still works (an observer can save its own replay log too —
+  // the input frames it received are the same the players sent), so
+  // the match-end + R-key flows are unchanged.
+  const input = isObserver ? null : new InputController({
     canvas,
     camera: scene.camera,
     unitMeshes: renderer.unitMeshMap,
     nodeMeshes: renderer.nodeMeshMap,
     sim: match.sim,
-    playerFaction: PLAYER_FACTION,
+    playerFaction,
   });
 
-  const panel = new BuildablesPanel(PLAYER_FACTION, {
-    onTrainKindSelected: (kind) => input.trainUnit(kind),
+  const panel = isObserver ? null : new BuildablesPanel(playerFaction, {
+    onTrainKindSelected: (kind) => input!.trainUnit(kind),
+    onBuildForgeSelected: () => input!.enterPlaceForgeMode(),
+    onBuildSpireSelected: () => input!.enterPlaceSpireMode(),
+    onBuildPylonSelected: () => input!.enterPlacePylonMode(),
+    onResearchTier2Selected: () => input!.researchTier2(),
+    onResearchTrailDurationSelected: () => input!.researchTrailDuration(),
+    onDumpSelected: () => input!.dumpSelectedWorkers(),
   }, document.body);
 
-  const matchEnd = new MatchEndOverlay(document.body);
+  const role: 'pva' | 'host' | 'join' | 'observe' = (() => {
+    switch (mode.kind) {
+      case 'pva': return 'pva';
+      case 'observe-local': return 'observe';
+      default: return playerFaction === 0 ? 'host' : 'join';
+    }
+  })();
+  const triggerDownloadReplay = (): void => downloadReplay(match, role, 'replay');
+  const triggerDownloadDesyncReplay = (): void => downloadReplay(match, role, 'desync');
+  const matchEnd = new MatchEndOverlay(document.body, triggerDownloadReplay);
+  const desyncOverlay = new DesyncOverlay(document.body, triggerDownloadDesyncReplay);
 
-  const driver = startSimDriver(match, renderer, scene, (m) => [
-    ...input.takeQueued(),
-    ...autoAssignIdleWorkers(m.sim.state, PLAYER_FACTION),
-    ...tickAi(m.sim.state, AI_FACTION),
-  ]);
+  let lockstep: LockstepChannel | null = null;
+  let lockstepLoop: LockstepLoop | null = null;
+  let observerChannel: ObserverChannel | null = null;
+  let observerLoop: ObserverLoop | null = null;
+  let desync: { tick: number; localHash: string; remoteHash: string } | null = null;
+  // Forward-ref to the driver's stop method. Set after startSimDriver
+  // returns; the desync handler may need to halt the loop before the
+  // assignment runs (very-early-tick desyncs are rare but possible),
+  // so we tolerate a no-op until then.
+  let haltDriver: () => void = () => {};
 
-  // HUD overlay.
+  if (isObserver && substrate !== null) {
+    observerChannel = new ObserverChannel({ channel: substrate });
+    observerLoop = new ObserverLoop({ channel: observerChannel });
+  } else if (substrate !== null && (mode.kind === 'lockstep-local' || mode.kind === 'lockstep-webrtc')) {
+    const localFaction: Faction = mode.localFaction;
+    lockstep = new LockstepChannel({
+      channel: substrate,
+      localFaction,
+      onDesync: (r) => {
+        if (desync !== null) return; // first divergence wins; ignore later mismatches
+        desync = r;
+        haltDriver();
+        desyncOverlay.show(r);
+        // eslint-disable-next-line no-console
+        console.error('lockstep desync', r);
+      },
+    });
+    lockstepLoop = new LockstepLoop({
+      channel: lockstep,
+      collectLocalCommands: (state) => [
+        ...input!.takeQueued(),
+        ...autoAssignIdleWorkers(state, playerFaction),
+      ],
+    });
+    lockstep.sendHello();
+  }
+
+  const commandsCallback = (m: Match): Command[] | null => {
+    if (observerLoop !== null) return observerLoop.next(m);
+    if (lockstepLoop !== null) return lockstepLoop.next(m);
+    // Single-player vs AI.
+    return [
+      ...input!.takeQueued(),
+      ...autoAssignIdleWorkers(m.sim.state, playerFaction),
+      ...tickAi(m.sim.state, (1 - playerFaction) as Faction),
+    ];
+  };
+
+  const driver = startSimDriver(match, renderer, scene, commandsCallback);
+  haltDriver = () => driver.stop();
+
+  // Phase 3.4: camera pan/zoom. Active in every mode (including
+  // observer) so the spectator can navigate the larger map. Pan keys +
+  // mouse use middle button so they don't conflict with the input
+  // controller's left-drag select / right-click move.
+  const cameraController = new CameraController({
+    canvas,
+    camera: scene.camera,
+    cameraOffset: scene.cameraOffset,
+    setHalfHeight: (hh) => scene.setHalfHeight(hh),
+  });
+
   const hud = document.createElement('div');
   hud.style.cssText = [
     'position:fixed', 'top:8px', 'left:8px',
@@ -91,21 +350,89 @@ function bootstrap(): void {
   ].join(';');
   document.body.appendChild(hud);
 
+  function modeLabel(): string {
+    switch (mode.kind) {
+      case 'pva': return 'vs ai';
+      case 'lockstep-local': return playerFaction === 0 ? 'lockstep host (local)' : 'lockstep join (local)';
+      case 'lockstep-webrtc': return playerFaction === 0
+        ? `lockstep host · room ${mode.room}`
+        : `lockstep join · room ${mode.room}`;
+      case 'observe-local': return 'observer (local)';
+    }
+  }
+
+  let desyncTestFired = false;
+  let lastFrameMs = performance.now();
+
   function tickHud(): void {
     requestAnimationFrame(tickHud);
+    const nowMs = performance.now();
+    const dtSeconds = Math.min(0.1, (nowMs - lastFrameMs) / 1000);
+    lastFrameMs = nowMs;
+    cameraController.update(dtSeconds);
     const s = match.sim.state;
-    hud.textContent = [
-      `vylux · ${TICK_HZ} Hz · you = cyan`,
+
+    // TEST-ONLY corruption injection. When ?desync-test=N is in the
+    // URL, we mutate state once at the first rAF after the sim crosses
+    // tick N. The mutated state hashes differently from the peer's, so
+    // the desync detection gate must surface within ~1 second (~20
+    // ticks at 20 Hz). No-op when the param is absent.
+    // Skip in observer mode — the observer doesn't drive the canonical
+    // state, and corrupting its local view wouldn't trigger a real
+    // desync (no hash exchange).
+    if (!isObserver && desyncTestTick !== null && !desyncTestFired && s.tick > desyncTestTick) {
+      desyncTestFired = true;
+      s.factions[0].points += 1;
+      // eslint-disable-next-line no-console
+      console.warn(`desync-test: corrupted state at tick ${s.tick} (target was ${desyncTestTick})`);
+    }
+
+    // Observer view shows both factions by their lockstep role; player
+    // views keep "you" / "opp" labels relative to the local faction so
+    // existing regex assertions in tests continue to match.
+    const factionLabelLine = isObserver
+      ? `vylux · ${TICK_HZ} Hz · ${modeLabel()} · watching both`
+      : `vylux · ${TICK_HZ} Hz · ${modeLabel()} · you = ${playerFaction === 0 ? 'cyan' : 'red'}`;
+    const f0Label = isObserver ? 'host' : (playerFaction === 0 ? 'you' : 'opp');
+    const f1Label = isObserver ? 'join' : (playerFaction === 0 ? 'opp' : 'you');
+    const fmtFaction = (idx: 0 | 1, label: string): string => {
+      const fx = s.factions[idx];
+      const t2 = fx.tier2Researched ? ' t2' : '';
+      return `${label}  hp ${(fx.hqHp / 65536).toFixed(0)}  pts ${fx.points}  e ${(fx.energy / 65536).toFixed(0)}  f ${(fx.flux / 65536).toFixed(0)}  c ${(fx.color / 65536).toFixed(0)}  s ${fx.supplyUsed}/${fx.supplyCap}${t2}`;
+    };
+    const lines = [
+      factionLabelLine,
       `tick ${s.tick}  winner ${s.winner ?? '–'}`,
-      `you  hp ${(s.factions[0].hqHp / 65536).toFixed(0)}  pts ${s.factions[0].points}  e ${(s.factions[0].energy / 65536).toFixed(0)}`,
-      `ai   hp ${(s.factions[1].hqHp / 65536).toFixed(0)}  pts ${s.factions[1].points}  e ${(s.factions[1].energy / 65536).toFixed(0)}`,
+      fmtFaction(0, f0Label),
+      fmtFaction(1, f1Label),
       `units ${s.units.filter((u) => u.alive).length}  dropped ${driver.droppedSteps}`,
-    ].join('\n');
+    ];
 
-    panel.refresh(match.sim);
-    renderer.applyInputVisuals(input.getSelectedUnitId());
+    if (lockstep !== null && lockstepLoop !== null) {
+      const peer = lockstep.peerConnected ? 'connected' : 'waiting';
+      const resolved = lockstep.latestResolvedHash();
+      const hashLine = resolved === null
+        ? 'hash pending'
+        : `hash@${resolved.tick} ${resolved.status}`;
+      const delayMs = lockstepLoop.inputDelay * (1000 / TICK_HZ);
+      lines.push(`peer ${peer}  ${hashLine}  delay ${lockstepLoop.inputDelay}t (${delayMs.toFixed(0)} ms)`);
+      if (desync !== null) {
+        lines.push(`DESYNC tick ${desync.tick}`);
+        lines.push(`  local  ${desync.localHash}`);
+        lines.push(`  remote ${desync.remoteHash}`);
+      }
+    } else if (observerChannel !== null) {
+      const presence = observerChannel.bothFactionsSeen ? 'both factions live' : 'waiting for players';
+      lines.push(`observer · ${presence}`);
+    }
 
-    if (s.winner !== null) matchEnd.show(PLAYER_FACTION, s.winner);
+    hud.textContent = lines.join('\n');
+
+    const selection = input?.getSelectedUnitIds() ?? EMPTY_SELECTION;
+    panel?.refresh(match.sim, selection);
+    renderer.applyInputVisuals(selection);
+
+    if (s.winner !== null) matchEnd.show(playerFaction, s.winner);
   }
   requestAnimationFrame(tickHud);
 
@@ -113,6 +440,24 @@ function bootstrap(): void {
     resizeCanvas();
     scene.resize(window.innerWidth, window.innerHeight);
   });
+
+  // Press R during play to save the current input log as a replay.
+  // Useful for capturing bug-report material before a match ends; the
+  // saved JSON round-trips through tools/replay.ts to the same final
+  // hash. Phase 2.4 deliverable.
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'r' && e.key !== 'R') return;
+    if (e.target instanceof HTMLInputElement) return;
+    triggerDownloadReplay();
+  });
+
+  // Tear down the WebRTC transport on tab-close — without this, peers
+  // see a half-open RTCPeerConnection until network timeout and the
+  // signaling server doesn't get a clean close on its WS.
+  window.addEventListener('beforeunload', () => {
+    cameraController.detach();
+    webrtc?.close();
+  });
 }
 
-bootstrap();
+void bootstrap();

@@ -162,6 +162,7 @@ describe('Sim — match-end behaviour', () => {
         { x: 14, y: 6, energy: 200 },
       ],
       initialEnergy: 5000,
+      initialColor: 5000, // Phase 3.5: pre-fund colour generously; this fixture isn't testing the lockout
       hqMaxHp: 100,
     });
     const startHpSum = sim.state.factions[0].hqHp + sim.state.factions[1].hqHp;

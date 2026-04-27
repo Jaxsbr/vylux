@@ -129,6 +129,8 @@ The casual player who wants a 5-minute coffee match is **welcome but not optimis
 
 This section is opinionated. It commits to the **shape** of a competitive match — what systems exist, what they do, how they interact. Concrete numbers (HP, damage, costs, gather rates, tick budgets) are deliberately deferred to design docs that come during Phase 1 and 3. What matters here is that the surface is wide enough to support build-order branching, scouting, comebacks, and spectator narrative — and narrow enough that a small team can ship it.
 
+> **Current catalog of what's actually in the game** (units, structures, resources, tech, controls, the launch map): see [`docs/manual.md`](../manual.md). This PRD describes the design intent; the manual describes the current shipped state. They diverge by design — the PRD is forward-looking, the manual is current. When a sub-phase ships a change, the manual updates with it; the PRD updates only when the design intent itself shifts.
+
 The current prototype's "race to 500 points across nodes/kills/HQ damage" is **not** assumed to survive. The shape below is what we are building toward.
 
 ### 6.1 Length & pacing

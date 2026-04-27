@@ -7,8 +7,9 @@ A Tron-inspired isometric real-time strategy game, designed from the ground up t
 Read these in order:
 
 1. **`docs/product/PRD.md`** — vision, pillars, phases 0–5, scope. The product anchor.
-2. **`AGENTS.md`** — current module layout, the determinism contract, what's load-bearing in the code.
-3. **The latest investigation doc** — what's currently being worked on. `docs/investigation/` is numbered chronologically; the highest-numbered open one is the current frontier. Each doc owns scope, sub-phases, exit criteria, decision log, and (after closing) the lessons learned.
+2. **`docs/manual.md`** — the current shipped catalog: units, structures, resources, tech, controls, current map. "What is in the game right now" vs the PRD's "what we're building toward."
+3. **`AGENTS.md`** — current module layout, the determinism contract, what's load-bearing in the code.
+4. **The latest investigation doc** — what's currently being worked on. `docs/investigation/` is numbered chronologically; the highest-numbered open one is the current frontier. Each doc owns scope, sub-phases, exit criteria, decision log, and (after closing) the lessons learned.
 
 The convention: **every PRD phase gets one investigation doc** when it starts. Phase 3+ stays at PRD §8 detail until its phase opens.
 
@@ -19,8 +20,8 @@ The convention: **every PRD phase gets one investigation doc** when it starts. P
 | 0 — Determinism Spike | ✅ Closed | [`docs/investigation/00-determinism-and-netcode.md`](docs/investigation/00-determinism-and-netcode.md) |
 | 0 audit (sub-investigation) | ✅ Closed | [`docs/investigation/01-nondeterminism-audit.md`](docs/investigation/01-nondeterminism-audit.md) |
 | 1 — Sim Rewrite | ✅ Closed | [`docs/investigation/02-phase-1-sim-rewrite.md`](docs/investigation/02-phase-1-sim-rewrite.md) — includes Lessons section |
-| **2 — Multiplayer Alpha** | **▶ Active (next)** | [`docs/investigation/03-phase-2-multiplayer-alpha.md`](docs/investigation/03-phase-2-multiplayer-alpha.md) |
-| 3 — Faction & Map Depth | Future (PRD §8) | n/a until Phase 2 closes |
+| 2 — Multiplayer Alpha | ✅ Architecture closed (2.0–2.5); 2.6 parked pending alpha-launch ops | [`docs/investigation/03-phase-2-multiplayer-alpha.md`](docs/investigation/03-phase-2-multiplayer-alpha.md) |
+| **3 — Faction & Map Depth** | **▶ Active — sub-phases 3.0–3.2 closed; 12-step plan now (player-control, pan/zoom, colour resource, supply, energy dump, fog+scouting, asymmetry, maps-as-data, win cond, balance); 3.3 next** | [`docs/investigation/04-phase-3-faction-and-map-depth.md`](docs/investigation/04-phase-3-faction-and-map-depth.md) |
 | 4 — Steam Early Access | Future (PRD §8) | n/a |
 | 5 — Ladder & Esport Hooks | Future (PRD §8) | n/a |
 
@@ -53,7 +54,14 @@ The dev build is a 1v1 RTS playable mouse-only against the scripted AI on the de
 - Click WORKER / DEFENDER / RAIDER on the buildables panel → unit trains and spawns at the HQ on the next sim tick.
 - Click your own worker → selection ring appears → click a live energy node → that worker walks there to harvest.
 - Esc / right-click clears selection.
-- Match ends on HQ destruction or 100-point threshold; VICTORY/DEFEAT overlay with Play Again.
+- Press **R** to download the current replay as JSON — useful for capturing bug-report material before a match ends. The match-end overlay also has a `DOWNLOAD REPLAY` button.
+- Match ends on HQ destruction or 100-point threshold; VICTORY/DEFEAT overlay with Play Again + Download Replay.
+
+**Two-tab lockstep (Phase 2.0):** open two tabs of the dev server, one at `?lockstep=host` and the other at `?lockstep=join`. Each tab is one faction; AI is off; both tabs run the same merged input stream every tick over a `BroadcastChannel`. HUD shows peer connection + per-tick hash agreement.
+
+**WebRTC lockstep (Phase 2.1):** start the signaling relay (`npm run signaling`), then open one tab at `?lockstep=host&room=ABCDEF` and another at `?lockstep=join&room=ABCDEF` (room codes are 6 chars from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`). The two clients exchange SDP + ICE through the relay and play peer-to-peer over the WebRTC datachannel. Override the relay URL with `?signaling=ws://...` or set `VITE_SIGNALING_URL` at build time.
+
+**Observer prototype (Phase 2.5):** open a third tab at `?lockstep=observe` while two players are running on `?lockstep=host` / `?lockstep=join`. The observer joins the same `BroadcastChannel`, listens for player frames, and runs the sim read-only. Network observer over WebRTC is a follow-up.
 
 Replays exist (`src/sim/replay.ts`) and can be played headless via `npx vite-node tools/replay.ts <replay.json>`.
 
