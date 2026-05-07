@@ -139,8 +139,15 @@ export const AI_VS_AI_SPEC: InitialMatchSpec = {
     { x: 10, y: 10, energy: 200 },
     { x: 6, y: 14, energy: 200 },
     { x: 14, y: 6, energy: 200 },
+    // Phase 3.5: a colour node per faction. Without these the AI
+    // can't build past its initialColor pre-fund and the determinism
+    // gate degenerates into "no AI activity for 3000 ticks." Placed
+    // near each HQ for an easy harvest cycle.
+    { x: 5, y: 5, energy: 100, kind: 'blue' },
+    { x: 15, y: 15, energy: 100, kind: 'red' },
   ],
   initialEnergy: 100,
+  initialColor: 100,
 };
 
 // AI-driven match: both factions get their commands generated from

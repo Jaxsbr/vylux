@@ -1,12 +1,26 @@
 import * as THREE from 'three';
 
+// Phase 3.4 bumped gridSize from 20 to 32. The map is bigger to make
+// room for the catalog still landing in 3.5+ (faction-locked colour
+// nodes, Pylons, more contested zones). worldExtent is derived from
+// gridSize * tileSize so the divider math + tile-to-world projection
+// stay consistent if the constant moves again.
+const GRID_SIZE = 32;
+const TILE_SIZE = 1;
+
 export const GRID_CONSTANTS = {
-  gridSize: 20,
-  tileSize: 1,
-  worldExtent: 20,
+  gridSize: GRID_SIZE,
+  tileSize: TILE_SIZE,
+  worldExtent: GRID_SIZE * TILE_SIZE,
   dividerWidth: 0.02,
+  // Phase 3.9.4: bumped from 0.4 → 1.2 so the grid reads as actual
+  // neon under good lighting. The fog overlay paints a dark layer
+  // *over* this bright grid in unexplored regions; without a bright
+  // base there is nothing for the fog to obscure (the v1 fog failed
+  // here — the grid was already near-black, and adding more darkness
+  // had no visible effect).
   dividerEmissive: 0x555555,
-  dividerEmissiveIntensity: 0.4,
+  dividerEmissiveIntensity: 1.2,
   tileColor: 0x0a0a0a,
   tileY: 0,
   dividerY: 0.02,

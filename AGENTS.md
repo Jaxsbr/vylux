@@ -2,7 +2,21 @@
 
 ## Purpose
 
-A Tron-inspired isometric real-time strategy game, designed from the ground up to be **deterministic, replayable, and competitively spectated**. See `docs/product/PRD.md` for the product direction; this file describes how the code is laid out.
+A Tron-inspired isometric real-time strategy game, designed from the ground up to be **deterministic, replayable, and competitively spectated**. See `docs/product/PRD.md` for the product direction; this file describes how the code is laid out. For the current in-game catalog (units, structures, resources, tech, controls), see `docs/manual.md`.
+
+## Documentation contract
+
+`docs/manual.md` is the canonical "what is in the game right now" reference. It MUST be updated as part of any change that adds, removes, or re-tunes:
+
+- a unit (`UnitKind`) — stats, cost, train time, role
+- a structure (`StructureKind`) — HP, cost, build time, what it produces / hosts
+- a resource (`ResourceKind`) — where it's gathered, what it's spent on
+- a tech / research — cost, time, structure that hosts it, effect
+- a victory or loss condition
+- the controls (mouse / keyboard / panel)
+- the launch map(s)
+
+The investigation-doc closing checklist for any sub-phase that touches the catalog must include "manual updated." If `docs/manual.md` disagrees with `src/sim/units-config.ts` or any other code source-of-truth, the code wins — patch the doc, don't paper over the divergence.
 
 ## Stack
 
@@ -72,9 +86,26 @@ Same gate the CI determinism workflow runs (`.github/workflows/determinism.yml`)
 | `sim-driver.ts`   | Fixed-tick driver. `requestAnimationFrame` for both sim catch-up and rendering, capped at `MAX_STEPS_PER_FRAME=5` to prevent spiral-of-death after long pauses. Sim-frontend-agnostic — takes a `commandsForTick` callback. |
 | `player-input.ts` | `PlayerInput` (buildables panel, queues `TrainUnit` commands on click, refreshes affordability from sim each frame) + `MatchEndOverlay` (VICTORY/DEFEAT screen; Play Again reloads the page). |
 
+### `src/net/` — multiplayer transport
+
+| File                    | Role |
+| ----------------------- | ---- |
+| `lockstep-channel.ts`   | Typed lockstep transport. Three message kinds — `hello`, `frame` (per-tick per-faction commands), `hash` (per-tick `stateHash()` for cross-peer desync detection). Sits on top of any `BroadcastChannelLike` — `BroadcastChannel` for the same-machine determinism gate (Phase 2.0), `WebRtcTransport` for peer-to-peer (Phase 2.1+). **Canonical merge order is load-bearing**: `tryConsumeOrderedFrame` always returns `[faction0, faction1]` because `applyCommand` mutates `state.nextEntityId` in apply order — any divergence here desyncs by tick 1. |
+| `lockstep-loop.ts`      | `LockstepLoop` class — owns the per-tick orchestration with input delay (default 6 ticks = 300 ms at 20 Hz, per Phase 2.2). Pre-seeds empty frames for ticks 0..D-1 on first `next()`, schedules local commands for tick `T+D`, submits hash for `T-1`, consumes merged frame for `T`. Used by both `BroadcastChannel` and WebRTC modes — single code path. |
+| `observer-channel.ts`   | `ObserverChannel` — receive-only sibling of `LockstepChannel` for the Phase 2.5 observer role. Listens on any `BroadcastChannelLike`, accumulates `frame` messages by `(tick, faction)`, exposes `tryConsumeMergedFrame` in canonical order. No hello, no hash, no local faction. |
+| `observer-loop.ts`      | `ObserverLoop` — drives the read-only sim from `ObserverChannel`. No input delay (the player-side delay is already baked into the relayed frames). |
+| `signaling-protocol.ts` | Wire types shared between the signaling server and the WebRTC client. Confusable-free 6-character room code alphabet (`ABCDEFGHJKMNPQRSTUVWXYZ23456789` — no I/L/O/0/1) and `isValidRoomCode` validator. |
+| `signaling-server.ts`   | `ws`-based WebSocket server. Pairs two clients by room code, blindly relays SDP + ICE. Goes dormant once the datachannel is up. Standalone Node.js process; not imported by anything in `src/main.ts`, so it stays out of the client bundle. |
+| `webrtc-transport.ts`   | Client-side adapter. Wraps `RTCPeerConnection` + `RTCDataChannel`, speaks the signaling protocol over a WebSocket, implements `BroadcastChannelLike` so `LockstepChannel` is reused unchanged. Host creates the datachannel before the offer; trickle ICE both ways; outbound queue drains on datachannel-open. |
+
 ### `src/main.ts` — orchestration
 
-Wires `Sim` → `Match` → `SimRenderer` → `startSimDriver`, plus `PlayerInput` (faction 0) and `tickAi` (faction 1). HUD overlay shows tick / winner / per-faction HP / points / energy / unit count / dropped sim steps.
+Three run modes selected from URL params:
+- default: PvAI. Player is faction 0 (cyan), AI controls faction 1.
+- `?lockstep=host` / `?lockstep=join` (no room): same-machine two-tab lockstep over `BroadcastChannel`. Local determinism gate.
+- `?lockstep=host&room=ABCDEF` / `?lockstep=join&room=ABCDEF`: peer-to-peer lockstep over WebRTC datachannel via the signaling server. Substrate-only swap; `LockstepChannel` is unchanged.
+
+Wires `Sim` → `Match` → `SimRenderer` → `startSimDriver`, plus `PlayerInput` and `tickAi` (PvAI) or `LockstepChannel` (lockstep). For WebRTC mode, `WebRtcTransport.connect()` is awaited before the scene is built and a "connecting · room ABCDEF" overlay is shown until the datachannel opens. HUD overlay shows tick / winner / per-faction HP / points / energy / unit count / dropped sim steps; in lockstep mode it also shows peer connection + the latest *resolved* per-tick hash status (BroadcastChannel + WebRTC delivery are both async, so the most-recent tick is almost always still "pending" at render time).
 
 ### `src/grid.ts` — shared
 
@@ -90,6 +121,7 @@ This is the single most load-bearing property of the codebase (PRD §3.1):
 - **Fixed-point integer math** for any value that affects state. Floats are renderer-only.
 - **Stable iteration**: arrays indexed by ID, tombstones (`alive=false`) on removal so live indices don't shift.
 - **State hash** (`Sim.stateHash`) defines the canonical serialisation. Changing it invalidates all replays and golden fixtures.
+- **`CommandKind` IDs are append-only — never reuse a slot, even after removal.** Each value in the `CommandKind` const enum corresponds to a wire-format byte; a v3 replay that contains `kind: 6` (the deprecated 3.1 `ResearchTier2`) must continue to parse without crashing under v4 even though no current command interface uses that slot. Removing a command means dropping its interface from the union and leaving the enum value behind as a reserved/dead slot — see `src/sim/commands.ts` header for the rule, and `ResearchTier2 = 6` for the worked example. Adding a command means picking the next unused number; never recycle.
 
 The `tests/determinism/` directory contains committed golden hash sequences for four scripted matches (200-tick + 12,000-tick harvest, 1500-tick combat, 3000-tick AI-vs-AI). The CI workflow runs the same `npm test` on Linux + macOS + Windows; if any platform's V8 produces a different hash than the committed fixture, the workflow fails with the first divergent tick visible in the diff.
 
@@ -103,12 +135,22 @@ RECORD_GOLDEN=1 npm test
 
 ## Tools
 
-| Path                 | Role |
-| -------------------- | ---- |
-| `tools/replay.ts`    | Headless replay runner. `npx vite-node tools/replay.ts <replay.json> [--hashes-out <file>]` plays a recorded match deterministically and prints final tick / winner / hash. The optional flag dumps the per-tick hash stream as JSON for cross-OS comparison via `diff`. |
+| Path                          | Role |
+| ----------------------------- | ---- |
+| `tools/replay.ts`             | Headless replay runner. `npx vite-node tools/replay.ts <replay.json> [--hashes-out <file>]` plays a recorded match deterministically and prints final tick / winner / hash. The optional flag dumps the per-tick hash stream as JSON for cross-OS comparison via `diff`. |
+| `tools/signaling-server.ts`   | Standalone WebSocket signaling server for Phase 2.1+ multiplayer. `npm run signaling` (default port 5182). PORT/HOST env override. Deployable as-is to any Node.js host (Render / Fly / Railway). |
 
 ## Quality checks
 
 - `src/source-scan.test.ts` — scans every `catch (` block for `throw` or `console.error` to catch silent-pass error handling. Generic across the whole `src/` tree.
+- `src/net/lockstep-channel.test.ts` — Phase 2.0 same-state gate: drives two `Match` instances over paired in-process channels for 600 ticks of AI play; per-tick hashes must agree on every tick.
+- `src/net/lockstep-loop.test.ts` — Phase 2.2 input-delay gate: same paired-sims setup but driven through `LockstepLoop` at the production `INPUT_DELAY_TICKS = 6`; pre-seed warm-up + 600-tick hash agreement.
+- `src/net/signaling-server.test.ts` — Phase 2.1 signaling-relay gate: real `ws` clients pair, exchange opaque signal payloads, and observe peer-left on disconnect.
+- `tests/e2e/lockstep.spec.ts` — browser form of the 2.0 gate: two tabs at `?lockstep=host` / `?lockstep=join` reach matching hashes via `BroadcastChannel`.
+- `tests/e2e/lockstep-webrtc.spec.ts` — browser form of the 2.1 gate: two tabs negotiate WebRTC through the local signaling server and reach matching hashes via the datachannel on loopback.
+- `tests/e2e/lockstep-desync.spec.ts` — Phase 2.3 gate: one tab corrupted via `?desync-test=N` causes the desync overlay to surface on both tabs within ~1 s of the divergent tick.
+- `tests/e2e/lockstep-replay.spec.ts` — Phase 2.4 gate: replay saved mid-match via R key round-trips through `playReplay()` to the same final hash.
+- `src/net/observer-channel.test.ts` — Phase 2.5 three-sim gate: host + join + observer reach identical per-tick hashes for 600 ticks.
+- `tests/e2e/lockstep-observer.spec.ts` — Phase 2.5 browser gate: three tabs (`?lockstep=host`, `=join`, `=observe`), observer's HUD reports `both factions live` and ticks within ~5 of the players.
 - `tsc --noEmit` with `strict`, `noUnusedParameters`, `noUnusedLocals`, `noImplicitReturns`, `noFallthroughCasesInSwitch`.
 - Cross-OS determinism workflow on every push.

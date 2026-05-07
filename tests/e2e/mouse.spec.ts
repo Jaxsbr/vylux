@@ -10,13 +10,18 @@ test('clicking WORKER trains a worker (spawns at HQ)', async ({ page }) => {
   });
   page.on('pageerror', (err) => consoleErrors.push(err.message));
 
-  await page.goto('/');
+  // Phase 3.10: action bar is selection-driven; the WORKER button only
+  // appears once the HQ is selected. ?test-hooks=1 exposes a window
+  // helper that does that programmatically (see main.ts).
+  await page.goto('/?menu=skip&test-hooks=1');
   await page.waitForTimeout(500);
 
   const beforeText = await page.locator('div').filter({ hasText: /vylux ·/ }).textContent();
   const beforeUnits = parseInt(beforeText!.match(/units (\d+)/)![1], 10);
   const beforeEnergy = parseInt(beforeText!.match(/you  hp \d+ {2}pts \d+ {2}e (\d+)/)![1], 10);
 
+  await page.evaluate(() => (window as unknown as { __vyluxTest: { selectHq(): void } }).__vyluxTest.selectHq());
+  await page.waitForTimeout(50);
   await page.getByRole('button', { name: /worker/i }).click();
 
   // 400ms = 8 sim ticks at 20 Hz. The TrainUnit command queues for the

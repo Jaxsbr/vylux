@@ -14,7 +14,7 @@ test('AI-vs-AI match runs, ticks advance, units appear', async ({ page }) => {
   });
   page.on('pageerror', (err) => consoleErrors.push(err.message));
 
-  await page.goto('/');
+  await page.goto('/?menu=skip');
 
   const canvas = page.locator('#canvas');
   await expect(canvas).toBeVisible();

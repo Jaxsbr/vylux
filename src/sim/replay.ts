@@ -26,7 +26,50 @@ import { Sim } from './sim';
 import type { Faction } from './types';
 import type { InitialMatchSpec } from './state';
 
-export const REPLAY_VERSION = 1;
+// Phase 3.0 bumped to v2: structures exist as first-class entities.
+// Phase 3.1 bumped to v3: state shape adds `flux` + `tier2Researched`
+// per faction, `kind` per node, and `carriedKind` per worker.
+// Phase 3.2 bumps to v4: Structure union expands to include
+// UpgradeStructure (with researchTicksRemaining); UnitKind adds
+// 'vanguard'; commands gain ResearchTier2AtStructure (slot 7) while
+// the deprecated standalone ResearchTier2 (slot 6) is retained as a
+// reserved enum value per the never-reuse-IDs rule.
+// Phase 3.3 bumps to v5: every Unit gains a nullable moveTarget on the
+// base; commands gain MoveUnit (slot 8). Hash format extends each
+// unit slot by a presence flag + 2 Fixed coords.
+// Phase 3.5 bumps to v6: ResourceKind extends with 'blue' + 'red';
+// FactionState gains `color`; ResourceNode gains `regenPerTick` +
+// `maxReserve`. Every cost path (TrainUnit, BuildStructure,
+// TrainAtStructure, ResearchTier2AtStructure) deducts colour. New
+// step-loop pass for passive node regen.
+// Phase 3.6 bumps to v7: supply system. FactionState gains `supplyCap` +
+// `supplyUsed`; UnitStats gains `supplyCost`; new StructureKind
+// 'supply' (Pylon) with its own STRUCTURE_STATS row. TrainUnit +
+// TrainAtStructure reserve supply at queue time; applyDamage
+// decrements on death; recomputeSupplyCaps end-of-step pass derives
+// the cap from the count of operational Pylons.
+// Phase 3.7 bumps to v8: worker energy dump + trails. New Trail entity
+// kind on SimState.trails; Worker gains dumpTicksRemaining +
+// dumpCooldownTicks + activeTrailId; FactionState gains
+// trailDurationResearched; UpgradeStructure gains researchKind
+// discriminator (tier2 / trailDuration / null). Two new commands —
+// ActivateEnergyDump (slot 9) + ResearchTrailDurationAtStructure
+// (slot 10). Two new step passes — trailKillSweep + advanceTrails.
+// Phase 3.8 bumps to v9: fog of war + node discovery. ResourceNode
+// gains a per-faction discoveredBy flag (permanent); UnitStats +
+// StructureStats gain visionRadius. New step pass advanceDiscovery
+// + initial-HQ discovery sweep at createInitialState. Renderer
+// filters mesh visibility per playerFaction (presentation-only;
+// the sim still hashes the canonical full state).
+// Phase 3.10.4–3.10.6 bumps to v10. FactionState gains
+// `nextSpawnRotation` (round-robin index for HQ-perimeter spawn);
+// Worker gains `targetStructureId` + a new 'building' phase; new
+// commands BuildStructureByWorker (slot 11) + AssignWorkerToBuild
+// (slot 12). Structures no longer auto-tick build phase — only ticks
+// down while ≥1 worker is on site. Workers now stop at the HQ
+// perimeter to deposit (HQ_DEPOSIT_REACH_SQ wider than the old
+// WORKER_REACH_SQ).
+export const REPLAY_VERSION = 10;
 
 export interface ReplayLog {
   version: number;

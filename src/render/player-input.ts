@@ -1,104 +1,109 @@
-// Buildables panel + match-end overlay.
+// Phase 2.3 desync overlay + Phase 2.4 match-end overlay.
 //
-// Clicking a button no longer queues a TrainUnit command directly.
-// Instead it enters placement mode on the input controller; the player
-// then clicks a tile to actually spawn the unit there. This is what
-// PRD §3.8 mechanical-mastery calls "no hidden APM tax" — the click is
-// the action that matters, not a deferred consequence.
+// Phase 3.10 dropped the BuildablesPanel — the in-game action bar
+// moved to src/render/action-bar.ts (selection-driven; see that file).
+// Only the two terminal overlays live here now.
 
-import type { Faction, UnitKind } from '../sim/types';
-import { UNIT_STATS } from '../sim/units-config';
-import type { Sim } from '../sim/sim';
+import type { Faction } from '../sim/types';
 
-export interface BuildablesPanelDelegate {
-  // Called when the player clicks a unit-kind button.
-  onTrainKindSelected(kind: UnitKind): void;
-}
+// Desync overlay. Shown when the lockstep hash gate fires onDesync —
+// i.e. our `stateHash()` for some tick T differs from the peer's. By
+// the Phase 2.3 contract, recovery = "show error and quit": we don't
+// try to roll back or recompute, we surface the divergent tick + both
+// hashes loudly, dump the input log so the bug is reportable, and end
+// the match.
+//
+// Caller is expected to halt the driver before calling show() so the
+// sim doesn't keep ticking on a known-corrupt state.
+export class DesyncOverlay {
+  private readonly el: HTMLDivElement;
+  private shown = false;
+  private readonly downloadReplay: () => void;
 
-export class BuildablesPanel {
-  private readonly faction: Faction;
-  private readonly delegate: BuildablesPanelDelegate;
-  private readonly panel: HTMLDivElement;
-  private readonly buttons = new Map<UnitKind, HTMLButtonElement>();
-
-  constructor(faction: Faction, delegate: BuildablesPanelDelegate, root: HTMLElement) {
-    this.faction = faction;
-    this.delegate = delegate;
-    this.panel = this.buildPanel();
-    root.appendChild(this.panel);
-  }
-
-  // Reflect current affordability on the buttons (greys out unaffordable
-  // options). Called from the render loop, cheap enough to run every frame.
-  refresh(sim: Sim): void {
-    const energy = sim.state.factions[this.faction].energy;
-    for (const [kind, btn] of this.buttons) {
-      const cost = UNIT_STATS[kind].trainCost;
-      const affordable = energy >= cost;
-      btn.disabled = !affordable;
-      btn.style.opacity = affordable ? '1' : '0.45';
-      btn.style.cursor = affordable ? 'pointer' : 'not-allowed';
-    }
-  }
-
-  destroy(): void {
-    this.panel.remove();
-  }
-
-  private buildPanel(): HTMLDivElement {
-    const panel = document.createElement('div');
-    panel.style.cssText = [
-      'position:fixed', 'left:50%', 'bottom:18px', 'transform:translateX(-50%)',
-      'display:flex', 'gap:8px',
-      'background:rgba(7,9,12,0.85)', 'border:1px solid #234',
-      'padding:8px', 'border-radius:6px',
-      'font-family:ui-monospace,Menlo,monospace', 'color:#9ad', 'font-size:12px',
-      'user-select:none',
+  constructor(root: HTMLElement, downloadReplay: () => void) {
+    this.downloadReplay = downloadReplay;
+    this.el = document.createElement('div');
+    this.el.style.cssText = [
+      'position:fixed', 'inset:0', 'display:none',
+      'align-items:center', 'justify-content:center',
+      'flex-direction:column', 'gap:18px',
+      'background:rgba(20,4,8,0.92)', 'z-index:11',
+      'font-family:ui-monospace,Menlo,monospace',
+      'color:#cde', 'text-align:center', 'padding:32px',
     ].join(';');
-
-    const kinds: UnitKind[] = ['worker', 'defender', 'raider'];
-    for (const kind of kinds) {
-      const btn = this.buildButton(kind);
-      panel.appendChild(btn);
-      this.buttons.set(kind, btn);
-    }
-    return panel;
+    root.appendChild(this.el);
   }
 
-  private buildButton(kind: UnitKind): HTMLButtonElement {
+  show(report: { tick: number; localHash: string; remoteHash: string }): void {
+    if (this.shown) return;
+    this.shown = true;
+    this.el.innerHTML = '';
+
+    const heading = document.createElement('div');
+    heading.textContent = 'DESYNC DETECTED';
+    heading.style.cssText = [
+      'font-size:48px', 'letter-spacing:0.18em', 'font-weight:700',
+      'color:#ff6a33', 'text-shadow:0 0 24px #ff6a33',
+    ].join(';');
+    this.el.appendChild(heading);
+
+    const tickLine = document.createElement('div');
+    tickLine.textContent = `divergent at tick ${report.tick}`;
+    tickLine.style.cssText = 'font-size:14px;letter-spacing:0.16em;color:#ff9a66';
+    this.el.appendChild(tickLine);
+
+    const hashes = document.createElement('div');
+    hashes.style.cssText = 'font-size:12px;line-height:1.7;color:#9ad;white-space:pre';
+    hashes.textContent = [
+      `local  ${report.localHash}`,
+      `remote ${report.remoteHash}`,
+    ].join('\n');
+    this.el.appendChild(hashes);
+
+    const note = document.createElement('div');
+    note.textContent = 'this is a sim bug — please attach the replay to a report';
+    note.style.cssText = 'font-size:11px;color:#7a8;letter-spacing:0.04em;max-width:520px';
+    this.el.appendChild(note);
+
+    const buttonRow = document.createElement('div');
+    buttonRow.style.cssText = 'display:flex;gap:12px;margin-top:6px';
+    buttonRow.appendChild(this.button('DOWNLOAD REPLAY', () => this.downloadReplay()));
+    buttonRow.appendChild(this.button('RELOAD', () => window.location.reload()));
+    this.el.appendChild(buttonRow);
+
+    this.el.style.display = 'flex';
+  }
+
+  // Test hook: surfaces visibility without exposing the DOM element directly.
+  isShown(): boolean { return this.shown; }
+
+  private button(label: string, onClick: () => void): HTMLButtonElement {
     const btn = document.createElement('button');
-    const cost = UNIT_STATS[kind].trainCost / 65536;
+    btn.textContent = label;
     btn.style.cssText = [
-      'padding:8px 14px',
-      'background:#0e1218', 'color:#cde',
-      'border:1px solid #345', 'border-radius:4px',
-      'font-family:inherit', 'font-size:11px',
-      'cursor:pointer', 'min-width:90px',
+      'padding:12px 24px', 'background:transparent', 'color:#cde',
+      'border:1px solid #654', 'border-radius:4px',
+      'font-family:inherit', 'font-size:12px', 'letter-spacing:0.2em',
+      'cursor:pointer',
     ].join(';');
-    btn.innerHTML = [
-      `<div style="font-weight:600;text-transform:uppercase;color:${factionColorCss(this.faction)}">${kind}</div>`,
-      `<div style="font-size:10px;opacity:0.75;margin-top:2px">${cost.toFixed(0)} energy</div>`,
-    ].join('');
-    btn.addEventListener('click', () => {
-      if (btn.disabled) return;
-      this.delegate.onTrainKindSelected(kind);
-    });
+    btn.addEventListener('click', onClick);
     return btn;
   }
 }
 
-function factionColorCss(faction: Faction): string {
-  return faction === 0 ? '#00e5ff' : '#ff6a33';
-}
-
 // Match-end overlay. Shown when sim.state.winner !== null. The Play
 // Again button reloads the page — the simplest correct reset given
-// the small surface area.
+// the small surface area. The Download Replay button (Phase 2.4) saves
+// the input log as JSON, which round-trips through tools/replay.ts —
+// the format `version: 1` was locked in Phase 1.3 and has been the same
+// shape end-to-end since then.
 export class MatchEndOverlay {
   private readonly el: HTMLDivElement;
+  private readonly downloadReplay: () => void;
   private shown = false;
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, downloadReplay: () => void) {
+    this.downloadReplay = downloadReplay;
     this.el = document.createElement('div');
     this.el.style.cssText = [
       'position:fixed', 'inset:0', 'display:none',
@@ -125,17 +130,28 @@ export class MatchEndOverlay {
     ].join(';');
     this.el.appendChild(heading);
 
+    const buttonRow = document.createElement('div');
+    buttonRow.style.cssText = 'display:flex;gap:12px';
+    buttonRow.appendChild(this.button('DOWNLOAD REPLAY', () => this.downloadReplay()));
+    buttonRow.appendChild(this.button('PLAY AGAIN', () => window.location.reload()));
+    this.el.appendChild(buttonRow);
+
+    this.el.style.display = 'flex';
+  }
+
+  // Test hook to surface visibility without exposing the DOM element.
+  isShown(): boolean { return this.shown; }
+
+  private button(label: string, onClick: () => void): HTMLButtonElement {
     const btn = document.createElement('button');
-    btn.textContent = 'PLAY AGAIN';
+    btn.textContent = label;
     btn.style.cssText = [
       'padding:12px 28px', 'background:transparent', 'color:#cde',
       'border:1px solid #456', 'border-radius:4px',
       'font-family:inherit', 'font-size:13px', 'letter-spacing:0.2em',
       'cursor:pointer',
     ].join(';');
-    btn.addEventListener('click', () => window.location.reload());
-    this.el.appendChild(btn);
-
-    this.el.style.display = 'flex';
+    btn.addEventListener('click', onClick);
+    return btn;
   }
 }
