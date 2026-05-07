@@ -26,8 +26,10 @@ test('two-tab lockstep host + join reach matching hashes and run a match', async
   host.on('pageerror', (err) => consoleErrors.push(`host: ${err.message}`));
   join.on('pageerror', (err) => consoleErrors.push(`join: ${err.message}`));
 
-  await host.goto('/?lockstep=host');
-  await join.goto('/?lockstep=join');
+  // Phase 3.10.9: ?debug=1 enables the legacy text HUD the assertions
+  // scrape (the player-facing HUD is now DOM cards, not parseable text).
+  await host.goto('/?lockstep=host&debug=1');
+  await join.goto('/?lockstep=join&debug=1');
 
   await expect(host.locator('#canvas')).toBeVisible();
   await expect(join.locator('#canvas')).toBeVisible();

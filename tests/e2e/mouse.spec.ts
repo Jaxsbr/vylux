@@ -13,7 +13,11 @@ test('clicking WORKER trains a worker (spawns at HQ)', async ({ page }) => {
   // Phase 3.10: action bar is selection-driven; the WORKER button only
   // appears once the HQ is selected. ?test-hooks=1 exposes a window
   // helper that does that programmatically (see main.ts).
-  await page.goto('/?menu=skip&test-hooks=1');
+  // Phase 3.10.9: ?debug=1 enables the legacy text HUD this test
+  // scrapes (the new player-facing HUD is DOM cards, not parseable
+  // text). The debug panel carries the same dense "units N / you hp X
+  // e Y" format the player-facing HUD used to expose by default.
+  await page.goto('/?menu=skip&test-hooks=1&debug=1');
   await page.waitForTimeout(500);
 
   const beforeText = await page.locator('div').filter({ hasText: /vylux ·/ }).textContent();

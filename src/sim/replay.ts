@@ -76,7 +76,15 @@ import type { InitialMatchSpec } from './state';
 // 3.13 lands wave-survival + scenario-objective + boss conditions.
 // Hash-shape: one fewer i32 per faction (the slot between hqHp and
 // supplyCap is gone).
-export const REPLAY_VERSION = 11;
+// Phase 3.10.9 bumps to v12 (game-feel pass v2). New step pass
+// `applyUnitSeparation` between unit advancement and the trail kill
+// sweep — pairwise sqrt-free push-back so stacked units visibly
+// separate. Sim STATE shape is unchanged (positions are already in
+// the hash) but step SEMANTICS move: movable-unit positions now
+// reflect both the move intent and the resolved overlap. Existing v11
+// replays still parse but no longer validate against the new sim;
+// golden fixtures regenerated.
+export const REPLAY_VERSION = 12;
 
 export interface ReplayLog {
   version: number;

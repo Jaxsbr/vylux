@@ -93,6 +93,55 @@ export const HQ_DEPOSIT_REACH_SQ: Fixed = rangeSq(fromFloat(2.0));
 // count as "on site" and contribute to construction progress.
 export const BUILD_REACH_SQ: Fixed = rangeSq(fromFloat(1.2));
 
+// Phase 3.10.9: per-unit soft-collision radius (tiles). Pairs of units
+// whose axis-aligned bounding boxes overlap get a GENTLE per-tick
+// push apart with a small RNG perturbation — sqrt-free, deterministic.
+//
+// Design goals after the first-cut feedback ("too weak / jittery" then
+// "too strong / non-functional"):
+//   - workers can get close (touch) but not visibly stack on top of
+//     each other;
+//   - the push doesn't fight a unit's target movement so hard that the
+//     unit can't reach a node (the previous "snap to bounding-box
+//     edge in one tick" pass blocked workers from converging at a
+//     harvest target);
+//   - over multiple ticks, the gentle push + the sim-RNG perturbation
+//     naturally spreads a cluster (e.g. workers at a node) without a
+//     visible jitter loop;
+//   - workers are also given a wider harvest reach (HARVEST_AT_NODE_RADIUS
+//     below) so a node in a small cluster of workers harvests from any
+//     of them — the player isn't punished for collision-induced offset.
+//
+// Push amount per tick: 1/4 of the per-axis overlap each (when both
+// movable). Over ~4 ticks of overlap, the pair drifts apart to the
+// bounding-box edge; well within the 100 ms of perceptible motion that
+// matters visually, but soft enough that converging movement isn't
+// fully blocked.
+//
+// Workers actively dumping (Phase 3.7 energy dump) skip collision —
+// they're a fast tactical dash and the dump's whole point is that they
+// punch through enemy units.
+export const UNIT_COLLISION_RADIUS: Fixed = fromFloat(0.20);
+const UNIT_COLLISION_DIAMETER: Fixed = fromFloat(0.40);
+// Per-tick fraction of the per-axis overlap each unit absorbs. Q16.16
+// so we can right-shift in the multiply to stay deterministic. 1/4 ≈
+// 16384 in Q16.16; we apply via `(overlap * 16384) >> 16`.
+const PUSH_SHARE_NUM = 16384;
+// Maximum RNG perturbation applied to each axis push (Q16.16 tiles).
+// 0.04 tiles ≈ 1/8 of a unit radius — enough to break perfect symmetry
+// in the diagonal-stack case so units drift apart over multiple ticks
+// rather than oscillating.
+const PUSH_RNG_RANGE: Fixed = fromFloat(0.04);
+
+// Phase 3.10.9 — widened harvest-arrival radius so workers cluster
+// naturally around a node instead of all trying to occupy its centre.
+// The original WORKER_REACH_SQ (0.06²) is preserved as the snap-to-
+// node "I'm exactly here" check; this looser radius is the
+// "close-enough-to-start-harvesting" gate, picked so a worker pushed
+// to the bounding-box edge of a stack at the node still triggers the
+// harvest transition.
+export const HARVEST_AT_NODE_REACH_SQ: Fixed = rangeSq(fromFloat(0.55));
+
 // Win conditions: HQ destruction only (post-2026-05-07 PvE pivot).
 // The previous POINTS_PER_KILL / POINTS_PER_HQ_HIT / WIN_POINTS
 // constants and the per-faction `points` field have been removed —
@@ -649,7 +698,13 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
       const nextPos = moveTowards(w.x, w.y, node.x, node.y, speed);
       w.x = nextPos.x;
       w.y = nextPos.y;
-      if (distSq(w.x, w.y, node.x, node.y) <= WORKER_REACH_SQ) {
+      // Phase 3.10.9: workers transition to harvesting from the wider
+      // HARVEST_AT_NODE_REACH_SQ so a worker bounced off the node centre
+      // by the soft-collision pass still grabs the harvest. The narrow
+      // WORKER_REACH_SQ (0.06²) is reserved for the post-deposit
+      // movement target snap so a parked worker still has a bit-stable
+      // integer-tile position.
+      if (distSq(w.x, w.y, node.x, node.y) <= HARVEST_AT_NODE_REACH_SQ) {
         w.phase = 'harvesting';
         w.harvestTicksRemaining = HARVEST_TICKS;
       }
@@ -981,12 +1036,23 @@ export function step(state: SimState, rng: Rng, frame: InputFrame): void {
       advanceUnit(state, state.units[i]);
     }
 
+    // 2.5 Phase 3.10.9: pairwise gentle separation with RNG
+    //     perturbation. Resolves visual stacking — two workers
+    //     sharing a fractional position were previously invisible.
+    //     Each tick pushes each overlapping pair apart by ~1/4 of the
+    //     overlap on both axes; the cluster spreads to the bounding-
+    //     box edge over a few ticks. Sqrt-free, deterministic, axis-
+    //     aligned. Runs AFTER advanceUnit so the end-of-tick canonical
+    //     position reflects both the move intent and the resolved
+    //     overlap.
+    applyUnitSeparation(state, rng);
+
     // 3. Phase 3.7: trail collision sweep. Runs after unit movement
-    //    but BEFORE the trails-age pass, so a freshly-laid segment
-    //    (age=0) gets one chance to kill before any aging, and an
-    //    old-but-still-live segment kills on the same tick it'd
-    //    expire. Order matters for "which segments are lethal this
-    //    tick"; pinned here so the hash is reproducible.
+    //    + separation but BEFORE the trails-age pass, so a freshly-
+    //    laid segment (age=0) gets one chance to kill before any
+    //    aging, and an old-but-still-live segment kills on the same
+    //    tick it'd expire. Order matters for "which segments are
+    //    lethal this tick"; pinned here so the hash is reproducible.
     trailKillSweep(state);
     advanceTrails(state);
 
@@ -1170,6 +1236,118 @@ function recomputeSupplyCaps(state: SimState): void {
   }
   state.factions[0].supplyCap = SUPPLY_CAP_INITIAL + bonus0;
   state.factions[1].supplyCap = SUPPLY_CAP_INITIAL + bonus1;
+}
+
+// Phase 3.10.9 — pairwise gentle separation with RNG perturbation.
+// Resolves units visibly stacking on top of each other without
+// fighting their target movement so hard that they can't reach a
+// destination.
+//
+// Per tick, each overlapping pair gets pushed apart on BOTH axes by
+// a small fraction (~1/4) of the per-axis overlap. The push direction
+// gets a small sim-RNG perturbation per pair so a perfectly-symmetric
+// stack drifts apart over a few ticks rather than oscillating exactly
+// on-axis. Over ~4–8 ticks of sustained overlap, a cluster spreads to
+// the bounding-box edge; converging movement (e.g. workers heading to
+// the same node) reaches its target while a slight residual offset
+// keeps them visually distinct.
+//
+// Workers actively dumping (Phase 3.7 energy dump) are exempt from
+// collision — the dump's design is "punch through enemy units leaving
+// a deadly trail," and rigid collision would block that.
+//
+// Iteration order: i < j over the units array (stable spawn order
+// with tombstones), so the pair-iteration is deterministic across
+// runs / OSes. The RNG is shared with the rest of the step, so
+// determinism flows from the same seed.
+function applyUnitSeparation(state: SimState, rng: Rng): void {
+  const units = state.units;
+  for (let i = 0; i < units.length; i++) {
+    const a = units[i];
+    if (!a.alive) continue;
+    if (!isCollisionActive(a)) continue;
+    const aMov = UNIT_STATS[a.kind].speed > 0;
+    for (let j = i + 1; j < units.length; j++) {
+      const b = units[j];
+      if (!b.alive) continue;
+      if (!isCollisionActive(b)) continue;
+      const bMov = UNIT_STATS[b.kind].speed > 0;
+      if (!aMov && !bMov) continue;
+
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      let absDx: Fixed = dx >= 0 ? dx : -dx;
+      let absDy: Fixed = dy >= 0 ? dy : -dy;
+
+      // Axis-aligned bounding-box overlap test. If either axis is
+      // already separated by ≥ diameter, the pair isn't overlapping.
+      if (absDx >= UNIT_COLLISION_DIAMETER) continue;
+      if (absDy >= UNIT_COLLISION_DIAMETER) continue;
+
+      // Direction of push: a moves AWAY from b (opposite of b-a
+      // delta); b moves WITH b-a delta. When stacked exactly,
+      // deterministic tiebreaker via lower-id-goes-negative on x.
+      let xDir: number;
+      let yDir: number;
+      if (dx === 0 && dy === 0) {
+        xDir = a.id < b.id ? 1 : -1;
+        yDir = 0;
+        absDx = 0;
+        absDy = 0;
+      } else {
+        xDir = dx >= 0 ? 1 : -1;
+        yDir = dy >= 0 ? 1 : -1;
+      }
+
+      // Per-axis overlap = diameter − |delta|.
+      const overlapX = UNIT_COLLISION_DIAMETER - absDx;
+      const overlapY = UNIT_COLLISION_DIAMETER - absDy;
+
+      // Per-tick gentle push: 1/4 of overlap each (when both
+      // movable). The bit-shift expression `(o * PUSH_SHARE_NUM) >> 16`
+      // applies the Q16.16 fraction without losing precision.
+      const aPushX: Fixed = aMov ? scaledShare(overlapX, aMov && bMov) : 0;
+      const bPushX: Fixed = bMov ? scaledShare(overlapX, aMov && bMov) : 0;
+      const aPushY: Fixed = aMov && yDir !== 0 ? scaledShare(overlapY, aMov && bMov) : 0;
+      const bPushY: Fixed = bMov && yDir !== 0 ? scaledShare(overlapY, aMov && bMov) : 0;
+
+      // Per-pair RNG perturbation: a small jitter on each axis so a
+      // symmetric stack breaks out of equilibrium over time. Two
+      // RNG draws per overlapping pair; deterministic via the sim
+      // RNG state.
+      const perturbX: Fixed = (rng.nextU32() % (PUSH_RNG_RANGE * 2)) - PUSH_RNG_RANGE;
+      const perturbY: Fixed = yDir !== 0
+        ? (rng.nextU32() % (PUSH_RNG_RANGE * 2)) - PUSH_RNG_RANGE
+        : 0;
+
+      a.x -= (aPushX * xDir) + (aMov ? perturbX : 0);
+      b.x += (bPushX * xDir) + (bMov ? perturbX : 0);
+      if (yDir !== 0) {
+        a.y -= (aPushY * yDir) + (aMov ? perturbY : 0);
+        b.y += (bPushY * yDir) + (bMov ? perturbY : 0);
+      }
+    }
+  }
+}
+
+function scaledShare(overlap: Fixed, halve: boolean): Fixed {
+  // Multiply Q16.16 overlap by the Q16.16 share fraction, then
+  // re-normalise by >> 16. `halve` halves the result when both
+  // partners are movable so the pair as a whole moves by `overlap *
+  // PUSH_SHARE` per tick.
+  const scaled = (overlap * PUSH_SHARE_NUM) >> 16;
+  return halve ? scaled >> 1 : scaled;
+}
+
+// Workers in the middle of an energy-dump skip collision entirely —
+// the dump is a fast tactical dash that the player expects to punch
+// through enemy units (and lay a deadly trail in passing). Stationary
+// defenders don't push other units (the movable check covers that),
+// but they DO act as obstacles — i.e. other movable units bump into
+// them, just not the other way around.
+function isCollisionActive(u: Unit): boolean {
+  if (u.kind === 'worker' && u.dumpTicksRemaining > 0) return false;
+  return true;
 }
 
 function checkWinner(state: SimState): SimState['winner'] {

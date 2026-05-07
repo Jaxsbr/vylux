@@ -182,6 +182,52 @@ interface ConnectingOverlay {
   hide(): void;
 }
 
+// Phase 3.10.9 — focused resource bar. One pill per gameplay-relevant
+// pool. The glyph colour matches the action-bar cost glyphs so a
+// player who reads "F 50" on a build button can find the same green F
+// in the bar. `large` makes the HQ HP card a touch bigger so it reads
+// as the most important pool (which it is — losing it ends the run).
+interface ResourceCard {
+  root: HTMLDivElement;
+  value: HTMLSpanElement;
+}
+
+function makeResourceCard(letter: string, initial: string, glyphColor: string, large: boolean): ResourceCard {
+  const root = document.createElement('div');
+  root.style.cssText = [
+    'display:flex', 'align-items:center', 'gap:10px',
+    'padding:' + (large ? '10px 18px' : '8px 14px'),
+    'background:rgba(7,11,16,0.78)',
+    'border:1px solid #234', 'border-radius:6px',
+    'box-shadow:0 0 18px rgba(0,0,0,0.55)',
+    'min-width:' + (large ? '94px' : '78px'),
+    'transition:border-color 0.15s',
+  ].join(';');
+
+  const glyph = document.createElement('span');
+  glyph.textContent = letter;
+  glyph.style.cssText = [
+    'font-size:' + (large ? '18px' : '15px'),
+    'font-weight:700', 'letter-spacing:0.18em',
+    `color:${glyphColor}`,
+    `text-shadow:0 0 10px ${glyphColor}`,
+  ].join(';');
+  root.appendChild(glyph);
+
+  const value = document.createElement('span');
+  value.textContent = initial;
+  value.style.cssText = [
+    'font-size:' + (large ? '22px' : '20px'),
+    'font-weight:500', 'color:#cde',
+    'font-variant-numeric:tabular-nums',
+    'min-width:' + (large ? '52px' : '40px'),
+    'text-align:right',
+  ].join(';');
+  root.appendChild(value);
+
+  return { root, value };
+}
+
 function makeConnectingOverlay(): ConnectingOverlay {
   const el = document.createElement('div');
   el.style.cssText = [
@@ -396,15 +442,64 @@ async function bootstrap(): Promise<void> {
     setHalfHeight: (hh) => scene.setHalfHeight(hh),
   });
 
-  const hud = document.createElement('div');
-  hud.style.cssText = [
+  // Phase 3.10.9 — focused resource bar (top-centre).
+  //
+  // The pre-pivot HUD was a dense monospace text dump (tick / winner /
+  // both factions' resources / units / dropped-steps / peer state). The
+  // player only needs to read their OWN resources to know "can I afford
+  // this build" — and that decision happens dozens of times per match,
+  // so the resource bar is the most-read UI element in the game.
+  //
+  // Layout: HQ HP card on the left, then Energy / Flux / Colour /
+  // Supply pills, each with the same coloured letter glyph as the
+  // action-bar cost glyphs (E gold, F green, C faction-tinted) so a
+  // player who reads a build cost can find the matching pool by colour
+  // alone. Numbers are big and readable; supply turns red when blocked
+  // (used >= cap).
+  //
+  // Tick / winner / opponent stats / dropped steps / lockstep peer
+  // state move to a separate ?debug=1 panel (top-right) — useful for
+  // dev sessions, hidden in the default player view.
+  const showDebugHud = new URLSearchParams(window.location.search).get('debug') === '1';
+
+  // Resource bar container (top-centre).
+  const resourceBar = document.createElement('div');
+  resourceBar.style.cssText = [
+    'position:fixed', 'top:14px', 'left:50%', 'transform:translateX(-50%)',
+    'display:flex', 'gap:10px', 'align-items:stretch',
+    'font-family:ui-monospace,Menlo,monospace',
+    'pointer-events:none', 'z-index:30',
+  ].join(';');
+  document.body.appendChild(resourceBar);
+
+  const playerColourHex = playerFaction === 0 ? '#00e5ff' : '#ff6a33';
+
+  // HP card — distinct from the resource pills because losing HQ ends
+  // the match. Slightly larger and faction-coloured.
+  const hpCard = makeResourceCard('HQ', '500', playerColourHex, true);
+  resourceBar.appendChild(hpCard.root);
+  const energyCard = makeResourceCard('E', '0', '#ffd166', false);
+  resourceBar.appendChild(energyCard.root);
+  const fluxCard = makeResourceCard('F', '0', '#a3ff66', false);
+  resourceBar.appendChild(fluxCard.root);
+  const colourCard = makeResourceCard('C', '0', playerColourHex, false);
+  resourceBar.appendChild(colourCard.root);
+  const supplyCard = makeResourceCard('S', '0/10', '#9ad', false);
+  resourceBar.appendChild(supplyCard.root);
+
+  // Debug panel — opt-in via ?debug=1. Carries the dense diagnostic
+  // text the old HUD used to show by default. Same layout (monospace,
+  // pre-formatted lines) so existing dev habits survive.
+  const debugHud = document.createElement('div');
+  debugHud.style.cssText = [
     'position:fixed', 'top:8px', 'left:8px',
     'font-family:ui-monospace,Menlo,monospace',
     'font-size:11px', 'color:#9ad', 'pointer-events:none',
     'background:rgba(0,0,0,0.4)', 'padding:6px 10px', 'border-radius:4px',
     'border:1px solid #234', 'white-space:pre',
-  ].join(';');
-  document.body.appendChild(hud);
+    showDebugHud ? '' : 'display:none',
+  ].filter(Boolean).join(';');
+  document.body.appendChild(debugHud);
 
   function modeLabel(): string {
     switch (mode.kind) {
@@ -452,46 +547,65 @@ async function bootstrap(): Promise<void> {
       console.warn(`desync-test: corrupted state at tick ${s.tick} (target was ${desyncTestTick})`);
     }
 
-    // Observer view shows both factions by their lockstep role; player
-    // views keep "you" / "opp" labels relative to the local faction so
-    // existing regex assertions in tests continue to match.
-    const factionLabelLine = isObserver
-      ? `vylux · ${TICK_HZ} Hz · ${modeLabel()} · watching both`
-      : `vylux · ${TICK_HZ} Hz · ${modeLabel()} · you = ${playerFaction === 0 ? 'cyan' : 'red'}`;
-    const f0Label = isObserver ? 'host' : (playerFaction === 0 ? 'you' : 'opp');
-    const f1Label = isObserver ? 'join' : (playerFaction === 0 ? 'opp' : 'you');
-    const fmtFaction = (idx: 0 | 1, label: string): string => {
-      const fx = s.factions[idx];
-      const t2 = fx.tier2Researched ? ' t2' : '';
-      return `${label}  hp ${(fx.hqHp / 65536).toFixed(0)}  e ${(fx.energy / 65536).toFixed(0)}  f ${(fx.flux / 65536).toFixed(0)}  c ${(fx.color / 65536).toFixed(0)}  s ${fx.supplyUsed}/${fx.supplyCap}${t2}`;
-    };
-    const lines = [
-      factionLabelLine,
-      `tick ${s.tick}  winner ${s.winner ?? '–'}`,
-      fmtFaction(0, f0Label),
-      fmtFaction(1, f1Label),
-      `units ${s.units.filter((u) => u.alive).length}  dropped ${driver.droppedSteps}`,
-    ];
+    // Player-facing resource bar. Observer mode shows the host
+    // (faction 0) view by convention — the bar is a single-faction
+    // surface; observers who want both should use ?debug=1.
+    const viewFaction: 0 | 1 = isObserver ? 0 : playerFaction;
+    const me = s.factions[viewFaction];
+    hpCard.value.textContent = `${(me.hqHp / 65536).toFixed(0)}`;
+    energyCard.value.textContent = `${(me.energy / 65536).toFixed(0)}`;
+    fluxCard.value.textContent = `${(me.flux / 65536).toFixed(0)}`;
+    colourCard.value.textContent = `${(me.color / 65536).toFixed(0)}`;
+    supplyCard.value.textContent = `${me.supplyUsed}/${me.supplyCap}`;
+    // Supply pulses red when the player is at or near the cap so the
+    // "why can't I train?" question gets answered before the player
+    // reads the action-bar tooltip.
+    const supplyBlocked = me.supplyUsed >= me.supplyCap;
+    supplyCard.root.style.borderColor = supplyBlocked ? '#ff5577' : '#234';
+    supplyCard.value.style.color = supplyBlocked ? '#ff7799' : '#cde';
 
-    if (lockstep !== null && lockstepLoop !== null) {
-      const peer = lockstep.peerConnected ? 'connected' : 'waiting';
-      const resolved = lockstep.latestResolvedHash();
-      const hashLine = resolved === null
-        ? 'hash pending'
-        : `hash@${resolved.tick} ${resolved.status}`;
-      const delayMs = lockstepLoop.inputDelay * (1000 / TICK_HZ);
-      lines.push(`peer ${peer}  ${hashLine}  delay ${lockstepLoop.inputDelay}t (${delayMs.toFixed(0)} ms)`);
-      if (desync !== null) {
-        lines.push(`DESYNC tick ${desync.tick}`);
-        lines.push(`  local  ${desync.localHash}`);
-        lines.push(`  remote ${desync.remoteHash}`);
+    // Debug panel. Only built if ?debug=1, but cheap to update — the
+    // textContent assignment is a no-op when the panel is display:none
+    // since the layout doesn't reflow.
+    if (showDebugHud) {
+      const factionLabelLine = isObserver
+        ? `vylux · ${TICK_HZ} Hz · ${modeLabel()} · watching both`
+        : `vylux · ${TICK_HZ} Hz · ${modeLabel()} · you = ${playerFaction === 0 ? 'cyan' : 'red'}`;
+      const f0Label = isObserver ? 'host' : (playerFaction === 0 ? 'you' : 'opp');
+      const f1Label = isObserver ? 'join' : (playerFaction === 0 ? 'opp' : 'you');
+      const fmtFaction = (idx: 0 | 1, label: string): string => {
+        const fx = s.factions[idx];
+        const t2 = fx.tier2Researched ? ' t2' : '';
+        return `${label}  hp ${(fx.hqHp / 65536).toFixed(0)}  e ${(fx.energy / 65536).toFixed(0)}  f ${(fx.flux / 65536).toFixed(0)}  c ${(fx.color / 65536).toFixed(0)}  s ${fx.supplyUsed}/${fx.supplyCap}${t2}`;
+      };
+      const lines = [
+        factionLabelLine,
+        `tick ${s.tick}  winner ${s.winner ?? '–'}`,
+        fmtFaction(0, f0Label),
+        fmtFaction(1, f1Label),
+        `units ${s.units.filter((u) => u.alive).length}  dropped ${driver.droppedSteps}`,
+      ];
+
+      if (lockstep !== null && lockstepLoop !== null) {
+        const peer = lockstep.peerConnected ? 'connected' : 'waiting';
+        const resolved = lockstep.latestResolvedHash();
+        const hashLine = resolved === null
+          ? 'hash pending'
+          : `hash@${resolved.tick} ${resolved.status}`;
+        const delayMs = lockstepLoop.inputDelay * (1000 / TICK_HZ);
+        lines.push(`peer ${peer}  ${hashLine}  delay ${lockstepLoop.inputDelay}t (${delayMs.toFixed(0)} ms)`);
+        if (desync !== null) {
+          lines.push(`DESYNC tick ${desync.tick}`);
+          lines.push(`  local  ${desync.localHash}`);
+          lines.push(`  remote ${desync.remoteHash}`);
+        }
+      } else if (observerChannel !== null) {
+        const presence = observerChannel.bothFactionsSeen ? 'both factions live' : 'waiting for players';
+        lines.push(`observer · ${presence}`);
       }
-    } else if (observerChannel !== null) {
-      const presence = observerChannel.bothFactionsSeen ? 'both factions live' : 'waiting for players';
-      lines.push(`observer · ${presence}`);
-    }
 
-    hud.textContent = lines.join('\n');
+      debugHud.textContent = lines.join('\n');
+    }
 
     const selection = input?.getSelectedUnitIds() ?? EMPTY_SELECTION;
     const selStructure = input?.getSelectedStructureId() ?? null;

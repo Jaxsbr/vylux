@@ -879,23 +879,27 @@ describe('Sim — structures (Phase 3.0)', () => {
 
   it('Phase 3.7: dumping worker moves at 2× speed', () => {
     const sim = new Sim(TRAIN_SPEC);
+    // Phase 3.10.9: spawn at distinct y so the soft-collision pass
+    // doesn't push them apart and entangle the per-worker progress
+    // comparison. The test's intent is "dump = 2× speed"; collision
+    // interactions would muddy the measurement.
     sim.step({
       tick: 0,
       commands: [
-        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 0, x: 5, y: 5 },
-        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 0, x: 5, y: 5 },
+        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 0, x: 5, y: 4 },
+        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 0, x: 5, y: 6 },
       ],
     });
     const wDump = sim.state.units[0];
     const wNormal = sim.state.units[1];
     if (wDump.kind !== 'worker' || wNormal.kind !== 'worker') throw new Error('expected workers');
-    // Send both to (15, 5) via MoveUnit. The dumping worker should
-    // arrive sooner.
+    // Both head straight along x to a distant target; they never come
+    // close enough on y to collide.
     sim.step({
       tick: 1,
       commands: [
-        { kind: CommandKind.MoveUnit, unitId: wDump.id, x: 15, y: 5 },
-        { kind: CommandKind.MoveUnit, unitId: wNormal.id, x: 15, y: 5 },
+        { kind: CommandKind.MoveUnit, unitId: wDump.id, x: 15, y: 4 },
+        { kind: CommandKind.MoveUnit, unitId: wNormal.id, x: 15, y: 6 },
         { kind: CommandKind.ActivateEnergyDump, workerId: wDump.id },
       ],
     });
@@ -913,17 +917,18 @@ describe('Sim — structures (Phase 3.0)', () => {
   it('Phase 3.7: trail kills enemy unit walking into it; same-faction units survive', () => {
     // Use enemy WORKERS as the sacrificial collision targets — workers
     // don't attack, so combat engagement doesn't entangle the test.
-    // Faction-0 worker at (5,5) dumps; an enemy faction-1 worker
-    // standing on the same tile dies on the next collision sweep.
-    // A second faction-0 worker on the trail proves same-faction
-    // immunity.
+    // Phase 3.10.9: with soft-collision, three workers can no longer
+    // share a fractional position. Move the dumper across the static
+    // enemy + ally so its trail extends through their tile and the
+    // kill sweep fires on the enemy (within TRAIL_KILL_RANGE_SQ ≈ 0.4
+    // tiles of any segment) while the same-faction ally survives.
     const sim = new Sim(TRAIN_SPEC);
     sim.step({
       tick: 0,
       commands: [
-        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 0, x: 5, y: 5 },
-        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 1, x: 5, y: 5 },
-        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 0, x: 5, y: 5 },
+        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 0, x: 5, y: 5 },  // dumper
+        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 1, x: 8, y: 5 },  // enemy on trail path
+        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 0, x: 8, y: 6 },  // ally near trail (faction immune)
       ],
     });
     const dumper = sim.state.units[0];
@@ -932,13 +937,20 @@ describe('Sim — structures (Phase 3.0)', () => {
     if (dumper.kind !== 'worker' || enemy.kind !== 'worker' || ally.kind !== 'worker') {
       throw new Error('expected three workers');
     }
+    // Dumper moves toward (12, 5), passing through the enemy's tile
+    // (8, 5) and laying trail segments along the way.
     sim.step({
       tick: 1,
-      commands: [{ kind: CommandKind.ActivateEnergyDump, workerId: dumper.id }],
+      commands: [
+        { kind: CommandKind.ActivateEnergyDump, workerId: dumper.id },
+        { kind: CommandKind.MoveUnit, unitId: dumper.id, x: 12, y: 5 },
+      ],
     });
-    // After one full step with dump active, segment is laid at (5,5)
-    // and the collision sweep kills any non-owner unit overlapping it.
-    sim.step({ tick: sim.state.tick, commands: [] });
+    // Run enough ticks for the dumper (2× speed = 0.10/tick) to walk
+    // ~3 tiles to the enemy's position. 30 ticks × 0.10 = 3.0 tiles.
+    for (let t = 0; t < 35 && enemy.alive; t++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+    }
     expect(enemy.alive).toBe(false);
     expect(ally.alive).toBe(true);
     expect(dumper.alive).toBe(true);
