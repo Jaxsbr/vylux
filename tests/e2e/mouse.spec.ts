@@ -18,7 +18,7 @@ test('clicking WORKER trains a worker (spawns at HQ)', async ({ page }) => {
 
   const beforeText = await page.locator('div').filter({ hasText: /vylux ·/ }).textContent();
   const beforeUnits = parseInt(beforeText!.match(/units (\d+)/)![1], 10);
-  const beforeEnergy = parseInt(beforeText!.match(/you  hp \d+ {2}pts \d+ {2}e (\d+)/)![1], 10);
+  const beforeEnergy = parseInt(beforeText!.match(/you  hp \d+ {2}e (\d+)/)![1], 10);
 
   await page.evaluate(() => (window as unknown as { __vyluxTest: { selectHq(): void } }).__vyluxTest.selectHq());
   await page.waitForTimeout(50);
@@ -30,7 +30,7 @@ test('clicking WORKER trains a worker (spawns at HQ)', async ({ page }) => {
 
   const afterText = await page.locator('div').filter({ hasText: /vylux ·/ }).textContent();
   const afterUnits = parseInt(afterText!.match(/units (\d+)/)![1], 10);
-  const afterEnergy = parseInt(afterText!.match(/you  hp \d+ {2}pts \d+ {2}e (\d+)/)![1], 10);
+  const afterEnergy = parseInt(afterText!.match(/you  hp \d+ {2}e (\d+)/)![1], 10);
 
   // Unit count grew (player worker + AI activity).
   expect(afterUnits).toBeGreaterThan(beforeUnits);

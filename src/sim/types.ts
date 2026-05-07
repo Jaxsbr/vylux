@@ -66,10 +66,11 @@ export interface FactionState {
   // itself (and the flag — observable in the hash for tests).
   tier2Researched: boolean;
   // HQ hit-points. Reaching 0 ends the match — the OTHER faction wins.
+  // Post-2026-05-07 PvE pivot: HQ destruction is the ONLY win/loss
+  // condition until 3.13's wave-survival lands. The previous
+  // points-threshold path was esport-balance scaffolding and has been
+  // removed; see PRD §0 + §6.7.
   hqHp: Fixed;
-  // Score accumulated from kills + HQ damage. Reaching a threshold also
-  // ends the match (in favour of THIS faction).
-  points: number;
   // Phase 3.6: supply system. supplyUsed sums the supplyCost of every
   // alive unit owned by this faction; supplyCap is the cap that bounds
   // it. Train commands silently reject when supplyUsed + cost > cap.
@@ -340,9 +341,10 @@ export interface SimState {
   // not spliced) so iteration order is bit-stable across the hash.
   trails: Trail[];
   nextEntityId: number;
-  // Set when a faction's HQ is destroyed or a points threshold is hit.
-  // Phase 1.2 fills in the points side; Phase 1.0 only writes this on
-  // HQ kill (which we don't do yet). Keeping the field present keeps
-  // hash format stable across sub-phases.
+  // Set when a faction's HQ is destroyed (the OTHER faction wins).
+  // Post-2026-05-07 PvE pivot: HQ destruction is the only path to a
+  // winner being set until 3.13 lands wave-survival + scenario-objective
+  // win conditions. Earlier sub-phases also wrote this on a points
+  // threshold; that path has been removed.
   winner: Faction | null;
 }

@@ -69,7 +69,14 @@ import type { InitialMatchSpec } from './state';
 // down while ≥1 worker is on site. Workers now stop at the HQ
 // perimeter to deposit (HQ_DEPOSIT_REACH_SQ wider than the old
 // WORKER_REACH_SQ).
-export const REPLAY_VERSION = 10;
+// Phase 3.10.8 bumps to v11 (2026-05-07 PvE pivot cleanup).
+// FactionState's `points` field is removed alongside the points-
+// threshold win condition — esport-balance scaffolding that doesn't
+// fit the PvE direction. HQ destruction is the only winner path until
+// 3.13 lands wave-survival + scenario-objective + boss conditions.
+// Hash-shape: one fewer i32 per faction (the slot between hqHp and
+// supplyCap is gone).
+export const REPLAY_VERSION = 11;
 
 export interface ReplayLog {
   version: number;

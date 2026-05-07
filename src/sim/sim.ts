@@ -53,7 +53,10 @@ export class Sim {
       h.writeI32(fs.color);
       h.writeU32(fs.tier2Researched ? 1 : 0);
       h.writeI32(fs.hqHp);
-      h.writeI32(fs.points);
+      // Phase 3.10.8 (2026-05-07 PvE pivot cleanup): the previous slot
+      // here was `points` — removed with the points-threshold win
+      // condition. REPLAY_VERSION bumps to 11 to mark the hash shape
+      // change.
       // Phase 3.6: supply accounting. supplyCap is derived from
       // operational Pylons each end-of-step but stored on FactionState
       // so the hash captures the current cap directly.

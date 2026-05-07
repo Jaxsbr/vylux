@@ -1,10 +1,16 @@
-// Win condition + match-end determinism for Phase 1.2.
+// Win condition + match-end determinism.
+//
+// Post-2026-05-07 PvE pivot: HQ destruction is the only win/loss
+// condition until sub-phase 3.13 lands wave-survival + scenario
+// objective + boss conditions. The previous "kill points" + "points
+// threshold" tests were removed alongside the points-threshold sim
+// path; what remains exercises HQ destruction, match freeze, and
+// past-end determinism — all of which carry forward unchanged.
 
 import { describe, expect, it } from 'vitest';
 import { Sim } from './sim';
 import { CommandKind } from './commands';
 import { tickAi } from './ai';
-import { POINTS_PER_HQ_HIT, POINTS_PER_KILL, WIN_POINTS } from './step';
 import { UNIT_STATS } from './units-config';
 import type { InitialMatchSpec } from './state';
 
@@ -14,45 +20,6 @@ const BASIC_SPEC: InitialMatchSpec = {
   nodes: [],
   initialEnergy: 1000,
 };
-
-describe('Sim — win condition: kill points', () => {
-  it('killing an enemy unit awards POINTS_PER_KILL to the attacker', () => {
-    const sim = new Sim({ ...BASIC_SPEC, hqMaxHp: 9999 });
-    // Defender at faction 0 close to a defenseless enemy (worker).
-    sim.step({
-      tick: 0,
-      commands: [
-        { kind: CommandKind.SpawnUnit, unitKind: 'defender', faction: 0, x: 10, y: 10 },
-        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 1, x: 11, y: 10 },
-      ],
-    });
-    // Step until worker dies. Defender deals 10 dmg per attack;
-    // worker has 40 HP so 4 hits, cooldown 20 → ~80 ticks.
-    for (let t = 1; t <= 100; t++) {
-      sim.step({ tick: t, commands: [] });
-      if (sim.state.units.find((u) => u.kind === 'worker')!.alive === false) break;
-    }
-    expect(sim.state.factions[0].points).toBe(POINTS_PER_KILL);
-  });
-
-  it('reaching WIN_POINTS sets winner', () => {
-    const sim = new Sim({ ...BASIC_SPEC, hqMaxHp: 9999 });
-    // Manually puff the points field to one below threshold then kill.
-    sim.state.factions[0].points = WIN_POINTS - POINTS_PER_KILL;
-
-    sim.step({
-      tick: 0,
-      commands: [
-        { kind: CommandKind.SpawnUnit, unitKind: 'defender', faction: 0, x: 10, y: 10 },
-        { kind: CommandKind.SpawnUnit, unitKind: 'worker', faction: 1, x: 11, y: 10 },
-      ],
-    });
-    for (let t = 1; t <= 100 && sim.state.winner === null; t++) {
-      sim.step({ tick: t, commands: [] });
-    }
-    expect(sim.state.winner).toBe(0);
-  });
-});
 
 describe('Sim — win condition: HQ destruction', () => {
   it('raider attacks enemy HQ when no enemy unit is in range', () => {
@@ -83,19 +50,6 @@ describe('Sim — win condition: HQ destruction', () => {
     }
     expect(sim.state.winner).toBe(0);
     expect(sim.state.factions[1].hqHp).toBe(0);
-  });
-
-  it('HQ hits accumulate points', () => {
-    const sim = new Sim({ ...BASIC_SPEC, hqMaxHp: 9999 });
-    sim.step({
-      tick: 0,
-      commands: [
-        { kind: CommandKind.SpawnUnit, unitKind: 'raider', faction: 0, x: 17, y: 11 },
-      ],
-    });
-    // Three full attack cycles for the raider (cooldown 15, range 1.0).
-    for (let t = 1; t <= 50; t++) sim.step({ tick: t, commands: [] });
-    expect(sim.state.factions[0].points).toBeGreaterThanOrEqual(POINTS_PER_HQ_HIT * 2);
   });
 });
 
@@ -145,12 +99,12 @@ describe('Sim — match-end behaviour', () => {
     expect(run()).toBe(run());
   });
 
-  it('AI-vs-AI match makes meaningful progress (kills / HQ damage)', () => {
+  it('AI-vs-AI match makes meaningful progress (HQ damage or winner)', () => {
     // We don't require a winner in N ticks (balance + map geometry
     // determine match length, and they're placeholder numbers right
-    // now). We DO require that the system makes progress: either a
-    // unit kills another or HQ damage is taken — proves the
-    // raider→combat→points→win-condition pipeline actually flows.
+    // now). We DO require that the system makes progress: HQ damage
+    // is taken or a winner emerges — proves the
+    // raider→combat→HQ-damage→win-condition pipeline actually flows.
     const sim = new Sim({
       seed: 99,
       hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 17, y: 17 } },
@@ -170,11 +124,10 @@ describe('Sim — match-end behaviour', () => {
       const cmds = [...tickAi(sim.state, 0), ...tickAi(sim.state, 1)];
       sim.step({ tick: t, commands: cmds });
     }
-    const totalPoints = sim.state.factions[0].points + sim.state.factions[1].points;
     const endHpSum = sim.state.factions[0].hqHp + sim.state.factions[1].hqHp;
-    // Either someone scored points, an HQ took damage, or there's a
-    // winner. If none of these, the pipeline isn't working.
-    const progress = totalPoints > 0 || endHpSum < startHpSum || sim.state.winner !== null;
+    // Either an HQ took damage or there's a winner. If neither, the
+    // pipeline isn't working.
+    const progress = endHpSum < startHpSum || sim.state.winner !== null;
     expect(progress).toBe(true);
   });
 });

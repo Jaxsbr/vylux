@@ -442,7 +442,12 @@ async function bootstrap(): Promise<void> {
     // desync (no hash exchange).
     if (!isObserver && desyncTestTick !== null && !desyncTestFired && s.tick > desyncTestTick) {
       desyncTestFired = true;
-      s.factions[0].points += 1;
+      // Corruption target post-2026-05-07 PvE pivot: nextSpawnRotation
+      // is hashed (so the desync surfaces) and only affects the next
+      // worker spawn position cosmetically. The previous corruption
+      // target — `points` — was removed with the points-threshold win
+      // condition.
+      s.factions[0].nextSpawnRotation += 1;
       // eslint-disable-next-line no-console
       console.warn(`desync-test: corrupted state at tick ${s.tick} (target was ${desyncTestTick})`);
     }
@@ -458,7 +463,7 @@ async function bootstrap(): Promise<void> {
     const fmtFaction = (idx: 0 | 1, label: string): string => {
       const fx = s.factions[idx];
       const t2 = fx.tier2Researched ? ' t2' : '';
-      return `${label}  hp ${(fx.hqHp / 65536).toFixed(0)}  pts ${fx.points}  e ${(fx.energy / 65536).toFixed(0)}  f ${(fx.flux / 65536).toFixed(0)}  c ${(fx.color / 65536).toFixed(0)}  s ${fx.supplyUsed}/${fx.supplyCap}${t2}`;
+      return `${label}  hp ${(fx.hqHp / 65536).toFixed(0)}  e ${(fx.energy / 65536).toFixed(0)}  f ${(fx.flux / 65536).toFixed(0)}  c ${(fx.color / 65536).toFixed(0)}  s ${fx.supplyUsed}/${fx.supplyCap}${t2}`;
     };
     const lines = [
       factionLabelLine,

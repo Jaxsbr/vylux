@@ -7,7 +7,7 @@
 //      - Workers: harvest/return loop.
 //      - Defenders: attack-in-range only.
 //      - Raiders: move toward enemy HQ + attack-in-range.
-//   3. (Future) periodic mechanics: node regen, points accrual, AI tick.
+//   3. (Future) periodic mechanics: node regen, AI tick.
 //   4. Bump tick counter, mirror RNG state.
 //
 // Mutation is in-place. The renderer never sees mid-step state because
@@ -93,10 +93,12 @@ export const HQ_DEPOSIT_REACH_SQ: Fixed = rangeSq(fromFloat(2.0));
 // count as "on site" and contribute to construction progress.
 export const BUILD_REACH_SQ: Fixed = rangeSq(fromFloat(1.2));
 
-// Win-condition tuning. Phase 3 will rebalance; numbers are placeholder.
-export const POINTS_PER_KILL = 5;
-export const POINTS_PER_HQ_HIT = 1;
-export const WIN_POINTS = 100;
+// Win conditions: HQ destruction only (post-2026-05-07 PvE pivot).
+// The previous POINTS_PER_KILL / POINTS_PER_HQ_HIT / WIN_POINTS
+// constants and the per-faction `points` field have been removed —
+// they were esport-balance scaffolding for a "first to threshold wins"
+// 1v1 path that doesn't fit the PvE direction. Wave-survival +
+// scenario objective + boss win conditions land in sub-phase 3.13.
 
 export function applyCommand(state: SimState, cmd: Command): void {
   switch (cmd.kind) {
@@ -480,17 +482,13 @@ function applyDamage(state: SimState, target: Unit, damage: Fixed): boolean {
   return false;
 }
 
-// Award kill points to the attacker's faction.
-function awardKill(state: SimState, attackerFaction: 0 | 1): void {
-  state.factions[attackerFaction].points += POINTS_PER_KILL;
-}
-
-// Award HQ-hit points and check for HQ destruction.
+// Apply HQ damage and clamp at zero. The OTHER faction wins when this
+// hits 0 (handled by checkWinner). Post-pivot the points side-effect
+// has been removed; only the HP transfer remains.
 function damageEnemyHq(state: SimState, attacker: Raider, damage: Fixed): void {
   const enemyFaction: 0 | 1 = attacker.faction === 0 ? 1 : 0;
   const target = state.factions[enemyFaction];
   target.hqHp = sub(target.hqHp, damage);
-  state.factions[attacker.faction].points += POINTS_PER_HQ_HIT;
   if (target.hqHp <= 0) {
     target.hqHp = 0;
   }
@@ -517,8 +515,7 @@ function tryAttack(state: SimState, attacker: Defender | Raider | Vanguard): Att
   }
   if (!target) return { engaged: false, fired: false };
 
-  const killed = applyDamage(state, target, stats.attackDamage);
-  if (killed) awardKill(state, attacker.faction);
+  applyDamage(state, target, stats.attackDamage);
   attacker.attackCooldown = stats.attackCooldownTicks;
   return { engaged: true, fired: true };
 }
@@ -562,11 +559,9 @@ function tryAttackEnemyStructure(state: SimState, attacker: Raider): boolean {
     return true; // engaged with structure; hold position
   }
   target.hp = sub(target.hp, stats.attackDamage);
-  state.factions[attacker.faction].points += POINTS_PER_HQ_HIT;
   if (target.hp <= 0) {
     target.alive = false;
     target.hp = 0;
-    state.factions[attacker.faction].points += POINTS_PER_KILL;
   }
   attacker.attackCooldown = stats.attackCooldownTicks;
   return true;
@@ -935,11 +930,9 @@ function tryAttackEnemyStructureForUnit(state: SimState, attacker: Raider | Vang
     return true;
   }
   target.hp = sub(target.hp, stats.attackDamage);
-  state.factions[attacker.faction].points += POINTS_PER_HQ_HIT;
   if (target.hp <= 0) {
     target.alive = false;
     target.hp = 0;
-    state.factions[attacker.faction].points += POINTS_PER_KILL;
   }
   attacker.attackCooldown = stats.attackCooldownTicks;
   return true;
@@ -961,7 +954,6 @@ function tryAttackHqForUnit(state: SimState, attacker: Raider | Vanguard): boole
   // specific helper; same shape as damageEnemyHq.
   const target = state.factions[enemyFaction];
   target.hqHp = sub(target.hqHp, stats.attackDamage);
-  state.factions[attacker.faction].points += POINTS_PER_HQ_HIT;
   if (target.hqHp <= 0) target.hqHp = 0;
   attacker.attackCooldown = stats.attackCooldownTicks;
   return true;
@@ -1101,11 +1093,10 @@ function trailKillSweep(state: SimState): void {
       }
       if (hit) {
         // Lethal damage = current hp so applyDamage zeroes + flips
-        // alive=false in one call. The owner of the trail gets the
-        // kill points credited via awardKill so 'who killed this
-        // unit' stays correct in points-tracking.
-        const wasKilled = applyDamage(state, u, u.hp);
-        if (wasKilled) awardKill(state, t.ownerFaction);
+        // alive=false in one call. The kill side-effect (awardKill /
+        // points credit) was removed with the 2026-05-07 PvE pivot;
+        // who-killed-whom isn't tracked any more.
+        applyDamage(state, u, u.hp);
         break; // unit is dead, no need to check other trails
       }
     }
@@ -1182,11 +1173,11 @@ function recomputeSupplyCaps(state: SimState): void {
 }
 
 function checkWinner(state: SimState): SimState['winner'] {
-  // HQ destruction: enemy HQ at 0 → THIS faction wins.
+  // Post-2026-05-07 PvE pivot: HQ destruction is the only path to a
+  // winner. The previous points-threshold check (esport scaffolding)
+  // has been removed; wave-survival + scenario-objective + boss win
+  // conditions land in sub-phase 3.13.
   if (state.factions[1].hqHp <= 0) return 0;
   if (state.factions[0].hqHp <= 0) return 1;
-  // Points threshold: first faction to cross WIN_POINTS wins.
-  if (state.factions[0].points >= WIN_POINTS) return 0;
-  if (state.factions[1].points >= WIN_POINTS) return 1;
   return null;
 }

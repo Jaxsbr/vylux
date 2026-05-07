@@ -107,14 +107,14 @@ The Spire's research slot is single-occupancy (Phase 3.7 added a `researchKind` 
 
 ## Victory conditions
 
-Currently a Phase 1 placeholder set:
+Interim post-pivot set (3.10.8 cleanup):
 
-- **HQ destruction** — destroy the enemy HQ. The other faction wins.
-- **Score threshold** — first faction to `WIN_POINTS = 100` wins. Points come from kills (5 per unit) and HQ damage (1 per hit).
-- **Hard timer** — not implemented yet. PRD §6.7 commits to a 25-minute hard timer with score tiebreaker; lands in sub-phase **3.6**.
-- **Resign** — not implemented yet. Lands in 3.6.
+- **HQ destruction** — destroy the enemy HQ. The other faction wins. **Currently the only win/loss path.**
+- **Resign** — not implemented yet. Lands in 3.13 alongside the PvE win conditions.
 
-The full PRD §6.7 set (military elimination requires HQ + all production destroyed, dominance-tick on Flux control, hard timer, resign) is sub-phase **3.6**'s deliverable.
+The previous Phase 1 placeholder set included a 100-point score threshold (kills + HQ damage). That path was esport-balance scaffolding and was **removed on 2026-05-07** as part of the PvE pivot — see PRD §0 + the 3.10.8 cleanup in the Phase 3 investigation doc. The HUD no longer displays a points line; `REPLAY_VERSION` bumped from 10 → 11 because `FactionState.points` was dropped from the canonical hash.
+
+The PvE win-condition set — **survive-N-waves + scenario objective + boss + resign** (PRD §6.7) — lands in sub-phase **3.13**. Until then HQ destruction is the only signal; matches against the existing scripted AI play out as a pure HQ-vs-HQ skirmish.
 
 ---
 
