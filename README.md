@@ -21,7 +21,7 @@ The convention: **every PRD phase gets one investigation doc** when it starts. P
 | 0 audit (sub-investigation) | ✅ Closed | [`docs/investigation/01-nondeterminism-audit.md`](docs/investigation/01-nondeterminism-audit.md) |
 | 1 — Sim Rewrite | ✅ Closed | [`docs/investigation/02-phase-1-sim-rewrite.md`](docs/investigation/02-phase-1-sim-rewrite.md) — includes Lessons section |
 | 2 — Multiplayer Alpha | ✅ Architecture closed (2.0–2.5); 2.6 parked pending alpha-launch ops | [`docs/investigation/03-phase-2-multiplayer-alpha.md`](docs/investigation/03-phase-2-multiplayer-alpha.md) |
-| **3 — Faction & Map Depth** | **▶ Active — sub-phases 3.0–3.2 closed; 12-step plan now (player-control, pan/zoom, colour resource, supply, energy dump, fog+scouting, asymmetry, maps-as-data, win cond, balance); 3.3 next** | [`docs/investigation/04-phase-3-faction-and-map-depth.md`](docs/investigation/04-phase-3-faction-and-map-depth.md) |
+| **3 — Faction & Map Depth** | **▶ Active — 3.0–3.10 closed (mechanics + game-feel pass + selection-driven action bar with worker-driven builds); 14-step plan; 3.11 next (faction asymmetry)** | [`docs/investigation/04-phase-3-faction-and-map-depth.md`](docs/investigation/04-phase-3-faction-and-map-depth.md) |
 | 4 — Steam Early Access | Future (PRD §8) | n/a |
 | 5 — Ladder & Esport Hooks | Future (PRD §8) | n/a |
 
@@ -51,9 +51,14 @@ Same gate used locally and in CI. The cross-OS determinism workflow (`.github/wo
 
 The dev build is a 1v1 RTS playable mouse-only against the scripted AI on the deterministic sim:
 
-- Click WORKER / DEFENDER / RAIDER on the buildables panel → unit trains and spawns at the HQ on the next sim tick.
-- Click your own worker → selection ring appears → click a live energy node → that worker walks there to harvest.
-- Esc / right-click clears selection.
+- A Tron-styled main menu opens first; click **PLAY VS AI** to start a match (lockstep modes skip the menu, see below).
+- The action bar at the bottom is selection-driven: click your **HQ** for `TRAIN WORKER`; click a **worker** for `BUILD FORGE / SPIRE / PYLON` + `DUMP`; click a **Forge** for combat units; click a **Spire** for `RESEARCH TIER 2 / TRAIL+`. Workers stay idle on spawn until commanded.
+- Workers build buildings — select a worker, pick `BUILD FORGE`, click a tile; the worker walks to the site and constructs it (visible "rising from the ground" + scaffolding ring while in build). Right-click an in-progress structure with workers selected to assign more builders.
+- Click your own worker(s) → click a live energy / flux / colour node → all selected workers go harvest. Selection persists across orders; only an empty-space left-click clears it.
+- Right-click on empty ground moves selected units. Faction-coloured ping at the target confirms the order; cursor changes to a crosshair while in placement mode.
+- Fog of war shows the world as dark; your vision uncovers the bright Tron grid where you can see, mid-darkening it where you've explored but lost sight.
+- Sound: UI click, train-complete, build-complete, attack-hit, HQ-alert. **M** toggles mute (top-right HUD indicator).
+- WASD / arrow keys pan the camera; middle-mouse drag pans; scroll wheel zooms.
 - Press **R** to download the current replay as JSON — useful for capturing bug-report material before a match ends. The match-end overlay also has a `DOWNLOAD REPLAY` button.
 - Match ends on HQ destruction or 100-point threshold; VICTORY/DEFEAT overlay with Play Again + Download Replay.
 

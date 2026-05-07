@@ -61,7 +61,15 @@ import type { InitialMatchSpec } from './state';
 // + initial-HQ discovery sweep at createInitialState. Renderer
 // filters mesh visibility per playerFaction (presentation-only;
 // the sim still hashes the canonical full state).
-export const REPLAY_VERSION = 9;
+// Phase 3.10.4–3.10.6 bumps to v10. FactionState gains
+// `nextSpawnRotation` (round-robin index for HQ-perimeter spawn);
+// Worker gains `targetStructureId` + a new 'building' phase; new
+// commands BuildStructureByWorker (slot 11) + AssignWorkerToBuild
+// (slot 12). Structures no longer auto-tick build phase — only ticks
+// down while ≥1 worker is on site. Workers now stop at the HQ
+// perimeter to deposit (HQ_DEPOSIT_REACH_SQ wider than the old
+// WORKER_REACH_SQ).
+export const REPLAY_VERSION = 10;
 
 export interface ReplayLog {
   version: number;

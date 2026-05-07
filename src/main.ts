@@ -38,7 +38,7 @@
 // Match-end overlay shows VICTORY/DEFEAT with a Play Again button
 // (page reload).
 
-import { autoAssignIdleWorkers, tickAi } from './sim/ai';
+import { tickAi } from './sim/ai';
 import type { Command } from './sim/commands';
 import { Match, serialiseReplay } from './sim/replay';
 import type { InitialMatchSpec } from './sim/state';
@@ -46,9 +46,15 @@ import type { Faction } from './sim/types';
 import { createScene } from './render/scene';
 import { SimRenderer } from './render/sim-renderer';
 import { startSimDriver, TICK_HZ } from './render/sim-driver';
-import { BuildablesPanel, DesyncOverlay, MatchEndOverlay } from './render/player-input';
+import { DesyncOverlay, MatchEndOverlay } from './render/player-input';
+import { ActionBar } from './render/action-bar';
 import { InputController } from './render/input-controller';
 import { CameraController } from './render/camera-controller';
+import { FeedbackOverlay } from './render/feedback';
+import { FogOverlay } from './render/fog-overlay';
+import { AudioManager } from './audio/audio-manager';
+import { GameEventDetector } from './render/event-detector';
+import { MainMenu } from './render/menu/main-menu';
 import { LockstepChannel, type BroadcastChannelLike } from './net/lockstep-channel';
 import { LockstepLoop } from './net/lockstep-loop';
 import { ObserverChannel } from './net/observer-channel';
@@ -208,6 +214,25 @@ async function bootstrap(): Promise<void> {
   resizeCanvas();
 
   const mode = detectRunMode();
+
+  // Phase 3.9.7: PvAI gets a main menu before the match starts.
+  // Lockstep / observer modes already encode intent in the URL and
+  // skip the menu — they're fired off via shared link, not browsed
+  // into. The menu blocks bootstrap until the user clicks PLAY.
+  // `?menu=skip` short-circuits the await for e2e tests + any future
+  // share-link flow that wants to deep-link into a match.
+  const skipMenu = new URLSearchParams(window.location.search).get('menu') === 'skip';
+  if (mode.kind === 'pva' && !skipMenu) {
+    await new Promise<void>((resolve) => {
+      const menu = new MainMenu({
+        onPlayVsAi: () => {
+          menu.hide();
+          resolve();
+        },
+      });
+    });
+  }
+
   const playerFaction: Faction = mode.kind === 'pva' || mode.kind === 'observe-local'
     ? 0
     : mode.localFaction;
@@ -242,6 +267,23 @@ async function bootstrap(): Promise<void> {
   const match = new Match(SPEC);
   const renderer = new SimRenderer(match.sim, scene.entitiesGroup, playerFaction, isObserver);
 
+  // Phase 3.9.1: input-feedback overlay. Observer mode has nothing to
+  // confirm so the overlay is omitted in that path; otherwise the
+  // input controller fires hooks into it on every committed command.
+  const feedback = isObserver ? null : new FeedbackOverlay(scene.entitiesGroup);
+
+  // Phase 3.9.4: fog of war overlay. Observer mode bypasses (sees the
+  // whole map). Player + lockstep modes get the per-faction fog +
+  // explored bitmap painted on top of the grid plane.
+  const fog = new FogOverlay(scene.entitiesGroup, match.sim, playerFaction, isObserver);
+
+  // Phase 3.9.5: audio + event detector. Observer mode runs a no-op
+  // detector (no player faction to attribute events to).
+  const audio = new AudioManager();
+  const eventDetector = isObserver
+    ? null
+    : new GameEventDetector(match.sim, playerFaction, audio);
+
   // Observer view: no input, no buildables panel. The DOWNLOAD REPLAY
   // path still works (an observer can save its own replay log too —
   // the input frames it received are the same the players sent), so
@@ -251,18 +293,28 @@ async function bootstrap(): Promise<void> {
     camera: scene.camera,
     unitMeshes: renderer.unitMeshMap,
     nodeMeshes: renderer.nodeMeshMap,
+    structureMeshes: renderer.structureMeshMap,
+    hqMeshes: renderer.hqMeshMap,
     sim: match.sim,
     playerFaction,
+    feedback: feedback === null ? undefined : {
+      onMoveOrder: (x, y, f) => feedback.spawnMovePing(x, y, f),
+      onAssignToNode: (x, y) => feedback.spawnAssignPulse(x, y),
+      onPlacement: (x, y) => feedback.spawnPlacementBurst(x, y),
+    },
   });
 
-  const panel = isObserver ? null : new BuildablesPanel(playerFaction, {
-    onTrainKindSelected: (kind) => input!.trainUnit(kind),
-    onBuildForgeSelected: () => input!.enterPlaceForgeMode(),
-    onBuildSpireSelected: () => input!.enterPlaceSpireMode(),
-    onBuildPylonSelected: () => input!.enterPlacePylonMode(),
-    onResearchTier2Selected: () => input!.researchTier2(),
-    onResearchTrailDurationSelected: () => input!.researchTrailDuration(),
-    onDumpSelected: () => input!.dumpSelectedWorkers(),
+  const panel = isObserver ? null : new ActionBar(playerFaction, {
+    // Phase 3.9.5: every panel button fires the UI click cue. The
+    // audio manager lazy-creates its AudioContext on first call, so
+    // the first click also unlocks the WebAudio gesture requirement.
+    onTrainKindSelected: (kind) => { audio.click(); input!.trainUnit(kind); },
+    onBuildForgeSelected: () => { audio.click(); input!.enterPlaceForgeMode(); },
+    onBuildSpireSelected: () => { audio.click(); input!.enterPlaceSpireMode(); },
+    onBuildPylonSelected: () => { audio.click(); input!.enterPlacePylonMode(); },
+    onResearchTier2Selected: () => { audio.click(); input!.researchTier2(); },
+    onResearchTrailDurationSelected: () => { audio.click(); input!.researchTrailDuration(); },
+    onDumpSelected: () => { audio.click(); input!.dumpSelectedWorkers(); },
   }, document.body);
 
   const role: 'pva' | 'host' | 'join' | 'observe' = (() => {
@@ -307,10 +359,14 @@ async function bootstrap(): Promise<void> {
     });
     lockstepLoop = new LockstepLoop({
       channel: lockstep,
-      collectLocalCommands: (state) => [
-        ...input!.takeQueued(),
-        ...autoAssignIdleWorkers(state, playerFaction),
-      ],
+      // Phase 3.9.2: player-controlled factions no longer auto-assign
+      // idle workers. New units stand still until the player gives
+      // them an order — agency on creation. The AI's tickAi still
+      // calls autoAssignIdleWorkers internally for its own faction.
+      // PRD §6.3: "assignment matters and idle workers are a real
+      // problem"; the §3.8 idle-worker hotkey is the long-term answer
+      // to that problem, not auto-reassignment after deposit.
+      collectLocalCommands: () => input!.takeQueued(),
     });
     lockstep.sendHello();
   }
@@ -318,10 +374,10 @@ async function bootstrap(): Promise<void> {
   const commandsCallback = (m: Match): Command[] | null => {
     if (observerLoop !== null) return observerLoop.next(m);
     if (lockstepLoop !== null) return lockstepLoop.next(m);
-    // Single-player vs AI.
+    // Single-player vs AI. Phase 3.9.2: no autoAssign for the player.
+    // The AI's tickAi handles its own auto-assign internally.
     return [
       ...input!.takeQueued(),
-      ...autoAssignIdleWorkers(m.sim.state, playerFaction),
       ...tickAi(m.sim.state, (1 - playerFaction) as Faction),
     ];
   };
@@ -368,8 +424,12 @@ async function bootstrap(): Promise<void> {
     requestAnimationFrame(tickHud);
     const nowMs = performance.now();
     const dtSeconds = Math.min(0.1, (nowMs - lastFrameMs) / 1000);
+    const dtMs = dtSeconds * 1000;
     lastFrameMs = nowMs;
     cameraController.update(dtSeconds);
+    feedback?.update(dtMs);
+    fog.update();
+    eventDetector?.update();
     const s = match.sim.state;
 
     // TEST-ONLY corruption injection. When ?desync-test=N is in the
@@ -429,8 +489,10 @@ async function bootstrap(): Promise<void> {
     hud.textContent = lines.join('\n');
 
     const selection = input?.getSelectedUnitIds() ?? EMPTY_SELECTION;
-    panel?.refresh(match.sim, selection);
-    renderer.applyInputVisuals(selection);
+    const selStructure = input?.getSelectedStructureId() ?? null;
+    const selHq = input?.getSelectedHqFaction() ?? null;
+    panel?.refresh(match.sim, selection, selStructure, selHq);
+    renderer.applyInputVisuals(selection, selStructure, selHq);
 
     if (s.winner !== null) matchEnd.show(playerFaction, s.winner);
   }
@@ -449,6 +511,41 @@ async function bootstrap(): Promise<void> {
     if (e.key !== 'r' && e.key !== 'R') return;
     if (e.target instanceof HTMLInputElement) return;
     triggerDownloadReplay();
+  });
+
+  // Phase 3.10.3: opt-in test hooks. Only attached when ?test-hooks=1
+  // is in the URL — production load / preview test never see them, so
+  // preview.spec.ts's "no debug globals" gate stays satisfied. Used by
+  // mouse + select e2e specs that need to programmatically focus the
+  // HQ / a Forge so the action bar shows the right buttons.
+  if (input !== null && new URLSearchParams(window.location.search).get('test-hooks') === '1') {
+    (window as unknown as { __vyluxTest?: unknown }).__vyluxTest = {
+      selectHq: () => input.selectHqProgrammatic(playerFaction),
+      selectStructure: (id: number) => input.selectStructureProgrammatic(id),
+      selectAllOwnWorkers: () => input.selectAllOwnWorkersProgrammatic(),
+      sim: match.sim,
+    };
+  }
+
+  // Phase 3.9.5: M toggles mute. Tiny HUD indicator shows the state
+  // — purely a status read, the keypress is the binding.
+  const muteIndicator = document.createElement('div');
+  muteIndicator.style.cssText = [
+    'position:fixed', 'top:8px', 'right:8px',
+    'font-family:ui-monospace,Menlo,monospace', 'font-size:11px',
+    'color:#9ad', 'pointer-events:none',
+    'background:rgba(0,0,0,0.4)', 'padding:6px 10px',
+    'border-radius:4px', 'border:1px solid #234',
+  ].join(';');
+  muteIndicator.textContent = 'sound · on  (M to mute)';
+  document.body.appendChild(muteIndicator);
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'm' && e.key !== 'M') return;
+    if (e.target instanceof HTMLInputElement) return;
+    audio.setMuted(!audio.isMuted());
+    muteIndicator.textContent = audio.isMuted()
+      ? 'sound · off (M to unmute)'
+      : 'sound · on  (M to mute)';
   });
 
   // Tear down the WebRTC transport on tab-close — without this, peers

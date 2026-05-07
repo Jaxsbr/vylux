@@ -13,8 +13,14 @@ export const GRID_CONSTANTS = {
   tileSize: TILE_SIZE,
   worldExtent: GRID_SIZE * TILE_SIZE,
   dividerWidth: 0.02,
+  // Phase 3.9.4: bumped from 0.4 → 1.2 so the grid reads as actual
+  // neon under good lighting. The fog overlay paints a dark layer
+  // *over* this bright grid in unexplored regions; without a bright
+  // base there is nothing for the fog to obscure (the v1 fog failed
+  // here — the grid was already near-black, and adding more darkness
+  // had no visible effect).
   dividerEmissive: 0x555555,
-  dividerEmissiveIntensity: 0.4,
+  dividerEmissiveIntensity: 1.2,
   tileColor: 0x0a0a0a,
   tileY: 0,
   dividerY: 0.02,

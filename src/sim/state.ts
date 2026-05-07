@@ -80,6 +80,7 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       supplyCap: SUPPLY_CAP_INITIAL,
       supplyUsed: 0,
       trailDurationResearched: false,
+      nextSpawnRotation: 0,
     },
     {
       hqX: fromInt(spec.hqs.faction1.x),
@@ -93,6 +94,7 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       supplyCap: SUPPLY_CAP_INITIAL,
       supplyUsed: 0,
       trailDurationResearched: false,
+      nextSpawnRotation: 0,
     },
   ];
 
@@ -248,6 +250,10 @@ export function spawnStructure(
         buildTicksRemaining: stats.buildTicks,
         trainingKind: null,
         trainTicksRemaining: 0,
+        // Phase 3.10.6: BuildStructureByWorker overrides this to true
+        // after the spawn returns. Default false so spawnStructure()
+        // calls from tests / scripts auto-build via advanceStructure.
+        builtByWorker: false,
       };
       state.structures.push(s);
       return s;
@@ -268,6 +274,7 @@ export function spawnStructure(
         // 'tier2' or 'trailDuration' when the corresponding research
         // command is applied; cleared back to null on completion.
         researchKind: null,
+        builtByWorker: false,
       };
       state.structures.push(s);
       return s;
@@ -283,6 +290,7 @@ export function spawnStructure(
         y,
         hp: stats.maxHp,
         buildTicksRemaining: stats.buildTicks,
+        builtByWorker: false,
       };
       state.structures.push(s);
       return s;
@@ -357,6 +365,11 @@ export function spawnUnit(
         dumpTicksRemaining: 0,
         dumpCooldownTicks: 0,
         activeTrailId: 0,
+        // Phase 3.10.6: not on a build task by default. The
+        // BuildStructureByWorker / AssignWorkerToBuild commands flip
+        // phase = 'building' + targetStructureId; on build complete +
+        // on death the field resets to 0.
+        targetStructureId: 0,
       };
       unit = w;
       break;

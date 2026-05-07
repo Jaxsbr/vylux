@@ -20,6 +20,26 @@ function factionToId(f: Faction): FactionId {
   return f === 0 ? 'blue' : 'red';
 }
 
+// Phase 3.9.3: visual-scale pass. The legacy meshes were sized for a
+// 20×20 grid where one tile = ~one screen-cm; on the 32×32 grid (3.4)
+// units read as ant-sized against the larger map. These scales fatten
+// each mesh on its existing footprint without changing the sim's
+// per-tile coordinates — the sim still sees a unit as a point at its
+// (x,y), the renderer just draws a bigger silhouette. Selection rings
+// + HP bars scale with the group so all the visual chrome stays in
+// proportion.
+//
+// Sim-renderer never writes to .scale, so setting it once at build is
+// stable across the lifetime of the mesh. The legacy placement-pulse
+// animation that reset scale to 1 internally is not driven by the
+// current Phase 3 sim-renderer (no external tickPlacementPulse caller),
+// so scale stays at whatever we set here.
+const UNIT_SCALE = 1.8;
+const HQ_SCALE = 2.0;
+const PRODUCTION_SCALE = 1.9;
+const SPIRE_SCALE = 1.4;
+const PYLON_SCALE = 1.4;
+
 export interface HqVisual {
   group: THREE.Group;
   hpBar: HpBar;
@@ -30,6 +50,16 @@ export interface UnitVisual {
   group: THREE.Group;
   hpBar: HpBar;
   selectionRing: THREE.Mesh;
+  // Phase 3.9.6 animation API. The legacy mesh modules have these built
+  // in already (placement scale-in + death emissive spike); 3.9.6 just
+  // surfaces them through the wrapper interface. tickDeathPulse returns
+  // true while the pulse is still running; sim-renderer waits on that
+  // to dispose the mesh after a unit dies.
+  triggerPlacementPulse(): void;
+  triggerDeathPulse(): void;
+  tickPlacementPulse(dt: number): void;
+  tickDeathPulse(dt: number): boolean;
+  readonly deathPulseActive: boolean;
 }
 
 export interface NodeVisual {
@@ -38,6 +68,7 @@ export interface NodeVisual {
 
 export function buildHqMesh(faction: Faction, tileX: number, tileY: number): HqVisual {
   const b = legacyBuildHQ(factionToId(faction), tileX, tileY);
+  b.group.scale.set(HQ_SCALE, HQ_SCALE, HQ_SCALE);
   return { group: b.group, hpBar: b.hpBar, selectionRing: b.selectionRing };
 }
 
@@ -56,28 +87,59 @@ export function buildUnitMesh(
       // show it always. The hpBar.update(hp, max) call from sim-renderer
       // keeps the fill correct.
       b.hpBar.group.visible = true;
-      return { group: b.mesh, hpBar: b.hpBar, selectionRing: b.selectionRing };
+      b.mesh.scale.set(UNIT_SCALE, UNIT_SCALE, UNIT_SCALE);
+      return wrapUnitVisual(b);
     }
     case 'defender': {
       const b = legacyBuildDefender(fid, tileX, tileY);
       b.hpBar.group.visible = true;
-      return { group: b.mesh, hpBar: b.hpBar, selectionRing: b.selectionRing };
+      b.mesh.scale.set(UNIT_SCALE, UNIT_SCALE, UNIT_SCALE);
+      return wrapUnitVisual(b);
     }
     case 'raider': {
       const b = legacyBuildRaider(fid, tileX, tileY);
       b.hpBar.group.visible = true;
-      return { group: b.mesh, hpBar: b.hpBar, selectionRing: b.selectionRing };
+      b.mesh.scale.set(UNIT_SCALE, UNIT_SCALE, UNIT_SCALE);
+      return wrapUnitVisual(b);
     }
     case 'vanguard': {
       // Phase 3.2 placeholder: a scaled-up raider mesh. Faction-
-      // asymmetric tier-2 visuals arrive in 3.4. The 1.5x scale on
-      // x and z reads as "bigger raider" without sliding off the grid.
+      // asymmetric tier-2 visuals arrive in 3.10. Vanguard reads as
+      // ~1.5× a raider — apply that on top of the unit-wide UNIT_SCALE.
       const b = legacyBuildRaider(fid, tileX, tileY);
-      b.mesh.scale.set(1.5, 1.5, 1.5);
+      const s = UNIT_SCALE * 1.5;
+      b.mesh.scale.set(s, s, s);
       b.hpBar.group.visible = true;
-      return { group: b.mesh, hpBar: b.hpBar, selectionRing: b.selectionRing };
+      return wrapUnitVisual(b);
     }
   }
+}
+
+// Phase 3.9.6: forward the legacy mesh's pulse API through UnitVisual.
+// All three legacy unit modules expose the same shape — placement +
+// death pulse triggers + per-frame tickers — so the wrapper is uniform.
+interface LegacyUnitMesh {
+  mesh: THREE.Group;
+  hpBar: HpBar;
+  selectionRing: THREE.Mesh;
+  triggerPlacementPulse(): void;
+  triggerDeathPulse(): void;
+  tickPlacementPulse(dt: number): void;
+  tickDeathPulse(dt: number): boolean;
+  readonly deathPulseActive: boolean;
+}
+
+function wrapUnitVisual(b: LegacyUnitMesh): UnitVisual {
+  return {
+    group: b.mesh,
+    hpBar: b.hpBar,
+    selectionRing: b.selectionRing,
+    triggerPlacementPulse: () => b.triggerPlacementPulse(),
+    triggerDeathPulse: () => b.triggerDeathPulse(),
+    tickPlacementPulse: (dt) => b.tickPlacementPulse(dt),
+    tickDeathPulse: (dt) => b.tickDeathPulse(dt),
+    get deathPulseActive() { return b.deathPulseActive; },
+  };
 }
 
 // Phase 3.1: Flux nodes are visually distinct from Energy nodes —
@@ -112,6 +174,58 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
   return { group: b.group };
 }
 
+// Phase 3.10.3: shared selection ring for structures. Faction-coloured
+// flat ring sits just above the grid plane; SimRenderer toggles
+// .visible based on the input controller's current selection. Same
+// visual idiom as the unit + HQ rings so the player reads "this thing
+// is selected" consistently regardless of entity kind.
+function buildStructureSelectionRing(faction: Faction, innerR: number, outerR: number): THREE.Mesh {
+  const fid = factionToId(faction);
+  const color = PRODUCTION_FACTION_EMISSIVE[fid];
+  const geo = new THREE.RingGeometry(innerR, outerR, 32);
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 1.6,
+    transparent: true,
+    opacity: 0.9,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const ring = new THREE.Mesh(geo, mat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.02;
+  ring.name = 'structure-selection-ring';
+  ring.visible = false;
+  return ring;
+}
+
+// Phase 3.10.7: scaffolding ring shown only while a structure is
+// under construction. Faction-coloured, dashed-look via a thin
+// ring with low opacity; pulses via the renderer's animation loop.
+// Distinct from the selection ring (dimmer, wider radius, always-on
+// during build).
+function buildScaffoldingRing(faction: Faction, innerR: number, outerR: number): THREE.Mesh {
+  const fid = factionToId(faction);
+  const color = PRODUCTION_FACTION_EMISSIVE[fid];
+  const geo = new THREE.RingGeometry(innerR, outerR, 48);
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.8,
+    transparent: true,
+    opacity: 0.55,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const ring = new THREE.Mesh(geo, mat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.015;
+  ring.name = 'structure-scaffolding-ring';
+  ring.visible = false;
+  return ring;
+}
+
 // Phase 3.0 production building. Visually a low boxy structure with
 // faction-coloured edge trim — distinct from the HQ (which is a tiered
 // spire) and from units. Faction-asymmetric silhouettes arrive in 3.4
@@ -136,9 +250,17 @@ const PRODUCTION_DIMENSIONS = {
 export interface ProductionVisual {
   group: THREE.Group;
   hpBar: HpBar;
+  // Phase 3.10.3: cyan/red ring mesh under the structure, hidden by
+  // default. SimRenderer toggles .visible based on the input
+  // controller's selectedStructureId.
+  selectionRing: THREE.Mesh;
+  // Phase 3.10.7: pulsing ring at the base while the structure is
+  // under construction. SimRenderer toggles + animates per frame.
+  scaffoldingRing: THREE.Mesh;
   // Sim-renderer calls this each frame so the building visually "fills
   // in" as it nears completion. ratio in [0, 1] where 0 = just placed,
-  // 1 = operational. Cheap; sets material emissive intensity.
+  // 1 = operational. Phase 3.10.7: also drives a y-scale rise from
+  // the ground so the structure visibly grows during construction.
   setBuildProgress(ratio: number): void;
 }
 
@@ -148,6 +270,8 @@ export interface ProductionVisual {
 export interface UpgradeVisual {
   group: THREE.Group;
   hpBar: HpBar;
+  selectionRing: THREE.Mesh;
+  scaffoldingRing: THREE.Mesh;
   setBuildProgress(ratio: number): void;
   // Pulse intensity while research is running. ratio 0 = idle, 1 =
   // mid-research; renderer hooks this off researchTicksRemaining.
@@ -190,22 +314,38 @@ export function buildProductionMesh(faction: Faction, tileX: number, tileY: numb
   hpBar.group.visible = true;
   group.add(hpBar.group);
 
+  const selectionRing = buildStructureSelectionRing(faction, 0.55, 0.68);
+  group.add(selectionRing);
+
+  const scaffoldingRing = buildScaffoldingRing(faction, 0.62, 0.78);
+  group.add(scaffoldingRing);
+
   const world = tileToWorld(tileX, tileY);
   group.position.set(world.x, world.y, world.z);
+  group.scale.set(PRODUCTION_SCALE, PRODUCTION_SCALE, PRODUCTION_SCALE);
 
   return {
     group,
     hpBar,
+    selectionRing,
+    scaffoldingRing,
     setBuildProgress(ratio: number): void {
-      // Under construction → trim is dimmed; operational → full intensity.
-      // Linear blend for now; the visual pass in 3.4 can replace this
-      // with a proper "scaffolding" or "rising-from-the-ground" effect.
+      // Phase 3.10.7: rises from the ground as build progresses.
+      // ratio 0 = freshly placed (scale.y = 0.15, body translucent),
+      // ratio 1 = operational (scale.y = 1, body opaque).
       const clamped = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
+      const yScale = 0.15 + 0.85 * clamped;
+      body.scale.y = yScale;
+      body.position.y = PRODUCTION_DIMENSIONS.centerY * yScale;
+      edges.scale.y = yScale;
+      edges.position.y = PRODUCTION_DIMENSIONS.centerY * yScale;
       const trimMat = edges.material as THREE.LineBasicMaterial;
-      trimMat.opacity = 0.25 + 0.75 * clamped;
+      trimMat.opacity = 0.35 + 0.65 * clamped;
       trimMat.transparent = clamped < 1;
-      bodyMat.opacity = 0.4 + 0.6 * clamped;
+      bodyMat.opacity = 0.45 + 0.55 * clamped;
       bodyMat.transparent = clamped < 1;
+      // Scaffolding ring visible only while in build phase.
+      scaffoldingRing.visible = clamped < 1;
     },
   };
 }
@@ -267,17 +407,34 @@ export function buildSpireMesh(faction: Faction, tileX: number, tileY: number): 
   hpBar.group.visible = true;
   group.add(hpBar.group);
 
+  const selectionRing = buildStructureSelectionRing(faction, 0.50, 0.62);
+  group.add(selectionRing);
+
+  const scaffoldingRing = buildScaffoldingRing(faction, 0.55, 0.70);
+  group.add(scaffoldingRing);
+
   const world = tileToWorld(tileX, tileY);
   group.position.set(world.x, world.y, world.z);
+  group.scale.set(SPIRE_SCALE, SPIRE_SCALE, SPIRE_SCALE);
 
   return {
     group,
     hpBar,
+    selectionRing,
+    scaffoldingRing,
     setBuildProgress(ratio: number): void {
       const clamped = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
-      bodyMat.opacity = 0.4 + 0.6 * clamped;
+      // Spire rises tall as build progresses — the dramatic vertical
+      // is what distinguishes it from a Forge.
+      const yScale = 0.10 + 0.90 * clamped;
+      body.scale.y = yScale;
+      body.position.y = (SPIRE_DIMS.height / 2) * yScale;
+      finial.position.y = SPIRE_DIMS.height * yScale + SPIRE_DIMS.finialHeight / 2;
+      finial.visible = clamped > 0.5;
+      bodyMat.opacity = 0.45 + 0.55 * clamped;
       bodyMat.transparent = clamped < 1;
       finialMat.emissiveIntensity = 0.2 + 1.3 * clamped;
+      scaffoldingRing.visible = clamped < 1;
     },
     setResearchProgress(ratio: number): void {
       // Pulse the finial brighter while research is running so the
@@ -303,6 +460,8 @@ const PYLON_DIMS = {
 export interface SupplyVisual {
   group: THREE.Group;
   hpBar: HpBar;
+  selectionRing: THREE.Mesh;
+  scaffoldingRing: THREE.Mesh;
   setBuildProgress(ratio: number): void;
 }
 
@@ -396,17 +555,32 @@ export function buildPylonMesh(faction: Faction, tileX: number, tileY: number): 
   hpBar.group.visible = true;
   group.add(hpBar.group);
 
+  const selectionRing = buildStructureSelectionRing(faction, 0.42, 0.52);
+  group.add(selectionRing);
+
+  const scaffoldingRing = buildScaffoldingRing(faction, 0.46, 0.58);
+  group.add(scaffoldingRing);
+
   const world = tileToWorld(tileX, tileY);
   group.position.set(world.x, world.y, world.z);
+  group.scale.set(PYLON_SCALE, PYLON_SCALE, PYLON_SCALE);
 
   return {
     group,
     hpBar,
+    selectionRing,
+    scaffoldingRing,
     setBuildProgress(ratio: number): void {
       const clamped = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
-      bodyMat.opacity = 0.4 + 0.6 * clamped;
+      const yScale = 0.15 + 0.85 * clamped;
+      body.scale.y = yScale;
+      body.position.y = (PYLON_DIMS.height / 2) * yScale;
+      cap.position.y = PYLON_DIMS.height * yScale + PYLON_DIMS.capHeight / 2;
+      cap.visible = clamped > 0.4;
+      bodyMat.opacity = 0.45 + 0.55 * clamped;
       bodyMat.transparent = clamped < 1;
       capMat.emissiveIntensity = 0.2 + 1.0 * clamped;
+      scaffoldingRing.visible = clamped < 1;
     },
   };
 }

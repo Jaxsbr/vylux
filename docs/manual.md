@@ -18,7 +18,7 @@ Three resources, in the shape PRD §6.3 commits to.
 | **Flux** | Flux nodes (small set, contested). Same gather-and-deposit loop; deposits to a separate pool. | Tier-2 research at the Spire, tier-2 unit production at the Forge. | Phase 3.1 added Flux as a distinct resource. The launch SPEC currently has 1 Flux node at the map centre. |
 | **Colour** (Blue / Red) | Colour nodes — **faction-locked**: blue nodes only by faction 0 (cyan), red only by faction 1 (red-orange). | Every unit and every structure (small cost). Lockout-by-denial: pushed off your colour nodes → no production until you reclaim. | Phase 3.5. Colour nodes regenerate passively (~1 / sec) toward a 100-unit cap, so a denied faction recovers slowly. Energy + Flux nodes don't regen and still die at empty. |
 
-**Worker model:** workers walk to a node, harvest for `HARVEST_TICKS` (~1 second), pick up `HARVEST_AMOUNT` clamped by `WORKER_CAPACITY`, walk back to HQ, deposit, and resume. Workers don't stand on a node and trickle. A worker assigned (manually or by auto-assign) to a foreign-colour node is silently dropped back to idle.
+**Worker model:** workers walk to a node, harvest for `HARVEST_TICKS` (~1 second), pick up `HARVEST_AMOUNT` clamped by `WORKER_CAPACITY`, walk back to HQ, deposit, and resume. Workers don't stand on a node and trickle. A worker assigned (manually or by auto-assign) to a foreign-colour node is silently dropped back to idle. **Phase 3.9.2:** newly-trained player-faction workers stand idle on spawn and after each deposit until the player issues a command — auto-assign was removed from the player path so the player keeps agency over where workers go (the AI still auto-assigns its own faction). PRD §6.3.
 
 ### Supply (Phase 3.6)
 
@@ -123,22 +123,51 @@ The full PRD §6.7 set (military elimination requires HQ + all production destro
 - **Left-click** an owned unit → selects only that unit (replaces any prior selection).
 - **Shift + left-click** an owned unit → toggle that unit in or out of the current selection.
 - **Left-click + drag** on empty ground → drag-rectangle. On release, every owned unit inside the rect joins the selection (shift-drag adds to the existing selection instead of replacing).
-- With selected workers, **left-click** a node → all selected workers are assigned to harvest there.
+- With selected workers, **left-click** a node → all selected workers are assigned to harvest there. Selection *persists* — the workers stay highlighted so you can give a follow-up order. Node-pick takes priority over unit-pick when you have a selection, so clicking a node already being harvested by another worker assigns the current selection rather than re-selecting the busy worker.
 - **Right-click** on empty ground → MoveUnit for every selected unit:
   - Workers cancel any harvest, walk to the tile, and stay parked there until you give them another order.
   - Raiders / vanguards take the tile as a temporary override of their march toward the enemy HQ; on arrival they resume default behaviour.
   - Defenders ignore the order (stationary).
+- **Right-click** on an in-progress own structure (with worker(s) selected) → assign those workers to help build it. Multi-worker construction stacks throughput.
 - **Right-click** during placement mode → cancels the placement (no move-order is issued).
+- **Left-click on empty ground** → clears the unit selection. Selection only clears here or via Esc; it persists across orders so a single batch of workers can be reassigned without re-picking them every time.
 - **Esc** → clears selection and cancels any pending placement.
 
-### Buildables panel
+**Phase 3.9.1 visual feedback.** A faction-coloured ring pings at the right-click target on every move order; a green pulse confirms an assign-to-node click; a brief burst confirms structure placement. The cursor switches to a crosshair while in placement mode and to a pointer when hovering over an own unit or a node — so the player can see at a glance what a click will do.
 
-Bottom of screen:
+**Phase 3.9.3 visual scale.** All units render at ~1.8× their previous size; HQ at ~2.0×, Forge at ~1.9×, Spire and Pylon at ~1.4× — the catalog now reads at glance distance instead of as ant-sized silhouettes against the 32×32 grid. Sim is untouched (footprints are still 1 tile in the canonical state); the scale-up is renderer-only. AI Forge + Spire offsets pushed from (±2,±2) and (±1,0) to (±3,±3) and (±3,0) so the bigger meshes don't visually overlap the HQ.
 
-- **WORKER / DEFENDER / RAIDER / VANGUARD** — train at HQ (worker) or first operational Forge (combat units). Disabled with reason text when prereqs unmet (`no forge` / `forge busy` / `tier 2 not researched` / `no flux` / `no <color>` / `supply blocked`).
-- **BUILD FORGE** / **BUILD SPIRE** / **BUILD PYLON** — click, then click a tile to place.
-- **TIER 2** / **TRAIL+** — research at the player's first idle Spire.
-- **DUMP (E)** — for every selected dumpable worker, activate the energy-dump ability. Hotkey: `E`.
+**Phase 3.9.4 fog visualization.** The Tron grid is *uncovered* by vision: a dark layer covers the whole map by default; visible tiles drop the layer to transparent so the brightened grid lines (intensity bumped from 0.4 → 1.2 in the same sub-phase) shine through. Explored-but-not-currently-visible tiles stay mid-darkened — you remember they're there, but they fade. Unexplored tiles stay heavily dimmed (~92% alpha) so the unknown reads as a void carved away from the lit map. Composited per-pixel CPU-side via `min()` of falloff contributions, so overlapping vision sources don't compound. Observer mode bypasses entirely. Pure renderer; the explored bitmap lives outside sim state, the cross-OS gate is unaffected.
+
+**Phase 3.9.5 audio.** Five Web-Audio-synthesized cues: UI button click, train complete (rising chime when a unit spawns), build complete (double tick when a structure goes operational), attack hit (noise burst when any friendly unit takes damage), HQ alert (pulsing low tone when the player HQ takes damage). Throttled to at most one of each type per tick, so combat doesn't spam. Mute toggle bound to **M** with a small status indicator top-right. No external audio assets — every sound is an oscillator + envelope. Renderer-side detection compares sim state across ticks; the deterministic sim is unaware.
+
+**Phase 3.9.6 unit animations.** Newly-trained units scale-in from 40% to full size on spawn (legacy "placement pulse" — already existed in mesh code, surfaced through the wrapper interface and triggered by sim-renderer when it sees a unit ID for the first time). Units that die get a brief emissive flash before the mesh disappears — the visual stays alive in a "dying" pool until the pulse decays, so the player can see the death even if it happens between two right-click moves. Renderer-only; sim is untouched.
+
+**Phase 3.9.7 main menu.** PvAI mode opens to a Tron-styled menu before the match begins — VYLUX title in glowing cyan, PLAY VS AI / MULTIPLAYER / OPTIONS buttons, faction picker placeholder. MULTIPLAYER + OPTIONS are stubs; the existing `?lockstep=host` URL flow is the multiplayer path until lobby UI lands, and OPTIONS waits on the Phase 4 binding-config UI. `?menu=skip` URL param bypasses the menu (used by e2e tests + future deep-link share flows). Match-end overlay's RELOAD button returns to the menu naturally — no separate "back to menu" wire needed.
+
+**Phase 3.10 in-game action bar (context-sensitive).** Replaces the Phase 1 always-on flat buildables panel with an action bar driven by current selection: HQ → TRAIN WORKER; Worker(s) → BUILD FORGE / SPIRE / PYLON + DUMP; Forge → TRAIN DEFENDER / RAIDER / VANGUARD; Spire → RESEARCH TIER 2 / TRAIL+; Pylon → info hint; mixed/empty → guidance text. Each button shows its hotkey letter, faction-coloured cost glyphs (E yellow, F green, C cyan/red), and tooltip-based disabled reasons. HQ + structures are now click-selectable (new selection rings on each); the input controller carries `selectedStructureId` + `selectedHqFaction` slots alongside the unit selection. Workers build buildings (PRD §6.3 "workers gather, deposit, and repair" extended): the player must train a worker before placing a Forge.
+
+**Phase 3.10.4 worker spawn perimeter.** Newly-trained workers no longer appear on the HQ tile (selection collision + visual overlap with the bigger 3.9.3 HQ silhouette). They spawn on one of eight surrounding tiles via a deterministic round-robin (`FactionState.nextSpawnRotation` indexes a fixed offset table). Player explicit-tile spawns (TrainUnit with `x`/`y`) still honour the requested coords.
+
+**Phase 3.10.5 deposit perimeter.** Returning workers stop at the HQ perimeter (~2-tile radius from HQ center) instead of walking onto the HQ centre tile. Visual cleanliness — workers are no longer hidden inside the HQ silhouette while depositing.
+
+**Phase 3.10.6 worker-driven building.** New `BuildStructureByWorker` command (slot 11): the player selects a worker, picks BUILD FORGE / SPIRE / PYLON, then clicks a tile. The structure spawns at full `buildTicksRemaining` with `builtByWorker = true`; the assigned worker walks to the site and ticks construction down each tick while in range. Multiple workers stack contributions naturally (each contributes one tick per tick on site). Construction halts if the worker dies or is given a different command — the structure waits in build phase until another worker is dispatched. AI also uses the new path. Legacy `BuildStructure` (slot 4) retained for tests + back-compat — spawns structures with `builtByWorker = false` so they auto-tick the build phase.
+
+**Phase 3.10.7 multi-worker building + construction visual.** Right-click on an in-progress structure with worker(s) selected fans out `AssignWorkerToBuild` (slot 12) per worker — additional builders accelerate the construction. Structures under construction now show a visible "rising from the ground" animation: the body's y-scale grows from 15% to 100% as build progresses, with a faction-coloured pulsing scaffolding ring at the base that fades when construction completes. Spire's finial only appears past 50% build progress; Pylon's cap past 40% — so the silhouette evolves through the build rather than just fading in.
+
+### Action bar (Phase 3.10)
+
+Bottom of screen, **driven by current selection**:
+
+- Select your **HQ** (left-click) → **TRAIN WORKER**.
+- Select a **Worker** (or several) → **BUILD FORGE / SPIRE / PYLON**, **DUMP**. Workers are the builders — to place your first Forge, train a worker first, then click it.
+- Select a **Forge** → **TRAIN DEFENDER / RAIDER / VANGUARD**. Vanguard is shown but disabled until tier 2 is researched (hover for the reason).
+- Select a **Spire** → **RESEARCH TIER 2 / TRAIL+**.
+- Select a **Pylon** → info hint (no actions; Pylons just provide supply).
+- Mixed unit selection → no actions; right-click moves them.
+- Nothing selected → empty bar with a guidance hint.
+
+Each button shows its hotkey letter, faction-coloured cost glyphs (E energy / F flux / C colour), and a tooltip explaining why it's disabled.
 
 ### Keyboard
 

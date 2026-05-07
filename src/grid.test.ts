@@ -97,10 +97,14 @@ describe('buildGrid', () => {
     expect(materialIds.size).toBe(TILE_COUNT);
   });
 
-  it('gridLineMaterial is emissive dim grey and is shared across dividers', () => {
+  it('gridLineMaterial is emissive grey and is shared across dividers', () => {
     const grid = buildGrid();
     expect(grid.gridLineMaterial.emissive.getHexString()).toBe('555555');
+    // Phase 3.9.4 bumped intensity from ~0.4 to 1.2 so the grid reads
+    // as actual neon under the new "uncover-by-vision" fog overlay.
+    // The lower bound stays at 0.1 to flag accidental zeroing; upper
+    // bound widened to 2.0 to leave room for tuning.
     expect(grid.gridLineMaterial.emissiveIntensity).toBeGreaterThanOrEqual(0.1);
-    expect(grid.gridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(0.5);
+    expect(grid.gridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(2.0);
   });
 });

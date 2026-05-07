@@ -61,6 +61,8 @@ export class Sim {
       h.writeU32(fs.supplyUsed);
       // Phase 3.7: trail-duration research flag.
       h.writeU32(fs.trailDurationResearched ? 1 : 0);
+      // Phase 3.10.4: round-robin index for HQ-perimeter spawn.
+      h.writeU32(fs.nextSpawnRotation);
     }
 
     // Units — array order is the sim's iteration order; tombstones
@@ -138,22 +140,22 @@ function hashStructure(h: Hasher, s: Structure): void {
       h.writeU32(s.buildTicksRemaining);
       h.writeU32(s.trainingKind === null ? 0 : unitKindToInt(s.trainingKind) + 1);
       h.writeU32(s.trainTicksRemaining);
+      // Phase 3.10.6: worker-driven build flag.
+      h.writeU32(s.builtByWorker ? 1 : 0);
       return;
     case 'upgrade':
       h.writeU32(s.buildTicksRemaining);
       h.writeU32(s.researchTicksRemaining);
-      // Phase 3.7: which research is currently running. 0 = idle,
-      // 1 = tier-2, 2 = trail-duration. Encoded as small-int slot so
-      // adding a third research kind in 3.9+ is one row.
       h.writeU32(
         s.researchKind === null ? 0 :
         s.researchKind === 'tier2' ? 1 :
         2,
       );
+      h.writeU32(s.builtByWorker ? 1 : 0);
       return;
     case 'supply':
-      // Phase 3.6: Pylon — build phase only.
       h.writeU32(s.buildTicksRemaining);
+      h.writeU32(s.builtByWorker ? 1 : 0);
       return;
   }
 }
@@ -201,6 +203,8 @@ function hashUnit(h: Hasher, u: Unit): void {
       h.writeU32(u.dumpTicksRemaining);
       h.writeU32(u.dumpCooldownTicks);
       h.writeU32(u.activeTrailId);
+      // Phase 3.10.6: structure id this worker is building (0 = none).
+      h.writeU32(u.targetStructureId);
       return;
     case 'defender':
     case 'raider':
@@ -235,5 +239,6 @@ function workerPhaseToInt(phase: WorkerPhase): number {
     case 'movingToNode': return 1;
     case 'harvesting': return 2;
     case 'returning': return 3;
+    case 'building': return 4;
   }
 }

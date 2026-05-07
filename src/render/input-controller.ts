@@ -37,13 +37,29 @@ import { toFloat } from '../sim/fixed';
 // default ballpark.
 const DRAG_THRESHOLD_PX = 5;
 
+export interface InputFeedbackHooks {
+  // Phase 3.9.1: fired after the input controller commits the
+  // corresponding sim command. Pure presentation — no sim impact.
+  onMoveOrder?(tileX: number, tileY: number, faction: Faction): void;
+  onAssignToNode?(tileX: number, tileY: number): void;
+  onPlacement?(tileX: number, tileY: number): void;
+}
+
 export interface InputControllerOptions {
   canvas: HTMLCanvasElement;
   camera: THREE.Camera;
   unitMeshes: ReadonlyMap<number, THREE.Group>;
   nodeMeshes: ReadonlyMap<number, THREE.Group>;
+  // Phase 3.10.3: structure + HQ raycast registries so the player can
+  // click them. Same shape as unitMeshes; mesh groups carry
+  // userData.structureId / userData.hqFaction respectively.
+  structureMeshes: ReadonlyMap<number, THREE.Group>;
+  hqMeshes: ReadonlyMap<Faction, THREE.Group>;
   sim: Sim;
   playerFaction: Faction;
+  // Phase 3.9.1: optional renderer-side feedback hooks. Omitted in
+  // tests / observer-style harnesses where no overlay exists.
+  feedback?: InputFeedbackHooks;
 }
 
 interface DragState {
@@ -59,12 +75,22 @@ interface DragState {
 
 export class InputController {
   private selectedUnitIds = new Set<number>();
+  // Phase 3.10.3: at most one structure or HQ may be "selected" at a
+  // time. Selecting either clears the other + clears the unit
+  // selection — the action bar reads exactly one of the three slots.
+  // Action-bar UX prefers a single "focused thing" rather than a
+  // mixed structure-and-units selection.
+  private selectedStructureId: number | null = null;
+  private selectedHqFaction: Faction | null = null;
   // When set, the next left-click places a structure of this kind at
   // the clicked tile. null = normal click flow (select / assign / drag).
   // Phase 3.0 introduced this for production buildings; Phase 3.2
   // reuses the slot for upgrade structures (Spires); Phase 3.6 adds
-  // supply structures (Pylons).
+  // supply structures (Pylons). Phase 3.10.6: also captures the worker
+  // IDs that will build it — snapshotted at enterPlace*Mode time so a
+  // mid-placement selection change doesn't strand the build.
   private pendingPlacement: 'production' | 'upgrade' | 'supply' | null = null;
+  private pendingPlacementWorkers: number[] = [];
   private readonly queue: Command[] = [];
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -130,9 +156,13 @@ export class InputController {
         unitKind: kind,
       });
     }
-    // Selecting and training are independent — clear selection so the
-    // ring doesn't linger on a unit the player isn't focused on.
-    this.clearSelection();
+    // Phase 3.10.6: keep the HQ / structure selection so the player
+    // can queue another train without re-selecting. (Clearing was the
+    // pre-3.10 behavior that assumed a flat panel; with the
+    // selection-driven action bar it'd hide the very buttons the
+    // player just clicked.) Unit selection still clears so the ring
+    // doesn't linger on workers that just got told to train.
+    this.selectedUnitIds.clear();
   }
 
   // Called by the buildables panel when BUILD FORGE is clicked. Enters
@@ -140,19 +170,43 @@ export class InputController {
   // BuildStructure command at the clicked tile.
   enterPlaceForgeMode(): void {
     this.pendingPlacement = 'production';
-    this.clearSelection();
+    this.pendingPlacementWorkers = this.snapshotSelectedWorkers();
+    // Don't clear the unit selection — the player wants to see "I'm
+    // about to dispatch these workers." The selection rings stay on
+    // until the placement click resolves.
+    this.applyCursor('crosshair');
   }
 
   // Phase 3.2: placement mode for the upgrade structure (Spire).
   enterPlaceSpireMode(): void {
     this.pendingPlacement = 'upgrade';
-    this.clearSelection();
+    this.pendingPlacementWorkers = this.snapshotSelectedWorkers();
+    this.applyCursor('crosshair');
   }
 
   // Phase 3.6: placement mode for the supply structure (Pylon).
   enterPlacePylonMode(): void {
     this.pendingPlacement = 'supply';
-    this.clearSelection();
+    this.pendingPlacementWorkers = this.snapshotSelectedWorkers();
+    this.applyCursor('crosshair');
+  }
+
+  // Phase 3.10.6: collect the IDs of currently-selected own-faction
+  // alive workers — these are the ones that will be dispatched on the
+  // placement click. The first becomes the BuildStructureByWorker
+  // owner; the rest queue AssignWorkerToBuild after the structure
+  // exists. Empty list means no worker available; the placement
+  // commit will silently no-op (sim rejects invalid workerId).
+  private snapshotSelectedWorkers(): number[] {
+    const out: number[] = [];
+    const sim = this.opts.sim.state;
+    for (const id of this.selectedUnitIds) {
+      const u = sim.units.find((x) => x.id === id);
+      if (!u || !u.alive || u.faction !== this.opts.playerFaction) continue;
+      if (u.kind !== 'worker') continue;
+      out.push(u.id);
+    }
+    return out;
   }
 
   isPlacing(): boolean {
@@ -228,22 +282,60 @@ export class InputController {
     if (e.button !== 0) return;
 
     // Placement consumes the click. The clicked tile (rounded from the
-    // ground-plane intersection) becomes the structure's position via
-    // BuildStructure. Sim is forgiving about overlap with other
-    // entities — Phase 3.5 introduces real tile occupancy.
+    // ground-plane intersection) becomes the structure's position.
+    // Phase 3.10.6: workers build buildings — the first selected
+    // worker dispatches via BuildStructureByWorker (which spawns the
+    // structure + assigns the worker), and any additional selected
+    // workers queue AssignWorkerToBuild for parallel construction.
     if (this.pendingPlacement !== null) {
       const tile = this.pickGroundTile(e);
-      if (tile !== null) {
+      if (tile !== null && this.pendingPlacementWorkers.length > 0) {
+        const [first, ...rest] = this.pendingPlacementWorkers;
         this.queue.push({
-          kind: CommandKind.BuildStructure,
-          faction: this.opts.playerFaction,
+          kind: CommandKind.BuildStructureByWorker,
+          workerId: first,
           structureKind: this.pendingPlacement,
           x: tile.x,
           y: tile.y,
         });
+        // The follow-up AssignWorkerToBuild commands target the
+        // structure id created by BuildStructureByWorker — but we
+        // don't know that id until the sim has applied the build
+        // command. The sim's nextEntityId is monotonic + visible to
+        // us; the structure will get state.nextEntityId at apply
+        // time. This couples the input layer to a sim implementation
+        // detail (next ID), so a cleaner approach is for the player
+        // to manually re-dispatch additional workers after seeing the
+        // structure appear. For 3.10.6 we ship single-worker only;
+        // 3.10.7 wires multi-worker through right-click on an
+        // in-progress structure.
+        void rest;
+        this.opts.feedback?.onPlacement?.(tile.x, tile.y);
       }
       this.pendingPlacement = null;
+      this.pendingPlacementWorkers = [];
+      this.refreshCursor(e);
       return;
+    }
+
+    // Phase 3.10 follow-up: if the player already has a selection and
+    // clicked (without shift) on a node, prefer node-assign over
+    // unit-pick. Without this, clicking a node that has another
+    // worker overlapping it (e.g. one already harvesting there)
+    // re-selects that worker instead of assigning the current
+    // selection — confusing because the player's intent was clearly
+    // "harvest this node." Shift+click still falls through to the
+    // unit-toggle path so additive selection works as before.
+    if (!e.shiftKey && this.selectedUnitIds.size > 0) {
+      const nodeHitFromDown = this.pickLiveNode(e);
+      if (nodeHitFromDown !== null) {
+        const sentAny = this.queueAssignWorkersToNode(nodeHitFromDown);
+        if (sentAny) {
+          const node = this.opts.sim.state.nodes.find((n) => n.id === nodeHitFromDown);
+          if (node) this.opts.feedback?.onAssignToNode?.(toFloat(node.x), toFloat(node.y));
+        }
+        return;
+      }
     }
 
     // Try unit hit first. A click on an owned unit either replaces or
@@ -257,6 +349,29 @@ export class InputController {
         this.selectedUnitIds.clear();
         this.selectedUnitIds.add(unitHit);
       }
+      // Selecting a unit clears any structure / HQ focus — see the
+      // mutual-exclusion rule at the field declarations.
+      this.selectedStructureId = null;
+      this.selectedHqFaction = null;
+      return;
+    }
+
+    // Phase 3.10.3: structure pick (own structures only). Single-
+    // select; clears unit + HQ slots.
+    const structureHit = this.pickOwnedStructure(e);
+    if (structureHit !== null) {
+      this.selectedUnitIds.clear();
+      this.selectedHqFaction = null;
+      this.selectedStructureId = structureHit;
+      return;
+    }
+
+    // Phase 3.10.3: HQ pick (own HQ only).
+    const hqHit = this.pickOwnedHq(e);
+    if (hqHit !== null) {
+      this.selectedUnitIds.clear();
+      this.selectedStructureId = null;
+      this.selectedHqFaction = hqHit;
       return;
     }
 
@@ -278,7 +393,13 @@ export class InputController {
   }
 
   private handlePointerMove(e: PointerEvent): void {
-    if (this.drag === null) return;
+    if (this.drag === null) {
+      // Phase 3.9.1: hover-driven cursor state. Only updated when NOT
+      // mid-drag — during a drag the cursor stays as it was at down so
+      // the player isn't visually tracked through stale hover states.
+      this.refreshCursor(e);
+      return;
+    }
     const dx = e.clientX - this.drag.startClientX;
     const dy = e.clientY - this.drag.startClientY;
     if (!this.drag.dragging) {
@@ -327,7 +448,15 @@ export class InputController {
     const nodeHit = this.pickLiveNode(e);
     if (nodeHit !== null && this.selectedUnitIds.size > 0) {
       const sentAny = this.queueAssignWorkersToNode(nodeHit);
-      if (sentAny) this.clearSelection();
+      if (sentAny) {
+        const node = this.opts.sim.state.nodes.find((n) => n.id === nodeHit);
+        if (node) this.opts.feedback?.onAssignToNode?.(toFloat(node.x), toFloat(node.y));
+        // Phase 3.10 follow-up: do NOT clear selection on assign-to-
+        // node. The pre-3.10 code cleared, but the player loses focus
+        // mid-task — they have to re-select the workers to give a
+        // follow-up order. Standard RTS pattern is "selection persists
+        // until you click empty space"; that's what we do now.
+      }
       return;
     }
     this.clearSelection();
@@ -338,16 +467,51 @@ export class InputController {
     // convention "abort current action"), regardless of selection.
     if (this.pendingPlacement !== null) {
       this.pendingPlacement = null;
+      this.refreshCursor(e);
       return;
     }
     if (this.selectedUnitIds.size === 0) return;
+
+    // Phase 3.10.7: right-click on an in-progress own-faction structure
+    // with worker(s) selected → dispatch additional builders. Sim
+    // already supports the multi-worker stacking; this is just the
+    // input wire. Operational structures fall through to the move-
+    // order path (right-clicking a Forge with workers selected just
+    // moves them past it — no special "repair" action yet).
+    const sim = this.opts.sim.state;
+    const structureHit = this.pickOwnedStructure(e);
+    if (structureHit !== null) {
+      const s = sim.structures.find((x) => x.id === structureHit);
+      if (s && s.alive && s.buildTicksRemaining > 0) {
+        let assigned = 0;
+        for (const id of this.selectedUnitIds) {
+          const u = sim.units.find((x) => x.id === id);
+          if (!u || !u.alive || u.kind !== 'worker') continue;
+          if (u.faction !== this.opts.playerFaction) continue;
+          this.queue.push({
+            kind: CommandKind.AssignWorkerToBuild,
+            workerId: id,
+            structureId: s.id,
+          });
+          assigned++;
+        }
+        if (assigned > 0) {
+          // Visual confirmation at the structure's tile.
+          this.opts.feedback?.onAssignToNode?.(toFloat(s.x), toFloat(s.y));
+          return;
+        }
+        // No workers in selection (e.g. only raiders) — fall through
+        // to move-order so the click does *something* on the tile.
+      }
+    }
+
     // Move-order for every selected unit at the clicked tile. Sim
     // silently ignores defenders + dead units, so the input layer
     // doesn't need to filter — but we do filter to avoid emitting
     // dead-letter commands every right-click.
     const tile = this.pickGroundTile(e);
     if (tile === null) return;
-    const sim = this.opts.sim.state;
+    let queued = false;
     for (const id of this.selectedUnitIds) {
       const u = sim.units.find((x) => x.id === id);
       if (!u || !u.alive || u.kind === 'defender') continue;
@@ -357,7 +521,11 @@ export class InputController {
         x: tile.x,
         y: tile.y,
       });
+      queued = true;
     }
+    // Only ping when at least one move actually queued — prevents the
+    // ring from flashing when the selection is all defenders / dead.
+    if (queued) this.opts.feedback?.onMoveOrder?.(tile.x, tile.y, this.opts.playerFaction);
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
@@ -365,6 +533,7 @@ export class InputController {
     if (e.key === 'Escape') {
       this.clearSelection();
       this.pendingPlacement = null;
+      this.applyCursor('auto');
       return;
     }
     // Phase 3.7: hotkey 'E' fires the energy dump for every selected
@@ -397,6 +566,118 @@ export class InputController {
 
   private clearSelection(): void {
     this.selectedUnitIds.clear();
+    this.selectedStructureId = null;
+    this.selectedHqFaction = null;
+  }
+
+  getSelectedStructureId(): number | null {
+    return this.selectedStructureId;
+  }
+
+  getSelectedHqFaction(): Faction | null {
+    return this.selectedHqFaction;
+  }
+
+  // Phase 3.10.3: programmatic selection for test hooks. Production
+  // input still goes through the pointer pickers — these methods exist
+  // so e2e specs can drive the action bar without computing canvas
+  // pixel coords for the HQ / structure tile.
+  selectHqProgrammatic(faction: Faction): void {
+    this.selectedUnitIds.clear();
+    this.selectedStructureId = null;
+    this.selectedHqFaction = faction;
+  }
+
+  selectStructureProgrammatic(structureId: number): void {
+    this.selectedUnitIds.clear();
+    this.selectedHqFaction = null;
+    this.selectedStructureId = structureId;
+  }
+
+  selectAllOwnWorkersProgrammatic(): void {
+    this.selectedUnitIds.clear();
+    this.selectedStructureId = null;
+    this.selectedHqFaction = null;
+    for (const u of this.opts.sim.state.units) {
+      if (!u.alive || u.faction !== this.opts.playerFaction || u.kind !== 'worker') continue;
+      this.selectedUnitIds.add(u.id);
+    }
+  }
+
+  private pickOwnedStructure(e: PointerEvent): number | null {
+    this.updatePointer(e);
+    const targets: THREE.Object3D[] = [];
+    for (const g of this.opts.structureMeshes.values()) {
+      if (g.visible) targets.push(g);
+    }
+    const hits = this.raycaster.intersectObjects(targets, true);
+    for (const h of hits) {
+      let obj: THREE.Object3D | null = h.object;
+      while (obj !== null) {
+        const ud = obj.userData as { structureId?: number };
+        if (typeof ud.structureId === 'number') {
+          const s = this.opts.sim.state.structures.find((x) => x.id === ud.structureId);
+          if (s && s.alive && s.faction === this.opts.playerFaction) return s.id;
+          return null;
+        }
+        obj = obj.parent;
+      }
+    }
+    return null;
+  }
+
+  private pickOwnedHq(e: PointerEvent): Faction | null {
+    this.updatePointer(e);
+    const targets: THREE.Object3D[] = [];
+    for (const g of this.opts.hqMeshes.values()) {
+      if (g.visible) targets.push(g);
+    }
+    const hits = this.raycaster.intersectObjects(targets, true);
+    for (const h of hits) {
+      let obj: THREE.Object3D | null = h.object;
+      while (obj !== null) {
+        const ud = obj.userData as { hqFaction?: Faction };
+        if (typeof ud.hqFaction === 'number') {
+          if (ud.hqFaction === this.opts.playerFaction) return ud.hqFaction;
+          return null;
+        }
+        obj = obj.parent;
+      }
+    }
+    return null;
+  }
+
+  // Phase 3.9.1: hover-driven CSS cursor on the canvas. Cheap raycast
+  // against the same mesh registries the click path uses; only fires
+  // when the pointer moves and we're not mid-drag, so the per-frame
+  // budget is one raycast per mousemove event (small entity counts —
+  // negligible).
+  //
+  //   placement mode      → crosshair (the click will commit a build)
+  //   over own unit       → pointer    (clickable to select)
+  //   over a live node    → pointer    (clickable as harvest target)
+  //   anything else       → auto       (default OS pointer)
+  private refreshCursor(e: PointerEvent): void {
+    if (this.pendingPlacement !== null) {
+      this.applyCursor('crosshair');
+      return;
+    }
+    if (this.pickOwnedUnit(e) !== null) {
+      this.applyCursor('pointer');
+      return;
+    }
+    if (this.pickLiveNode(e) !== null) {
+      this.applyCursor('pointer');
+      return;
+    }
+    this.applyCursor('auto');
+  }
+
+  private currentCursor: string = 'auto';
+  private applyCursor(c: string): void {
+    if (c === this.currentCursor) return;
+    this.currentCursor = c;
+    this.opts.canvas.style.cursor = c;
   }
 
   // Project the pointer onto the y=0 ground plane and return the

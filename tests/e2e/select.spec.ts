@@ -18,14 +18,18 @@ test('click-select-then-click-node sequence runs without errors', async ({ page 
   });
   page.on('pageerror', (err) => consoleErrors.push(err.message));
 
-  await page.goto('/');
+  // Phase 3.10: action bar is selection-driven; the WORKER button only
+  // appears once the HQ is selected. ?test-hooks=1 exposes the helper.
+  await page.goto('/?menu=skip&test-hooks=1');
   await page.waitForTimeout(500);
 
   const canvas = page.locator('#canvas');
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
 
-  // 1. Place a worker near the middle of the grid.
+  // 1. Select HQ programmatically, then train a worker.
+  await page.evaluate(() => (window as unknown as { __vyluxTest: { selectHq(): void } }).__vyluxTest.selectHq());
+  await page.waitForTimeout(50);
   await page.getByRole('button', { name: /worker/i }).click();
   await canvas.click({ position: { x: box!.width / 2, y: box!.height / 2 + 30 } });
   await page.waitForTimeout(400);

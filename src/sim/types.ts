@@ -85,9 +85,22 @@ export interface FactionState {
   // pick up the new lifetime too — the segment-age check looks up the
   // owner faction's flag at expiry-time, not at spawn-time.
   trailDurationResearched: boolean;
+  // Phase 3.10.4: round-robin index for HQ-perimeter spawn placement.
+  // Each TrainUnit at the HQ picks an offset from a fixed table of
+  // perimeter tiles using `nextSpawnRotation % N`, then increments.
+  // Workers no longer spawn on the HQ tile itself (selection collision
+  // + visual overlap with the bigger HQ silhouette from 3.9.3).
+  nextSpawnRotation: number;
 }
 
-export type WorkerPhase = 'idle' | 'movingToNode' | 'harvesting' | 'returning';
+// Phase 3.10.6: 'building' added — a worker assigned to construct an
+// in-progress structure walks to it, then ticks down its
+// buildTicksRemaining each tick while present. Multiple workers on the
+// same structure stack contributions. Only structures spawned via the
+// BuildStructureByWorker command (StructureBase.builtByWorker = true)
+// require a worker to construct; legacy BuildStructure spawns
+// already-operational and is used for test setup.
+export type WorkerPhase = 'idle' | 'movingToNode' | 'harvesting' | 'returning' | 'building';
 
 // Common fields on every unit. Combat applies to all units (workers can
 // be killed by raiders), so HP and cooldown live here. attackCooldown is
@@ -137,6 +150,11 @@ export interface Worker extends UnitBase {
   // worker's state regardless. Default 'energy' on spawn / reset.
   carriedKind: ResourceKind;
   harvestTicksRemaining: number;
+  // Phase 3.10.6: structure id this worker is assigned to construct
+  // (0 = none). When non-zero and phase === 'building', the worker
+  // walks to the structure tile and ticks down its buildTicksRemaining
+  // each tick while in range. Reset to 0 on death + on build complete.
+  targetStructureId: number;
 }
 
 export interface Defender extends UnitBase {
@@ -240,6 +258,11 @@ export interface ProductionBuilding {
   // later pass once the basic flow is proven.
   trainingKind: UnitKind | null;
   trainTicksRemaining: number;
+  // Phase 3.10.6: true when this structure was placed via
+  // BuildStructureByWorker — buildTicksRemaining ticks down only when
+  // a worker is on site (advanceWorkerPhase 'building' case). Legacy
+  // BuildStructure spawns operational + sets this false.
+  builtByWorker: boolean;
 }
 
 export interface UpgradeStructure {
@@ -258,6 +281,7 @@ export interface UpgradeStructure {
   // research-kind dispatch sets the appropriate faction-level flag.
   researchTicksRemaining: number;
   researchKind: 'tier2' | 'trailDuration' | null;
+  builtByWorker: boolean;
 }
 
 // Phase 3.6: Pylon. Build-phase-only — no queue, no research, no
@@ -273,6 +297,7 @@ export interface SupplyStructure {
   y: Fixed;
   hp: Fixed;
   buildTicksRemaining: number;
+  builtByWorker: boolean;
 }
 
 export type Structure = ProductionBuilding | UpgradeStructure | SupplyStructure;

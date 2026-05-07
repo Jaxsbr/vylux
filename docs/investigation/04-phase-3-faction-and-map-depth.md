@@ -1,6 +1,6 @@
 # Investigation 04 — Phase 3 Faction & Map Depth
 
-> **Status:** Open — sub-phases 3.0–3.8 closed; 3.9 next (Phase 3 sub-phase numbering shifted; see 2026-04-27 decision-log entry)
+> **Status:** Open — sub-phases 3.0–3.10 closed; 3.11 next (Phase 3 sub-phase numbering shifted; see 2026-04-27 + 2026-05-06 + 2026-05-07 decision-log entries)
 > **Phase:** 3 (Faction & Map Depth)
 > **Owner:** Jaco
 > **Created:** 2026-04-26
@@ -20,21 +20,23 @@
 | 3.6  | Unit supply system + Pylons                                              | ✅ Closed |
 | 3.7  | Worker energy dump + fading light trail + tech-upgradeable duration      | ✅ Closed |
 | 3.8  | Fog of war + worker resource discovery (scouting)                        | ✅ Closed |
-| 3.9  | Faction asymmetry (Faction A + Faction B)                                | Pending  |
-| 3.10 | Maps as data + launch-map starter set                                    | Pending  |
-| 3.11 | Win conditions rework                                                    | Pending  |
-| 3.12 | Playtest balance gate                                                    | Pending  |
+| 3.9  | Game feel & presentation pass                                            | ✅ Closed |
+| 3.10 | In-game HUD / action-bar redesign (context-sensitive) + worker-build      | ✅ Closed |
+| 3.11 | Faction asymmetry (Faction A + Faction B)                                | Pending  |
+| 3.12 | Maps as data + launch-map starter set                                    | Pending  |
+| 3.13 | Win conditions rework                                                    | Pending  |
+| 3.14 | Playtest balance gate                                                    | Pending  |
 
 Each row links to the design notes in the corresponding `### 3.N — ...` section below.
 
-### Session pickup — current sub-phase: 3.9
+### Session pickup — current sub-phase: 3.11
 
 A new session starting work on the next pending sub-phase should:
 
-1. **Read the 3.9 section below** for scope, exit criterion, and sim-shape impact.
-2. **Read the closed sub-phase sections (3.0 / 3.1 / 3.2 / 3.3 / 3.4 / 3.5 / 3.6 / 3.7 / 3.8)** as worked examples — they show the standard work shape (types → state → commands → step → hash → AI → renderer → UI → tests → fixtures → verify gate). New sub-phases follow the same pattern unless the section explicitly says otherwise.
+1. **Read the 3.11 section below** for scope, exit criterion, and sim-shape impact.
+2. **Read the closed sub-phase sections (3.0 through 3.10)** as worked examples — they show the standard work shape (types → state → commands → step → hash → AI → renderer → UI → tests → fixtures → verify gate). New sub-phases follow the same pattern unless the section explicitly says otherwise.
 3. **Read the Sub-phase closing checklist** further down. Five items: tsc clean, vitest green (regen `tests/determinism/` if sim shape moved), playwright green, `docs/manual.md` updated if catalog changed, status table + decision log updated.
-4. **Sim-shape changes also bump `REPLAY_VERSION`** in `src/sim/replay.ts` — see the comment-header on that constant for the running history. Phase 3 is currently on v9 (after 3.8).
+4. **Sim-shape changes also bump `REPLAY_VERSION`** in `src/sim/replay.ts` — see the comment-header on that constant for the running history. Phase 3 is currently on v10 (after 3.10's worker-driven build).
 5. **`CommandKind` IDs are append-only** — never reuse a slot. Pick the next unused number. See `src/sim/commands.ts` header + the `AGENTS.md` determinism contract.
 
 UX micro-decisions not pre-specified in the 3.3 section (drag thresholds, exact behaviour of right-click overload, shift-click toggle vs. add semantics) are judgment calls — make a defensible pick, capture it in the closed sub-phase's "What landed" notes, and Jaco can redirect on review.
@@ -391,7 +393,81 @@ Two coupled mechanics in one sub-phase: per-faction vision filtering on the rend
 - Vision radii numbers are placeholder; 3.12 will tune. The shape that's load-bearing is "structures see further than units, HQ sees furthest, vanguard outscouts raider." If playtest says "raiders should be the scouts," swap two numbers — the rest of the system is parametric.
 - `SimRenderer`'s constructor went from `_playerFaction` (deliberately unused) to `playerFaction` (used). The `void _playerFaction` line that survived 3.0–3.7 was a marker for "this is what we'll use when fog lands." Same pattern is worth using in future sub-phases when reserving fields ahead of the work that consumes them.
 
-### 3.9 — Faction asymmetry (Faction A + Faction B)
+### 3.9 — Game feel & presentation pass
+
+The mechanics surface from 3.0–3.8 produces a complete RTS loop, but match *feel* hasn't been touched since Phase 1. Symptoms a first-time player notices in the first minute: units read tiny against the 32×32 grid; every structure is a single-cell box (HQ, Forge, Spire, Pylon all the same footprint, only silhouette varies); fog of war is invisible (enemies "pop in" rather than emerging from a visible fog edge — sim-correct since 3.8 but the renderer makes no attempt to show the boundary); workers auto-assign to nodes the moment they spawn (player has no agency on creation); right-click move and left-click action both land without any visual or audio confirmation; no animations beyond positional lerp; no sounds; no main menu — the build drops the player straight into a match.
+
+This sub-phase is **presentation, not mechanics**. The sim is largely untouched (so `REPLAY_VERSION` stays at 9 and the cross-OS gate stays green throughout), with two small, surgical sim-shape additions called out below. Item ordering is fun-per-effort, highest first.
+
+1. **Input feedback layer.** Move-order ping at the right-click target tile (short fade), attack-confirm flash on left-click, distinct cursor states (default / select / move / attack / place), drag-rect chrome (currently an undecorated overlay div from 3.3). All renderer.
+2. **Unit agency on spawn.** Strip `autoAssignIdleWorkers` from the default behaviour for player factions — new units stand still until commanded. Add per-structure rally points (the queue from 3.0 already supports a single train slot; rally is a tile target consulted on spawn). Sim change: an optional `rally: { x, y } | null` slot on production structures + HQ; AI keeps its current auto-assign loop. The `autoAssignIdleWorkers` *call site* moves out of the player path; the function itself stays — AI still uses it, scripted matches still use it.
+3. **Visual scale + silhouette pass.** Larger unit meshes (current scale reads as ant-sized vs structures); multi-cell footprints for HQ (3×3), Forge (2×2), Spire (2×2), Pylon (1×1 stays). Sim change: `tileFootprint: { w: number; h: number }` on `StructureStats`; placement validation, vision-source positions, and pathing/collision all read it instead of assuming 1×1. This is the load-bearing sim shape change of the sub-phase — bumps `REPLAY_VERSION` to 10 and regenerates golden fixtures.
+4. **Fog visualization.** Actual dark overlay outside vision sources, soft edge gradient, "explored but not visible" mid-tone for terrain (per-faction explored-tiles bitmap on the renderer side — sim doesn't need to know), reveal-pulse when an enemy first enters LOS. Renderer-only; sim already provides the data from 3.8.
+5. **Audio layer (minimal).** UI click, train-complete, attack-hit, alert-on-base-attacked, build-complete, ambient grid hum. New `src/audio/` module gated by a mute toggle in the HUD. Six sounds is enough to triple perceived production value; more is Phase 4 polish.
+6. **Unit animation pass.** Idle pulse, walk bob, attack flash, death dissolve. Sim states already exist (worker phase, raider attack cooldown, alive/dead); renderer just reads them. No sim shape change.
+7. **Main menu + match chrome.** Menu scene (PLAY VS AI / MULTIPLAYER / OPTIONS), faction picker placeholder (locked to Pulse until 3.10 lands), settings panel (volume, key-binding stub for §3.8), redesigned VICTORY/DEFEAT overlay with replay download + return-to-menu. New `src/render/menu/` directory; `main.ts` learns a menu mode that precedes the match scene.
+
+Each item lands as its own commit on `main`; all close together as 3.9 once the gate runs green. Items 1–4 are the highest leverage — they fix the "this doesn't feel like a game" complaint directly. Items 5–7 can slip into 4.x polish if Phase 3 timeline tightens; 7 in particular overlaps with Phase 4's Steam-wrapper work and could move there cleanly.
+
+**Sim-shape impact:** small but real — `tileFootprint` on `StructureStats` (item 3) and an optional `rally` field on production structures + HQ (item 2). `REPLAY_VERSION` bumps to 10 once item 3 lands. Everything else (audio, animations, menu, fog overlay, input feedback) is renderer-only.
+
+**Exit:** a first-time player can launch the build, see a menu, start a match, train units that wait for orders, give those units commands with visible *and* audible feedback, see the enemy emerge from a visible fog edge instead of popping in, and finish the match wanting to play another. Cross-OS determinism gate green against the new sim shape; all Phase 2 e2e gates still pass.
+
+**What landed:**
+- **3.9.1 Input feedback layer** — new `src/render/feedback.ts` (`FeedbackOverlay`) with three cue types: faction-coloured **move ping** at right-click target, green **assign pulse** when workers are routed to a node, neutral **placement burst** when a structure is placed. `input-controller.ts` fires hooks on commit + sets canvas cursor (`crosshair` in placement, `pointer` over own unit / live node, `auto` otherwise). Per-frame ring scaling + quadratic alpha falloff via the existing `eventPulseFactor` curve. Renderer-only.
+- **3.9.2 Unit agency on spawn** — stripped `autoAssignIdleWorkers` from both player paths in `main.ts` (PvAI commands callback + lockstep `collectLocalCommands`). Newly trained workers + workers that just deposited stand idle until commanded. `tickAi` still calls the helper internally for its own faction. Sim untouched. PRD §6.3 ("assignment matters and idle workers are a real problem") direction made literal.
+- **3.9.3 Visual scale** — `meshes.ts` scale constants: units 1.8×, HQ 2.0×, Forge 1.9×, Spire 1.4×, Pylon 1.4×; vanguard inherits raider × 1.5 × UNIT_SCALE. `ai.ts` Forge offset bumped from (±2,±2) to (±3,±3) and Spire from (±1,0) to (±3,0) so the bigger silhouettes don't visually overlap the HQ. No `tileFootprint` field on `StructureStats` (deferred — would only earn its keep when sim consumes it for placement validation / vision center / pathing, none of which land here). Sim untouched. AI scripted match never reaches the Forge-build branch in 3000 ticks (lean energy budget), so golden fixtures didn't move.
+- **3.9.4 Fog of war (v4 metaphor)** — first three implementation attempts failed for instructive reasons documented inline in `fog-overlay.ts`. v4 lands the Tron-correct **uncover-as-explore** metaphor: dark layer covers the grid by default; visible tiles drop the layer to transparent so the brightened grid lines (`grid.ts` divider intensity bumped 0.4 → 1.2 in the same sub-phase) shine through. Composited per-pixel CPU-side via `min()` of falloff contributions — single mesh, single texture, NormalBlending, no GPU blend shenanigans, no shader. `grid.test.ts` upper-bound widened to match. Renderer-only; explored bitmap lives outside sim state.
+- **3.9.5 Audio** — new `src/audio/audio-manager.ts` (`AudioManager`, Web Audio API, lazy context under user gesture, fail-soft if WebAudio unavailable) + new `src/render/event-detector.ts` (`GameEventDetector`, snapshots sim state, fires cues on tick advance). Five cues: UI click (panel buttons), train complete (rising chime), build complete (double tick), attack hit (noise burst), HQ alert (pulsing low tone). Throttled at most one per type per tick. Mute toggle on **M** with HUD indicator top-right. No external assets — every sound is an oscillator + envelope. Renderer-only.
+- **3.9.6 Unit animations** — extended `UnitVisual` interface to surface the legacy mesh code's `triggerPlacementPulse`, `triggerDeathPulse`, `tickPlacementPulse`, `tickDeathPulse`. `sim-renderer.ts` triggers placement pulse on lazy mesh creation (a unit ID seen for the first time = newly trained), and on alive→dead transition moves the visual into a `dyingUnits` pool that holds the mesh visible until `tickDeathPulse` returns false. Wall-clock dt tracked internally so animation rate is render-rate, not tick-rate. Sim untouched.
+- **3.9.7 Main menu** — new `src/render/menu/main-menu.ts` (`MainMenu`, pure DOM). PvAI mode opens to a Tron-styled menu (glowing cyan VYLUX title + PLAY VS AI / MULTIPLAYER stub / OPTIONS stub + faction-locked Pulse note). `main.ts` awaits the play click before the scene + match are built. Lockstep / observer URL flows skip the menu (intent already encoded). `?menu=skip` URL param bypasses the menu — used by e2e tests + future deep-link share flows. Match-end RELOAD button returns to the menu naturally on reload.
+
+**Gates added:**
+- No new Vitest tests (the entire sub-phase was renderer + audio + DOM, not sim shape). `grid.test.ts` upper bound on `dividerEmissiveIntensity` widened from 0.5 → 2.0 to accommodate the 0.4 → 1.2 bump.
+- No new Playwright assertions, but two debug spec files added during iteration: `tests/e2e/fog-debug.spec.ts` and `tests/e2e/menu-debug.spec.ts`. Both are visual-review aids (screenshot the canvas at known time points) — kept for the duration of 3.9, dropped at close.
+- Three existing e2e tests updated to use `?menu=skip` so they still hit the match scene directly: `smoke.spec.ts`, `mouse.spec.ts`, `select.spec.ts`, plus the fog-debug spec.
+- All 161 unit tests + 10 e2e gates green.
+
+**Lessons:**
+- **Self-verify visual changes.** The fog work iterated four times — the first three were wrong (Fixed/float bug, then wrong metaphor, then `MaxEquation` ignoring blend factors). I burned the owner's time as the visual QA loop because I had no way to see what I was rendering. Setting up `fog-debug.spec.ts` (Playwright + screenshot) collapsed the iteration loop from 5+ minutes per round to <30 seconds and let me catch the v3 brightness issue myself before pushing back to the owner. **For any visual work after this, build the screenshot harness first.**
+- **MaxEquation per WebGL spec ignores blend factors.** Tried `MaxEquation` + `SrcAlphaFactor` to cap stacking on overlapping vision pools; the gradient texture's alpha was therefore never attenuating fragment RGB and the gradient collapsed into a hard saturated disc. Fix was to drop the GPU multi-mesh approach entirely and composite on the CPU via per-pixel `min()`. Lesson: GPU blend equations have spec quirks that aren't visible in the API surface — when blending behaviour seems wrong, read the underlying WebGL extension spec, not just the Three.js wrapper.
+- **The metaphor matters more than the visual fidelity.** v3 fog (vision adds light to the grid) had perfect math but the wrong concept — the owner immediately saw it as backwards: "we're adding glow as we explore instead of uncovering map." v4 inverted the painter (dark by default, transparent in vision) and required bumping the base grid intensity 0.4 → 1.2 so there was something to uncover. Same data, opposite framing, completely different read. **Pick the metaphor before tuning the numbers.**
+- **`autoAssignIdleWorkers` was masking the idle-worker problem the PRD calls out.** Removing it from the player path made workers feel "agent-controlled by me" instead of "auto-managed for me," which is the PRD §6.3 + §3.8 direction made literal. The change is one line in `main.ts` × two callsites. Big behavioural shift from a tiny diff.
+- **WebAudio's lazy-on-gesture quirk is well-handled by deferring context creation.** `AudioManager.ensureContext()` constructs the context on first call (which is always inside a click event handler), so no special unlock flow is needed. The fail-soft pattern (return null on browser refusal) means a sandboxed test environment gets silence, not crashes.
+- **The legacy mesh code already had placement + death pulse APIs from Phase 1**, just unused since the sim-renderer rewrite stopped calling them. Surfacing them through `UnitVisual` cost ~25 lines and unlocked spawn/death animation immediately. **Audit legacy code for unwired capability before writing new visual code.**
+- **`?menu=skip` URL flag is the right tool for "make tests bypass UI flows that don't exist in the path under test."** Cleaner than text-selector clicks (which couple tests to button copy) and explicit about intent. Same shape as `?desync-test=N` from 2.3 and `?lockstep=host` from 2.0.
+
+### 3.10 — In-game HUD / action-bar redesign (context-sensitive)
+
+The Phase 1 buildables panel was a flat always-on grid of every action the player can possibly take — TRAIN WORKER / DEFENDER / RAIDER / VANGUARD, BUILD FORGE / SPIRE / PYLON, RESEARCH TIER 2 / TRAIL+, DUMP. Each cell is a small bordered card with a title and a one-line cost / reason note. After 3.0–3.8 grew the catalog, the panel reads as **a wall of cards of information** rather than a guided action bar — the player sees ten "things" without any visual cue about which one is the natural next move, and grey-out reasons (`no forge` / `tier 2 not researched`) explain failure but not purpose.
+
+3.10 reframes the panel as a **context-sensitive action bar** driven by selection — the standard RTS pattern (StarCraft, AoE, Warcraft III). The actions you see are the ones the *thing you have selected* can do, not every action that exists in the game.
+
+**Selection → actions:**
+
+- **HQ selected** — TRAIN WORKER. (HQ is workers-only since 3.0.)
+- **Worker selected** — BUILD FORGE / SPIRE / PYLON, DUMP (E). Workers are the builders.
+- **Forge selected** — TRAIN DEFENDER / RAIDER / VANGUARD (vanguard greys out until tier 2 researched, but stays *visible* with a tooltip / icon explaining the lock).
+- **Spire selected** — RESEARCH TIER 2 / RESEARCH TRAIL+. (Both research slots live on the Spire per 3.2 + 3.7.)
+- **Pylon selected** — info-only (no actions). Confirms supply contribution.
+- **Multiple unit kinds selected** — only the union of *commands* (move, stop), not training. (Future: production-from-anywhere when control groups land in Phase 4.)
+- **Nothing selected** — empty action bar with a one-line hint ("select your HQ to train workers").
+
+**Visual upgrade:**
+
+- Bigger button slots that read as buttons, not cards. Clear hover state with faction-glow ring.
+- Each action gets a small **icon / silhouette** so the player can recognise it at a glance instead of reading the label every time. Upgrades especially need this — RESEARCH TIER 2 and TRAIL+ are currently indistinguishable squares of text.
+- Hotkey letters surfaced on each button (matches the §3.8 mechanical-mastery direction without committing the full key-bind UI yet).
+- Cost display gets a clear iconography (E / F / C glyphs in faction colours) instead of the current `e ##` / `f ##` text.
+- Disabled reason becomes a tooltip on hover, not a permanent line of greyed text — keeps the bar visually clean.
+
+**Sim-shape impact:** none. The actions are the same `TrainUnit` / `TrainAtStructure` / `BuildStructure` / `ResearchTier2AtStructure` / `ResearchTrailDurationAtStructure` / `ActivateEnergyDump` commands that already exist; only the UI affordance changes. `REPLAY_VERSION` stays at 9. No fixture regeneration needed.
+
+**Open scope decision:** how does the *first* Forge get built? Today the panel offers BUILD FORGE without requiring a worker selection. Routing buildings through worker-selected → BUILD changes the bootstrap flow (the player must train a worker first, then select it to build). That's the SC2 / AoE pattern and matches PRD §6.3 ("workers gather, deposit, **and repair**" — and by extension build). The alternative (HQ selected → BUILD options) is the AoE 4 / Anno pattern. Pick the worker-builder pattern unless playtest pushes back; documented in the closing notes.
+
+**Exit:** selecting an HQ shows only TRAIN WORKER; selecting a worker shows BUILD options + DUMP; selecting a Forge shows combat training; selecting a Spire shows research. The action bar is empty when nothing is selected. Disabled actions still show but explain why on hover. The player can complete a full match (train workers → build Forge → train raider → win) using the new bar.
+
+### 3.11 — Faction asymmetry (Faction A + Faction B)
 
 Both factions assemble their full Phase 3 roster: distinct production-building lists, distinct unit rosters at both tiers, distinct tech-progression shapes. Each faction has its own counter-triangle filling — same roles (eco / frontline / harass / tier-2 specialist), different stats and behaviours.
 
@@ -401,7 +477,7 @@ The energy-dump mechanic from 3.7 locks in here as Pulse-faction-specific (Forge
 
 **Exit:** the two factions feel different to play within the first 60 seconds; a player picking Pulse vs Forge produces a different opening; replays of A-vs-A, A-vs-B, B-vs-B all run deterministically.
 
-### 3.10 — Maps as data + launch-map starter set
+### 3.12 — Maps as data + launch-map starter set
 
 Maps move out of `main.ts`'s hardcoded `SPEC` into JSON files under `src/maps/`. Map data includes: grid dimensions, HQ start positions per faction, energy node positions, Flux node positions, per-faction colour node positions, vision-blocker tile coordinates. Map selection arrives via URL param + (eventually) lobby UI — for Phase 3 dev, URL is enough.
 
@@ -412,13 +488,13 @@ Hand-tune 2–3 launch maps with distinct shapes:
 
 **Exit:** match runs on any of the launch maps; both factions can be played on any map; faction × map matchup matrix has nine combinations and replays validate per-pairing.
 
-### 3.11 — Win conditions rework
+### 3.13 — Win conditions rework
 
 Replace the current "100-point threshold or HQ destruction" with the §6.7 set: military elimination requires HQ + all production destroyed; dominance-tick accumulates from sustained Flux control; 25-minute hard timer with tiebreaker by score; resign is a first-class command. End-game pressure compounds via the dominance-tick rate scaling with Flux share.
 
 **Exit:** all four win paths exercised in scripted matches: kill HQ + production → military win; sustained Flux control → dominance win; timer expiry with one player ahead → tiebreaker win; resign command → loss for the resigning faction.
 
-### 3.12 — Playtest balance gate
+### 3.14 — Playtest balance gate
 
 The actual PRD exit criterion: internal playtests show no obviously dominant strategy or faction at tester skill, two distinct build orders feel competitive per map, no faction is universally map-favoured. This is **not** a numeric tuning gate (winrates ±5% is a Phase 4 / live-service problem). It's a "does this game feel like a game" gate.
 
@@ -477,6 +553,10 @@ The work in 3.12 is data collection + tuning passes, not new features. Tools in 
 | 2026-04-27 | Sub-phase 3.6 closed. | Supply system + Pylon. `FactionState.supplyCap` (initial 10, +8 per Pylon) + `supplyUsed`; `UnitStats.supplyCost` (1/2/2/4); new `StructureKind = 'supply'`. `TrainUnit` + `TrainAtStructure` reject at cap; `TrainAtStructure` reserves supply at queue time so two Forges can't double-book. `applyDamage` decrements supplyUsed on death (centralised — every kill flows through here). End-of-step `recomputeSupplyCaps` pass derives cap from operational Pylon count. AI builds Pylon when `supplyUsed >= cap - 2` and no Pylon already in progress. SPEC splits central Flux into two flank-symmetric Flux nodes. UI: BUILD PYLON button + HUD `s N/M` + `supply blocked` reason. Renderer: faction-coloured pylon mesh. `REPLAY_VERSION` bumps to 7; golden fixtures regenerated; all 151 unit tests + 9 e2e gates green. |
 | 2026-04-27 | Sub-phase 3.7 closed. | Worker energy dump + light trail + tech-upgradeable duration. New `Trail` entity in `state.trails`; `Worker` gains `dumpTicksRemaining + dumpCooldownTicks + activeTrailId`; `FactionState.trailDurationResearched`; `UpgradeStructure.researchKind` discriminator (`tier2 \| trailDuration \| null`). New commands `ActivateEnergyDump` (slot 9) + `ResearchTrailDurationAtStructure` (slot 10). Two new step passes — `trailKillSweep` (kills overlapping non-owner units) + `advanceTrails` (ages segments, drops expired, kills empty trails). Effective lifetime is faction-research-aware at expiry-time so an in-flight trail extends the moment the research lands. UI: DUMP button + `E` hotkey + TRAIL+ research button. Renderer: per-trail group of small glowing segment tiles, opacity + emissive intensity fade with age. `REPLAY_VERSION` bumps to 8; golden fixtures regenerated; all 157 unit tests + 9 e2e gates green. |
 | 2026-04-27 | Sub-phase 3.8 closed. | Fog of war + permanent node discovery. `ResourceNode.discoveredBy: [boolean, boolean]`; per-kind `visionRadius` on UnitStats + StructureStats + `HQ_VISION_RADIUS`. New step pass `advanceDiscovery` flips per-faction bits as friendly entities walk into LOS. Initial sweep at `createInitialState` pre-discovers home-patch nodes so AI + player can bootstrap. AI's three node-finder helpers gained the discovery filter. Renderer hides enemy units / structures / HQs outside friendly vision and undiscovered nodes; observer mode bypasses. Sim itself doesn't gate AssignWorkerToNode on discovery — that's a presentation + AI concern, not a sim rule. `REPLAY_VERSION` bumps to 9; golden fixtures regenerated; all 161 unit tests + 9 e2e gates green. |
+| 2026-05-06 | Phase 3 sub-phases renumbered (third pass) — new 3.9 inserted: game feel & presentation pass. | Owner playtest read: "the game feels disconnected — units are tiny, buildings are all one cell, fog isn't visible, workers auto-assign on spawn (no agency), no click feedback, no menu, no sounds." 3.0–3.8 shipped a complete RTS *loop* but match *feel* hasn't been touched since Phase 1, and the (now) 3.10 faction-asymmetry sub-phase would land twice as much content into a build the player doesn't enjoy reading. Slotted as 3.9 ahead of asymmetry: input feedback + spawn-agency + visual scale + fog overlay + audio + animation + main menu, fun-per-effort ordered. Sim shape moves only for `tileFootprint` on `StructureStats` and optional `rally` on production structures; expected `REPLAY_VERSION` bump to 10 once the footprint item lands. Old 3.9 (asymmetry) → 3.10; 3.10 (maps-as-data) → 3.11; 3.11 (win cond) → 3.12; 3.12 (playtest) → 3.13. 13 sub-phases total. |
+| 2026-05-07 | Sub-phase 3.9 closed. | Game feel + presentation pass: 7 work items shipped — input feedback overlay (move ping / assign pulse / placement burst + cursor states); `autoAssignIdleWorkers` stripped from player paths so newly trained workers wait for orders; visual scale-up of all entities (1.4–2.0× depending on kind) + AI placement offsets nudged to clear bigger silhouettes; Tron-style fog of war (uncover-as-explore metaphor with grid intensity bump 0.4 → 1.2 to give the layer something to obscure); 5-cue WebAudio synthesis layer with `M`-mute toggle; placement + death pulse animations surfaced from latent legacy mesh code; main menu DOM scene with PvAI flow + `?menu=skip` test bypass. Sim shape unchanged across all seven items — `REPLAY_VERSION` stays at 9, no fixture regen needed. Three e2e tests updated to use `?menu=skip`. Two debug specs (fog-debug, menu-debug) dropped at close. All 161 unit tests + 9 e2e gates green. |
+| 2026-05-07 | Sub-phase 3.10 closed. | Selection-driven action bar (HQ/worker/forge/spire/pylon → context-specific buttons; faction-coloured cost glyphs; hotkey badges; tooltip disabled-reasons) replaces the Phase 1 always-on flat panel. New `selectionRing` + raycast registries on structures + HQ. Worker-driven building (`BuildStructureByWorker` slot 11; `AssignWorkerToBuild` slot 12) — workers walk to construction sites + decrement `buildTicksRemaining` while on site, multi-worker stacks throughput. Workers spawn around the HQ perimeter via `FactionState.nextSpawnRotation` round-robin through eight offsets (no more selection-collision with the bigger HQ silhouette); they deposit at the HQ perimeter (`HQ_DEPOSIT_REACH_SQ` widened from 0.06² to 2.0²). Construction visual: y-scale rise from 15% → 100%, faction-coloured pulsing scaffolding ring at the base while building, Spire's finial / Pylon's cap appear past completion thresholds for evolving silhouette. AI dispatches via `pickIdleBuilderWorker` (idle > moving/returning > building, lowest-id tiebreaker). Legacy `BuildStructure` (slot 4) retained for tests + back-compat — spawns structures with `builtByWorker = false` so they auto-tick the build phase. `?test-hooks=1` URL flag exposes `__vyluxTest.{selectHq, selectStructure, selectAllOwnWorkers, sim}` for e2e specs. `REPLAY_VERSION` bumps to 10; golden fixtures regenerated. All 161 unit tests + 9 e2e gates green. |
+| 2026-05-07 | Phase 3 sub-phases renumbered (fourth pass) — new 3.10 inserted: in-game HUD / action-bar redesign (context-sensitive). | Owner feedback after 3.9 landed: the in-match buildables panel reads as "a wall of cards of information" rather than a guided action bar — every command always visible, no cue about what the natural next move is, upgrades indistinguishable squares of text. The fix: make the bar **context-sensitive** (HQ selected → train workers; worker selected → build options; Forge selected → combat units; Spire selected → research) with bigger button affordance, icons, hotkey letters, faction-coloured cost glyphs, and tooltip-based disabled reasons. Sim untouched (same commands, different UI). Slotted as 3.10 before faction asymmetry — same "fix the lens before adding more content" rationale as the 2026-05-06 game-feel insertion. Old 3.10 (asymmetry) → 3.11; 3.11 (maps-as-data) → 3.12; 3.12 (win cond) → 3.13; 3.13 (playtest) → 3.14. 14 sub-phases total. |
 
 ## Next investigation
 

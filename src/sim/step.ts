@@ -69,6 +69,30 @@ export const HARVEST_TICKS = 20; // 1 second at 20 Hz
 export const HARVEST_AMOUNT: Fixed = fromInt(5);
 export const WORKER_CAPACITY: Fixed = fromInt(5);
 
+// Phase 3.10.4: HQ-perimeter spawn offsets for newly-trained workers.
+// Eight surrounding tiles, ordered to spread sequential spawns around
+// the HQ rather than stacking on one side. The faction's
+// nextSpawnRotation indexes into this table.
+export const HQ_PERIMETER_OFFSETS: ReadonlyArray<{ dx: number; dy: number }> = [
+  { dx:  2, dy:  0 },
+  { dx:  0, dy:  2 },
+  { dx: -2, dy:  0 },
+  { dx:  0, dy: -2 },
+  { dx:  2, dy:  2 },
+  { dx: -2, dy:  2 },
+  { dx: -2, dy: -2 },
+  { dx:  2, dy: -2 },
+];
+
+// Phase 3.10.5: workers stop at the HQ perimeter (don't walk into the
+// 3.9.3-bumped HQ silhouette to deposit). Threshold is in tile-units²
+// — 2.0² gives an arrival ring just outside the HQ visual.
+export const HQ_DEPOSIT_REACH_SQ: Fixed = rangeSq(fromFloat(2.0));
+
+// Phase 3.10.6: how close a worker must be to the structure tile to
+// count as "on site" and contribute to construction progress.
+export const BUILD_REACH_SQ: Fixed = rangeSq(fromFloat(1.2));
+
 // Win-condition tuning. Phase 3 will rebalance; numbers are placeholder.
 export const POINTS_PER_KILL = 5;
 export const POINTS_PER_HQ_HIT = 1;
@@ -127,20 +151,32 @@ export function applyCommand(state: SimState, cmd: Command): void {
       fs.energy = sub(fs.energy, stats.trainCost);
       if (stats.trainColorCost > 0) fs.color = sub(fs.color, stats.trainColorCost);
       // Spawn at the given tile if provided (player click-to-place);
-      // otherwise at HQ (AI / tests / no-input-layer paths).
-      const spawnX = cmd.x !== undefined ? fromInt(cmd.x) : fs.hqX;
-      const spawnY = cmd.y !== undefined ? fromInt(cmd.y) : fs.hqY;
+      // otherwise at the HQ perimeter (Phase 3.10.4 — workers no longer
+      // appear inside the HQ silhouette where they're hard to select).
+      // Round-robin offset by faction.nextSpawnRotation so consecutive
+      // trains spread around the HQ instead of stacking.
+      let spawnX: Fixed;
+      let spawnY: Fixed;
+      if (cmd.x !== undefined && cmd.y !== undefined) {
+        spawnX = fromInt(cmd.x);
+        spawnY = fromInt(cmd.y);
+      } else {
+        const offset = HQ_PERIMETER_OFFSETS[fs.nextSpawnRotation % HQ_PERIMETER_OFFSETS.length];
+        fs.nextSpawnRotation = (fs.nextSpawnRotation + 1) | 0;
+        spawnX = add(fs.hqX, fromInt(offset.dx));
+        spawnY = add(fs.hqY, fromInt(offset.dy));
+      }
       spawnUnit(state, cmd.unitKind, cmd.faction, spawnX, spawnY);
       return;
     }
     case CommandKind.BuildStructure: {
+      // Phase 3.10.6: legacy command kept for back-compat + test
+      // setup. Spawns the structure with `builtByWorker = false` so
+      // advanceStructure auto-ticks the build phase as it always did.
+      // Player + AI use BuildStructureByWorker for the real workflow.
       const fs = state.factions[cmd.faction];
-      // Phase 3.2: per-kind cost lookup. Each StructureKind has its
-      // own cost + build time; extending to more structure kinds is a
-      // matter of adding a row to STRUCTURE_STATS.
       const stats = STRUCTURE_STATS[cmd.structureKind];
-      if (fs.energy < stats.buildCost) return; // silent reject
-      // Phase 3.5: colour gate on every build.
+      if (fs.energy < stats.buildCost) return;
       if (fs.color < stats.buildColorCost) return;
       fs.energy = sub(fs.energy, stats.buildCost);
       if (stats.buildColorCost > 0) fs.color = sub(fs.color, stats.buildColorCost);
@@ -266,6 +302,64 @@ export function applyCommand(state: SimState, cmd: Command): void {
       s.researchKind = 'trailDuration';
       return;
     }
+    case CommandKind.BuildStructureByWorker: {
+      // Phase 3.10.6: worker-driven build. Spawns the structure +
+      // assigns the named worker to walk to it and construct it. Cost
+      // deducted at command time so the resource commitment is visible
+      // to the player on click — same shape as BuildStructure but the
+      // structure is inert (buildTicksRemaining stays at full) until a
+      // worker arrives at the site.
+      const w = findUnit(state, cmd.workerId);
+      if (w === null || !w.alive || w.kind !== 'worker') return;
+      const fs = state.factions[w.faction];
+      const stats = STRUCTURE_STATS[cmd.structureKind];
+      if (fs.energy < stats.buildCost) return;
+      if (fs.color < stats.buildColorCost) return;
+      fs.energy = sub(fs.energy, stats.buildCost);
+      if (stats.buildColorCost > 0) fs.color = sub(fs.color, stats.buildColorCost);
+      const newStructure = spawnStructure(
+        state,
+        cmd.structureKind,
+        w.faction,
+        fromInt(cmd.x),
+        fromInt(cmd.y),
+      );
+      // Phase 3.10.6: this structure waits for the worker — its build
+      // phase only ticks down when a worker is on site (advanceWorker
+      // Phase 'building'). Without this flag advanceStructure would
+      // auto-tick the build, defeating the purpose.
+      newStructure.builtByWorker = true;
+      // Drop any in-progress harvest / move; the worker's new job is
+      // to build. carriedKind reset to canonical so the hash slot
+      // stays clean (mirrors the on-deposit + on-death resets).
+      w.carrying = 0;
+      w.carriedKind = 'energy';
+      w.targetNodeId = 0;
+      w.moveTarget = null;
+      w.harvestTicksRemaining = 0;
+      w.phase = 'building';
+      w.targetStructureId = newStructure.id;
+      return;
+    }
+    case CommandKind.AssignWorkerToBuild: {
+      // Phase 3.10.7: another worker joins an in-progress build. No
+      // cost — the structure already paid; this just stacks build
+      // throughput.
+      const w = findUnit(state, cmd.workerId);
+      if (w === null || !w.alive || w.kind !== 'worker') return;
+      const s = findStructure(state, cmd.structureId);
+      if (s === null || !s.alive) return;
+      if (s.faction !== w.faction) return; // can't help an enemy build
+      if (s.buildTicksRemaining <= 0) return; // already operational
+      w.carrying = 0;
+      w.carriedKind = 'energy';
+      w.targetNodeId = 0;
+      w.moveTarget = null;
+      w.harvestTicksRemaining = 0;
+      w.phase = 'building';
+      w.targetStructureId = s.id;
+      return;
+    }
   }
 }
 
@@ -366,6 +460,10 @@ function applyDamage(state: SimState, target: Unit, damage: Fixed): boolean {
       target.dumpTicksRemaining = 0;
       target.dumpCooldownTicks = 0;
       target.activeTrailId = 0;
+      // Phase 3.10.6: clear build-task back-ref so the dead worker's
+      // hash slot is canonical. The structure stays in build phase
+      // until another worker is sent to it (no progress = waiting).
+      target.targetStructureId = 0;
     }
     // Phase 3.3: clear move-order on death so the dead-unit field is in
     // a canonical state for the hash. Tombstones are kept (alive=false)
@@ -615,12 +713,45 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
       return;
     }
 
+    case 'building': {
+      // Phase 3.10.6: walk to the assigned structure tile; while
+      // within BUILD_REACH_SQ, decrement its buildTicksRemaining each
+      // tick. Multiple workers stack their decrements naturally
+      // (each one fires once per tick). When the structure dies or
+      // completes, drop back to idle.
+      const s = findStructure(state, w.targetStructureId);
+      if (s === null || !s.alive || s.buildTicksRemaining <= 0) {
+        w.phase = 'idle';
+        w.targetStructureId = 0;
+        return;
+      }
+      const nextPos = moveTowards(w.x, w.y, s.x, s.y, speed);
+      w.x = nextPos.x;
+      w.y = nextPos.y;
+      if (distSq(w.x, w.y, s.x, s.y) <= BUILD_REACH_SQ) {
+        s.buildTicksRemaining -= 1;
+        if (s.buildTicksRemaining <= 0) {
+          // Build complete — release the worker. Other workers on the
+          // same structure will also fall through this branch on their
+          // own tick and release.
+          w.phase = 'idle';
+          w.targetStructureId = 0;
+        }
+      }
+      return;
+    }
+
     case 'returning': {
       const hq = state.factions[w.faction];
       const nextPos = moveTowards(w.x, w.y, hq.hqX, hq.hqY, speed);
       w.x = nextPos.x;
       w.y = nextPos.y;
-      if (distSq(w.x, w.y, hq.hqX, hq.hqY) <= WORKER_REACH_SQ) {
+      // Phase 3.10.5: deposit at the HQ perimeter, not the centre.
+      // Old WORKER_REACH_SQ threshold was 0.06² — workers had to be
+      // essentially on top of the HQ tile, which made them disappear
+      // inside the bigger 3.9.3 HQ silhouette. HQ_DEPOSIT_REACH_SQ is
+      // wider (2.0²) so the worker stops at the HQ edge instead.
+      if (distSq(w.x, w.y, hq.hqX, hq.hqY) <= HQ_DEPOSIT_REACH_SQ) {
         // Phase 3.1 + 3.5: deposit to the pool matching the carried
         // kind. Colour kinds always credit faction.color (we'd never
         // get here carrying the opposite colour because canHarvest
@@ -697,14 +828,13 @@ function advanceStructure(state: SimState, s: Structure): void {
   if (!s.alive) return;
   switch (s.kind) {
     case 'production': {
-      // Building phase first — counts down to operational.
+      // Phase 3.10.6: build-phase tick down only if NOT
+      // worker-driven; worker-driven structures wait for
+      // advanceWorkerPhase 'building' to decrement.
       if (s.buildTicksRemaining > 0) {
-        s.buildTicksRemaining -= 1;
+        if (!s.builtByWorker) s.buildTicksRemaining -= 1;
         return;
       }
-      // Training phase — when the timer hits zero, spawn the unit at the
-      // building's tile. The single-slot model (Phase 3.0) means the
-      // queue clears on completion; multi-slot queues land later.
       if (s.trainingKind !== null) {
         s.trainTicksRemaining -= 1;
         if (s.trainTicksRemaining <= 0) {
@@ -716,12 +846,8 @@ function advanceStructure(state: SimState, s: Structure): void {
       return;
     }
     case 'upgrade': {
-      // Phase 3.2 upgrade structure. Same build-phase semantics as
-      // production buildings; once operational, supports research.
-      // Phase 3.7: completion dispatches by researchKind so the same
-      // research-slot can host either 'tier2' or 'trailDuration'.
       if (s.buildTicksRemaining > 0) {
-        s.buildTicksRemaining -= 1;
+        if (!s.builtByWorker) s.buildTicksRemaining -= 1;
         return;
       }
       if (s.researchTicksRemaining > 0) {
@@ -730,18 +856,15 @@ function advanceStructure(state: SimState, s: Structure): void {
           const fs = state.factions[s.faction];
           if (s.researchKind === 'tier2') fs.tier2Researched = true;
           else if (s.researchKind === 'trailDuration') fs.trailDurationResearched = true;
-          // Slot returns to idle so the Spire can host another
-          // research command next.
           s.researchKind = null;
         }
       }
       return;
     }
     case 'supply': {
-      // Phase 3.6: Pylon. Build-phase only. Once operational, the
-      // end-of-step recomputeSupplyCaps pass accounts for it; nothing
-      // else to do here.
-      if (s.buildTicksRemaining > 0) s.buildTicksRemaining -= 1;
+      if (s.buildTicksRemaining > 0) {
+        if (!s.builtByWorker) s.buildTicksRemaining -= 1;
+      }
       return;
     }
   }

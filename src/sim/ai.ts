@@ -145,14 +145,20 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
       fs.energy >= STRUCTURE_STATS.production.buildCost &&
       fs.color >= STRUCTURE_STATS.production.buildColorCost
     ) {
-      const tile = forgeTileFor(state, faction);
-      commands.push({
-        kind: CommandKind.BuildStructure,
-        faction,
-        structureKind: 'production',
-        x: tile.x,
-        y: tile.y,
-      });
+      // Phase 3.10.6: AI dispatches a worker to build, same as the
+      // player path. If no worker is free this tick, skip — the build
+      // happens once a worker is available.
+      const worker = pickIdleBuilderWorker(state, faction);
+      if (worker !== null) {
+        const tile = forgeTileFor(state, faction);
+        commands.push({
+          kind: CommandKind.BuildStructureByWorker,
+          workerId: worker,
+          structureKind: 'production',
+          x: tile.x,
+          y: tile.y,
+        });
+      }
     }
     return commands;
   }
@@ -167,14 +173,17 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
     fs.energy >= STRUCTURE_STATS.upgrade.buildCost &&
     fs.color >= STRUCTURE_STATS.upgrade.buildColorCost
   ) {
-    const tile = spireTileFor(state, faction);
-    commands.push({
-      kind: CommandKind.BuildStructure,
-      faction,
-      structureKind: 'upgrade',
-      x: tile.x,
-      y: tile.y,
-    });
+    const worker = pickIdleBuilderWorker(state, faction);
+    if (worker !== null) {
+      const tile = spireTileFor(state, faction);
+      commands.push({
+        kind: CommandKind.BuildStructureByWorker,
+        workerId: worker,
+        structureKind: 'upgrade',
+        x: tile.x,
+        y: tile.y,
+      });
+    }
     return commands;
   }
 
@@ -188,14 +197,17 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
     fs.color >= STRUCTURE_STATS.supply.buildColorCost &&
     !hasPylonInProgress(state, faction)
   ) {
-    const tile = pylonTileFor(state, faction);
-    commands.push({
-      kind: CommandKind.BuildStructure,
-      faction,
-      structureKind: 'supply',
-      x: tile.x,
-      y: tile.y,
-    });
+    const worker = pickIdleBuilderWorker(state, faction);
+    if (worker !== null) {
+      const tile = pylonTileFor(state, faction);
+      commands.push({
+        kind: CommandKind.BuildStructureByWorker,
+        workerId: worker,
+        structureKind: 'supply',
+        x: tile.x,
+        y: tile.y,
+      });
+    }
     return commands;
   }
 
@@ -243,21 +255,26 @@ function forgeTileFor(state: SimState, faction: Faction): { x: number; y: number
   const fs = state.factions[faction];
   const hqX = Math.round(toFloat(fs.hqX));
   const hqY = Math.round(toFloat(fs.hqY));
-  const dx = faction === 0 ? 2 : -2;
-  const dy = faction === 0 ? 2 : -2;
+  // Phase 3.9.3: pushed from (±2, ±2) to (±3, ±3) so the larger HQ +
+  // Forge meshes don't overlap visually. Sim doesn't enforce footprint
+  // collision; the offset is the cheap renderer-friendly fix.
+  const dx = faction === 0 ? 3 : -3;
+  const dy = faction === 0 ? 3 : -3;
   return { x: hqX + dx, y: hqY + dy };
 }
 
 // Phase 3.2 Spire placement: alongside the Forge, one tile further out
 // on the perpendicular axis. Same deterministic-offset shape; same
-// rule that 3.5 will replace once map data is real.
+// rule that 3.10 will replace once map data is real.
 function spireTileFor(state: SimState, faction: Faction): { x: number; y: number } {
   const fs = state.factions[faction];
   const hqX = Math.round(toFloat(fs.hqX));
   const hqY = Math.round(toFloat(fs.hqY));
-  // Faction 0: 1 tile east of HQ, same Y. Faction 1: 1 tile west.
-  // Different axis from Forge so the two structures don't overlap.
-  const dx = faction === 0 ? 1 : -1;
+  // Phase 3.9.3: pushed from (±1, 0) to (±3, 0) for the same reason as
+  // forgeTileFor — bigger HQ silhouette would otherwise occlude the
+  // Spire. Different axis from Forge so the two tier-2 structures
+  // remain visually separate.
+  const dx = faction === 0 ? 3 : -3;
   const dy = 0;
   return { x: hqX + dx, y: hqY + dy };
 }
@@ -470,6 +487,33 @@ function nearestLiveNodeOfKindWithReserve(
     if (best === null || d < bestDistSq || (d === bestDistSq && n.id < best.id)) {
       best = n;
       bestDistSq = d;
+    }
+  }
+  return best;
+}
+
+// Phase 3.10.6: pick a worker the AI is willing to interrupt for a
+// build job. Preference order:
+//   1. Already-idle (no node, no current build, no manual move)
+//   2. Currently harvesting / returning — fine to interrupt; the
+//      build cost already deducted means we want this build to start
+//      ASAP.
+//   3. Already-building — skip (don't re-route an active builder).
+// Lowest worker ID wins on ties for determinism.
+function pickIdleBuilderWorker(state: SimState, faction: Faction): number | null {
+  let best: number | null = null;
+  let bestRank = 99;
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (!u.alive || u.faction !== faction || u.kind !== 'worker') continue;
+    if (u.phase === 'building') continue;
+    let rank: number;
+    if (u.phase === 'idle' && u.targetNodeId === 0) rank = 0;
+    else if (u.phase === 'movingToNode' || u.phase === 'returning') rank = 1;
+    else rank = 2;
+    if (best === null || rank < bestRank || (rank === bestRank && u.id < best)) {
+      best = u.id;
+      bestRank = rank;
     }
   }
   return best;

@@ -22,6 +22,8 @@ export const enum CommandKind {
   MoveUnit = 8, // Phase 3.3: manual move-order for a single unit. Workers cancel harvest and walk + park there; raiders/vanguards take it as a temporary override of the march-to-HQ default; defenders silently ignore (stationary).
   ActivateEnergyDump = 9, // Phase 3.7: worker-only ability. Spends DUMP_ENERGY_COST upfront; for DUMP_DURATION_TICKS the worker moves at 2× speed and bleeds a deadly trail segment per tick. Per-tick collision sweep kills enemy units overlapping segments.
   ResearchTrailDurationAtStructure = 10, // Phase 3.7: research at a Spire that doubles TRAIL_SEGMENT_LIFETIME for the faction's trails. Same shape as ResearchTier2AtStructure but with researchKind = 'trailDuration'.
+  BuildStructureByWorker = 11, // Phase 3.10.6: place a structure that requires a worker to construct it. Spawns the structure (with full buildTicksRemaining) and assigns the named worker to walk to + build it. Replaces the player path through BuildStructure (slot 4 retained for replay back-compat + AI's instant-build path during 3.10.6 transition).
+  AssignWorkerToBuild = 12, // Phase 3.10.7: ask an additional worker to join an in-progress build. Sets the worker on phase 'building' targeting the named structure. Multi-worker builds tick down faster.
 }
 
 export interface NoopCommand {
@@ -103,6 +105,22 @@ export interface ResearchTrailDurationAtStructureCommand {
   structureId: number;
 }
 
+export interface BuildStructureByWorkerCommand {
+  kind: CommandKind.BuildStructureByWorker;
+  workerId: number;
+  structureKind: StructureKind;
+  // Tile coords (integer). Sim still doesn't validate position; the
+  // input layer is expected to clamp to grid bounds.
+  x: number;
+  y: number;
+}
+
+export interface AssignWorkerToBuildCommand {
+  kind: CommandKind.AssignWorkerToBuild;
+  workerId: number;
+  structureId: number;
+}
+
 export type Command =
   | NoopCommand
   | AssignWorkerToNodeCommand
@@ -113,7 +131,9 @@ export type Command =
   | ResearchTier2AtStructureCommand
   | MoveUnitCommand
   | ActivateEnergyDumpCommand
-  | ResearchTrailDurationAtStructureCommand;
+  | ResearchTrailDurationAtStructureCommand
+  | BuildStructureByWorkerCommand
+  | AssignWorkerToBuildCommand;
 
 // One frame's worth of commands across both players. The sim consumes
 // these in the order given, deterministically.

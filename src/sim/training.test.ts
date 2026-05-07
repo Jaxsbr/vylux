@@ -33,7 +33,11 @@ const TRAIN_SPEC: InitialMatchSpec = {
 };
 
 describe('Sim — training', () => {
-  it('TrainUnit deducts energy and spawns at HQ', () => {
+  it('TrainUnit deducts energy and spawns near HQ perimeter', () => {
+    // Phase 3.10.4: workers spawn at one of the HQ_PERIMETER_OFFSETS
+    // tiles, not on the HQ tile itself. The offset is deterministic
+    // (round-robin via faction.nextSpawnRotation) so we can predict
+    // it: the first spawn uses index 0 = (+2, 0).
     const sim = new Sim(TRAIN_SPEC);
     const before = sim.state.factions[0].energy;
     sim.step({
@@ -45,8 +49,9 @@ describe('Sim — training', () => {
 
     const trained = sim.state.units.find((u) => u.kind === 'worker' && u.faction === 0);
     expect(trained).toBeTruthy();
-    expect(trained!.x).toBe(sim.state.factions[0].hqX);
-    expect(trained!.y).toBe(sim.state.factions[0].hqY);
+    // First perimeter offset is (+2, 0). HQ at (3, 3) → spawn at (5, 3).
+    expect(trained!.x).toBe((3 + 2) * 65536);
+    expect(trained!.y).toBe(3 * 65536);
   });
 
   it('TrainUnit silently rejects when underfunded', () => {
@@ -87,15 +92,16 @@ describe('Sim — training', () => {
     expect(w!.y).toBe(9 * 65536);
   });
 
-  it('TrainUnit without tile coords still spawns at HQ', () => {
+  it('TrainUnit without tile coords spawns at HQ perimeter (Phase 3.10.4)', () => {
     const sim = new Sim(TRAIN_SPEC);
     sim.step({
       tick: 0,
       commands: [{ kind: CommandKind.TrainUnit, faction: 0, unitKind: 'worker' }],
     });
     const w = sim.state.units.find((u) => u.kind === 'worker' && u.faction === 0);
-    expect(w!.x).toBe(sim.state.factions[0].hqX);
-    expect(w!.y).toBe(sim.state.factions[0].hqY);
+    // First perimeter offset is (+2, 0). HQ at (3, 3).
+    expect(w!.x).toBe((3 + 2) * 65536);
+    expect(w!.y).toBe(3 * 65536);
   });
 
   it('TrainUnit silently rejects combat unitKinds — Phase 3.0 HQ trains workers only', () => {
@@ -1194,7 +1200,8 @@ describe('Sim — AI', () => {
       const commands = tickAi(sim.state, 0);
       for (const c of commands) {
         if (c.kind === CommandKind.TrainUnit) seen.push(c.unitKind);
-        else if (c.kind === CommandKind.BuildStructure) seen.push(`build:${c.structureKind}`);
+        // Phase 3.10.6: AI now uses BuildStructureByWorker.
+        else if (c.kind === CommandKind.BuildStructureByWorker) seen.push(`build:${c.structureKind}`);
         else if (c.kind === CommandKind.TrainAtStructure) seen.push(c.unitKind);
       }
       sim.step({ tick: t, commands });

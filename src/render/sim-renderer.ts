@@ -70,6 +70,11 @@ export class SimRenderer {
   // Combined raycast-target views for the input controller.
   private readonly unitGroupView = new Map<number, THREE.Group>();
   private readonly nodeGroupView = new Map<number, THREE.Group>();
+  // Phase 3.10.3: structure + HQ raycast registries for the input
+  // controller. Same shape as the unit/node maps; populated lazily as
+  // sim-renderer creates the meshes.
+  private readonly structureGroupView = new Map<number, THREE.Group>();
+  private readonly hqGroupView = new Map<Faction, THREE.Group>();
 
   constructor(sim: Sim, entitiesGroup: THREE.Group, playerFaction: Faction, bypassVision = false) {
     this.sim = sim;
@@ -88,13 +93,28 @@ export class SimRenderer {
   }
 
   update(alpha: number): void {
+    // Phase 3.9.6: drive per-frame animation timers. Wall-clock dt
+    // (not sim dt) so animations run at render-rate, not tick-rate.
+    const nowMs = performance.now();
+    const dt = this.lastAnimMs < 0
+      ? 0
+      : Math.min(0.1, (nowMs - this.lastAnimMs) / 1000);
+    this.lastAnimMs = nowMs;
+
     this.collectVisionSources();
     this.syncHqs();
     this.syncNodes();
     this.syncStructures();
-    this.syncUnits(alpha);
+    this.syncUnits(alpha, dt);
+    this.tickDyingUnits(dt);
     this.syncTrails();
   }
+
+  // Phase 3.9.6: track wall-clock time for animation tick deltas, and
+  // a side-pool of meshes that are mid-death-pulse (the unit is dead in
+  // sim but the mesh stays visible until the pulse finishes).
+  private lastAnimMs = -1;
+  private readonly dyingUnits = new Map<number, UnitVisual>();
 
   // Phase 3.8: rebuild the friendly vision-source cache for this frame.
   // Observer mode (bypassVision) skips the rebuild + isPositionVisible
@@ -141,12 +161,33 @@ export class SimRenderer {
     return this.nodeGroupView;
   }
 
-  // Each unit/HQ owns its own selection ring; toggling rings requires
-  // walking the registry. Cheap (entity counts are small). Phase 3.3:
-  // takes a set of selected IDs to support multi-unit selection.
-  applyInputVisuals(selectedUnitIds: ReadonlySet<number>): void {
+  get structureMeshMap(): ReadonlyMap<number, THREE.Group> {
+    return this.structureGroupView;
+  }
+
+  get hqMeshMap(): ReadonlyMap<Faction, THREE.Group> {
+    return this.hqGroupView;
+  }
+
+  // Each unit/structure/HQ owns its own selection ring; toggling rings
+  // requires walking the registry. Cheap (entity counts are small).
+  // Phase 3.10.3 extends the original Phase 3.3 multi-unit signature
+  // with optional structure / HQ slots — the action bar reads these
+  // to decide what to show.
+  applyInputVisuals(
+    selectedUnitIds: ReadonlySet<number>,
+    selectedStructureId: number | null = null,
+    selectedHqFaction: Faction | null = null,
+  ): void {
     for (const [id, vis] of this.unitMeshes) {
       vis.selectionRing.visible = selectedUnitIds.has(id);
+    }
+    for (const [id, vis] of this.structureMeshes) {
+      vis.selectionRing.visible = id === selectedStructureId;
+    }
+    for (const f of [0, 1] as const) {
+      const v = this.hqMeshes[f];
+      if (v) v.selectionRing.visible = f === selectedHqFaction;
     }
   }
 
@@ -154,8 +195,12 @@ export class SimRenderer {
     for (const f of [0, 1] as const) {
       const fs = this.sim.state.factions[f];
       const v = buildHqMesh(f, toFloat(fs.hqX), toFloat(fs.hqY));
+      // Phase 3.10.3: tag the mesh group + register for raycasting so
+      // the input controller can pick the HQ on click.
+      v.group.userData.hqFaction = f;
       this.entitiesGroup.add(v.group);
       this.hqMeshes[f] = v;
+      this.hqGroupView.set(f, v.group);
     }
   }
 
@@ -218,8 +263,11 @@ export class SimRenderer {
           v = buildPylonMesh(s.faction, toFloat(s.x), toFloat(s.y));
         }
         if (v !== undefined) {
+          // Phase 3.10.3: tag + register for raycast picking.
+          v.group.userData.structureId = s.id;
           this.entitiesGroup.add(v.group);
           this.structureMeshes.set(s.id, v);
+          this.structureGroupView.set(s.id, v.group);
         }
       }
       if (!v) continue;
@@ -238,6 +286,18 @@ export class SimRenderer {
       v.setBuildProgress(buildRatio);
       v.hpBar.update(toFloat(s.hp), toFloat(stats.maxHp));
 
+      // Phase 3.10.7: scaffolding pulse + slow rotation while in
+      // build phase. setBuildProgress already toggled visibility; we
+      // just animate the live ring on top of that.
+      if (v.scaffoldingRing.visible) {
+        const t = performance.now() / 1000;
+        const pulse = 0.5 + 0.5 * Math.sin(t * 2.6); // 0..1
+        const mat = v.scaffoldingRing.material as THREE.MeshStandardMaterial;
+        mat.emissiveIntensity = 0.4 + 1.4 * pulse;
+        mat.opacity = 0.35 + 0.45 * pulse;
+        v.scaffoldingRing.rotation.z = t * 0.6;
+      }
+
       // Upgrade-only: pulse the finial while research is running.
       if (s.kind === 'upgrade') {
         const upgradeVis = v as UpgradeVisual;
@@ -253,7 +313,7 @@ export class SimRenderer {
     }
   }
 
-  private syncUnits(alpha: number): void {
+  private syncUnits(alpha: number, dt: number): void {
     for (const u of this.sim.state.units) {
       let v = this.unitMeshes.get(u.id);
       if (!v) {
@@ -262,16 +322,38 @@ export class SimRenderer {
         this.entitiesGroup.add(v.group);
         this.unitMeshes.set(u.id, v);
         this.unitGroupView.set(u.id, v.group);
+        // Phase 3.9.6: this is the first time we've ever seen this id —
+        // the unit was just spawned. Trigger the placement scale-in
+        // pulse so the player's eye catches "a thing arrived here." On
+        // initial scene load there are no pre-spawned units (only HQs),
+        // so this fires only on actual TrainUnit / TrainAtStructure
+        // commits.
+        v.triggerPlacementPulse();
       }
+      v.tickPlacementPulse(dt);
+
       // Phase 3.8: friendly units always visible; enemy units hidden
       // unless within the player's current vision. The position lerp
-      // below uses the fresh sim coords either way (no need to halt
-      // interpolation when an enemy slips out of vision — the mesh is
-      // simply hidden, not detached).
+      // below uses the fresh sim coords either way.
       const isOwn = u.faction === this.playerFaction;
-      v.group.visible = u.alive
+      const visible = u.alive
         && (isOwn || this.bypassVision || this.isPositionVisible(u.x, u.y));
-      if (!u.alive) continue;
+
+      if (!u.alive) {
+        // Phase 3.9.6: unit died this tick. Move the visual into the
+        // dying pool — its death pulse plays out in tickDyingUnits
+        // before the mesh is finally hidden + disposed. We *also*
+        // remove it from unitMeshes so the next syncUnits doesn't
+        // re-tick it as if alive.
+        if (!this.dyingUnits.has(u.id)) {
+          v.triggerDeathPulse();
+          this.dyingUnits.set(u.id, v);
+          this.unitMeshes.delete(u.id);
+          this.unitGroupView.delete(u.id);
+        }
+        continue;
+      }
+      v.group.visible = visible;
 
       const curX = toFloat(u.x);
       const curY = toFloat(u.y);
@@ -283,6 +365,19 @@ export class SimRenderer {
 
       const maxHp = UNIT_STATS[u.kind].maxHp;
       v.hpBar.update(toFloat(u.hp), toFloat(maxHp));
+    }
+  }
+
+  // Phase 3.9.6: advance the death-pulse animation on units that died
+  // recently. Once the pulse completes, hide + remove the mesh.
+  private tickDyingUnits(dt: number): void {
+    for (const [id, v] of this.dyingUnits) {
+      const stillPulsing = v.tickDeathPulse(dt);
+      if (!stillPulsing) {
+        v.group.visible = false;
+        this.entitiesGroup.remove(v.group);
+        this.dyingUnits.delete(id);
+      }
     }
   }
 

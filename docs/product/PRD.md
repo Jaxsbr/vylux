@@ -2,7 +2,7 @@
 
 > **Status:** Draft v4 (esport pivot — mechanical-mastery pillar + competitive surface fleshed out). Supersedes the prototype-era PRD.
 > **Owner:** Jaco
-> **Last updated:** 2026-04-26
+> **Last updated:** 2026-05-07 (Phase 3.0–3.10 implemented; 3.11 next)
 
 ---
 
@@ -162,6 +162,8 @@ Why two resources, not one or three:
 - **Two** gives the build-order branching needed for "do I rush, do I expand to Flux, do I tech?" without ballooning the spreadsheet.
 
 Workers gather, deposit, and repair. They are not auto-harvesters in the strict sense — assignment matters and idle workers are a real problem (per §3.8 idle-worker hotkey). But the model is deposit-based (gather → return to nearest dropoff), not the prototype's "stand-on-node-and-multiply-income" model. The prototype model is too passive for a game where map control _means something_.
+
+> _Implementation status (Phase 3.10):_ workers are the builders too — `BuildStructureByWorker` dispatches a selected worker to walk to a tile and construct the structure (Forge / Spire / Pylon); multiple workers stack throughput. Auto-assign on spawn was removed in 3.9.2 so the player keeps agency over where workers go; the §3.8 idle-worker hotkey is the long-term answer to surfacing them. "Repair" itself is not yet wired — that lands when structures can take damage outside of HQ-attack scenarios.
 
 ### 6.4 Tech & production
 
