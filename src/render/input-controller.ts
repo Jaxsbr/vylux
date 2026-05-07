@@ -25,7 +25,7 @@
 import * as THREE from 'three';
 import { CommandKind, type Command } from '../sim/commands';
 import type { Sim } from '../sim/sim';
-import { findFirstOperationalProduction, findFirstOperationalUpgrade } from '../sim/state';
+import { findFirstOperationalProduction, findFirstOperationalUpgrade, findNode, findStructure, findUnit } from '../sim/state';
 import type { Faction, UnitKind } from '../sim/types';
 import { GRID_CONSTANTS } from '../grid';
 import { tileFloatToWorld } from './scene';
@@ -199,10 +199,10 @@ export class InputController {
   // commit will silently no-op (sim rejects invalid workerId).
   private snapshotSelectedWorkers(): number[] {
     const out: number[] = [];
-    const sim = this.opts.sim.state;
+    const state = this.opts.sim.state;
     for (const id of this.selectedUnitIds) {
-      const u = sim.units.find((x) => x.id === id);
-      if (!u || !u.alive || u.faction !== this.opts.playerFaction) continue;
+      const u = findUnit(state, id);
+      if (!u || u.faction !== this.opts.playerFaction) continue;
       if (u.kind !== 'worker') continue;
       out.push(u.id);
     }
@@ -245,10 +245,10 @@ export class InputController {
   // (some workers may be dumpable, others not — the AI tick may have
   // mutated energy already, so sequential rejection is fine).
   dumpSelectedWorkers(): void {
-    const sim = this.opts.sim.state;
+    const state = this.opts.sim.state;
     for (const id of this.selectedUnitIds) {
-      const u = sim.units.find((x) => x.id === id);
-      if (!u || !u.alive) continue;
+      const u = findUnit(state, id);
+      if (!u) continue;
       if (u.faction !== this.opts.playerFaction) continue;
       if (u.kind !== 'worker') continue;
       if (u.dumpTicksRemaining > 0) continue;
@@ -298,17 +298,19 @@ export class InputController {
           x: tile.x,
           y: tile.y,
         });
-        // The follow-up AssignWorkerToBuild commands target the
-        // structure id created by BuildStructureByWorker — but we
-        // don't know that id until the sim has applied the build
-        // command. The sim's nextEntityId is monotonic + visible to
-        // us; the structure will get state.nextEntityId at apply
-        // time. This couples the input layer to a sim implementation
-        // detail (next ID), so a cleaner approach is for the player
-        // to manually re-dispatch additional workers after seeing the
-        // structure appear. For 3.10.6 we ship single-worker only;
-        // 3.10.7 wires multi-worker through right-click on an
-        // in-progress structure.
+        // KNOWN GAP (followup, see investigation 04 §3.10 close):
+        // when N>1 workers are selected at placement-click time, only
+        // the first walks to the build site. The follow-up
+        // AssignWorkerToBuild commands need the structure id created
+        // by BuildStructureByWorker — that id isn't known until the
+        // sim has applied the build command. The sim's nextEntityId
+        // is monotonic + readable here, so a future fix can capture
+        // `state.nextEntityId` immediately before queueing the build
+        // and use it for the follow-up Assign commands. 3.10.7 only
+        // wires multi-worker via right-click on an in-progress
+        // structure (see handleRightClick), which covers the "I want
+        // more builders" path but not the "I clicked place with 4
+        // workers selected" intent.
         void rest;
         this.opts.feedback?.onPlacement?.(tile.x, tile.y);
       }
@@ -331,7 +333,7 @@ export class InputController {
       if (nodeHitFromDown !== null) {
         const sentAny = this.queueAssignWorkersToNode(nodeHitFromDown);
         if (sentAny) {
-          const node = this.opts.sim.state.nodes.find((n) => n.id === nodeHitFromDown);
+          const node = findNode(this.opts.sim.state, nodeHitFromDown);
           if (node) this.opts.feedback?.onAssignToNode?.(toFloat(node.x), toFloat(node.y));
         }
         return;
@@ -449,7 +451,7 @@ export class InputController {
     if (nodeHit !== null && this.selectedUnitIds.size > 0) {
       const sentAny = this.queueAssignWorkersToNode(nodeHit);
       if (sentAny) {
-        const node = this.opts.sim.state.nodes.find((n) => n.id === nodeHit);
+        const node = findNode(this.opts.sim.state, nodeHit);
         if (node) this.opts.feedback?.onAssignToNode?.(toFloat(node.x), toFloat(node.y));
         // Phase 3.10 follow-up: do NOT clear selection on assign-to-
         // node. The pre-3.10 code cleared, but the player loses focus
@@ -478,15 +480,15 @@ export class InputController {
     // input wire. Operational structures fall through to the move-
     // order path (right-clicking a Forge with workers selected just
     // moves them past it — no special "repair" action yet).
-    const sim = this.opts.sim.state;
+    const state = this.opts.sim.state;
     const structureHit = this.pickOwnedStructure(e);
     if (structureHit !== null) {
-      const s = sim.structures.find((x) => x.id === structureHit);
-      if (s && s.alive && s.buildTicksRemaining > 0) {
+      const s = findStructure(state, structureHit);
+      if (s && s.buildTicksRemaining > 0) {
         let assigned = 0;
         for (const id of this.selectedUnitIds) {
-          const u = sim.units.find((x) => x.id === id);
-          if (!u || !u.alive || u.kind !== 'worker') continue;
+          const u = findUnit(state, id);
+          if (!u || u.kind !== 'worker') continue;
           if (u.faction !== this.opts.playerFaction) continue;
           this.queue.push({
             kind: CommandKind.AssignWorkerToBuild,
@@ -513,8 +515,8 @@ export class InputController {
     if (tile === null) return;
     let queued = false;
     for (const id of this.selectedUnitIds) {
-      const u = sim.units.find((x) => x.id === id);
-      if (!u || !u.alive || u.kind === 'defender') continue;
+      const u = findUnit(state, id);
+      if (!u || u.kind === 'defender') continue;
       this.queue.push({
         kind: CommandKind.MoveUnit,
         unitId: id,
@@ -548,10 +550,10 @@ export class InputController {
   // the caller can decide whether to clear selection).
   private queueAssignWorkersToNode(nodeId: number): boolean {
     let queued = false;
-    const sim = this.opts.sim.state;
+    const state = this.opts.sim.state;
     for (const id of this.selectedUnitIds) {
-      const u = sim.units.find((x) => x.id === id);
-      if (!u || !u.alive) continue;
+      const u = findUnit(state, id);
+      if (!u) continue;
       if (u.faction !== this.opts.playerFaction) continue;
       if (u.kind !== 'worker') continue;
       this.queue.push({
@@ -616,8 +618,8 @@ export class InputController {
       while (obj !== null) {
         const ud = obj.userData as { structureId?: number };
         if (typeof ud.structureId === 'number') {
-          const s = this.opts.sim.state.structures.find((x) => x.id === ud.structureId);
-          if (s && s.alive && s.faction === this.opts.playerFaction) return s.id;
+          const s = findStructure(this.opts.sim.state, ud.structureId);
+          if (s && s.faction === this.opts.playerFaction) return s.id;
           return null;
         }
         obj = obj.parent;
@@ -727,8 +729,8 @@ export class InputController {
       while (obj !== null) {
         const ud = obj.userData as { unitId?: number };
         if (typeof ud.unitId === 'number') {
-          const u = this.opts.sim.state.units.find((x) => x.id === ud.unitId);
-          if (u && u.alive && u.faction === this.opts.playerFaction) return u.id;
+          const u = findUnit(this.opts.sim.state, ud.unitId);
+          if (u && u.faction === this.opts.playerFaction) return u.id;
           return null;
         }
         obj = obj.parent;
@@ -749,8 +751,8 @@ export class InputController {
       while (obj !== null) {
         const ud = obj.userData as { nodeId?: number };
         if (typeof ud.nodeId === 'number') {
-          const n = this.opts.sim.state.nodes.find((x) => x.id === ud.nodeId);
-          if (n && n.alive) return n.id;
+          const n = findNode(this.opts.sim.state, ud.nodeId);
+          if (n) return n.id;
           return null;
         }
         obj = obj.parent;

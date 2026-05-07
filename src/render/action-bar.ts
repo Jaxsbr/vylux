@@ -24,6 +24,7 @@ import {
   findFirstOperationalUpgrade,
   findFirstUpgradeAnyState,
   findStructure,
+  findUnit,
 } from '../sim/state';
 import {
   DUMP_ENERGY_COST,
@@ -135,7 +136,10 @@ export class ActionBar {
   ): void {
     const ctx = this.computeSelectionContext(sim, selectedUnitIds, selectedStructureId, selectedHqFaction);
     const specs = this.computeSpecs(sim, ctx);
-    const key = ctx.kind + '|' + specs.map((s) => `${s.id}:${s.enabled ? '1' : '0'}:${s.disabledReason ?? ''}`).join('/');
+    // Hint is part of the comparison key — without it, going from 1
+    // worker selected → 2 workers selected wouldn't refresh the hint
+    // ("WORKER" vs "2 WORKERS") because the button list is identical.
+    const key = ctx.kind + '|' + ctx.hint + '|' + specs.map((s) => `${s.id}:${s.enabled ? '1' : '0'}:${s.disabledReason ?? ''}`).join('/');
     if (key === this.currentSpecKey) return;
     this.currentSpecKey = key;
 
@@ -166,8 +170,8 @@ export class ActionBar {
       let allWorkers = true;
       let count = 0;
       for (const id of selectedUnitIds) {
-        const u = sim.state.units.find((x) => x.id === id);
-        if (!u || !u.alive || u.faction !== this.faction) continue;
+        const u = findUnit(sim.state, id);
+        if (!u || u.faction !== this.faction) continue;
         count++;
         if (u.kind !== 'worker') allWorkers = false;
       }
@@ -189,7 +193,7 @@ export class ActionBar {
     const colorLabel = FACTION_COLOR[this.faction];
     switch (ctx.kind) {
       case 'hq':
-        return [this.workerTrainSpec(sim, fs, colorLabel)];
+        return [this.workerTrainSpec(fs, colorLabel)];
       case 'workers':
         return [
           this.buildForgeSpec(fs, colorLabel),
@@ -215,7 +219,7 @@ export class ActionBar {
     }
   }
 
-  private workerTrainSpec(sim: Sim, fs: Sim['state']['factions'][number], colorLabel: 'blue' | 'red'): ButtonSpec {
+  private workerTrainSpec(fs: Sim['state']['factions'][number], colorLabel: 'blue' | 'red'): ButtonSpec {
     const stats = UNIT_STATS.worker;
     const energyOk = fs.energy >= stats.trainCost;
     const colorOk = fs.color >= stats.trainColorCost;
@@ -225,7 +229,6 @@ export class ActionBar {
     if (!energyOk) reason = 'no energy';
     else if (!colorOk) reason = `no ${colorLabel}`;
     else if (!supplyOk) reason = 'supply blocked';
-    void sim;
     return {
       id: 'train-worker',
       label: 'TRAIN  WORKER',
