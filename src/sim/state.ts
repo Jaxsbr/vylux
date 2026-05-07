@@ -368,6 +368,9 @@ export function spawnUnit(
         // phase = 'building' + targetStructureId; on build complete +
         // on death the field resets to 0.
         targetStructureId: 0,
+        // Phase 3.10.10d: harvest slot — picked at AssignWorkerToNode
+        // time. Default 0 on spawn (no node assigned).
+        targetNodeSlot: 0,
       };
       unit = w;
       break;

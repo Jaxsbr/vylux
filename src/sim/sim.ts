@@ -179,6 +179,10 @@ function hashUnit(h: Hasher, u: Unit): void {
   h.writeU32(unitKindToInt(u.kind));
   h.writeI32(u.x);
   h.writeI32(u.y);
+  // Phase 3.10.10e: the per-unit velocity (vx, vy) and lateral-bias
+  // fields added in 3.10.10 + 3.10.10b were dropped along with the
+  // collision / friction passes they fed. Movement is back to chebyshev
+  // step-toward-target; only x, y are hashed for unit position.
   h.writeI32(u.hp);
   h.writeU32(u.attackCooldown);
   // Phase 3.3: moveTarget — presence flag + xy. null hashes the same
@@ -208,6 +212,8 @@ function hashUnit(h: Hasher, u: Unit): void {
       h.writeU32(u.activeTrailId);
       // Phase 3.10.6: structure id this worker is building (0 = none).
       h.writeU32(u.targetStructureId);
+      // Phase 3.10.10d: harvest slot index (0..HARVEST_SLOT_COUNT-1).
+      h.writeU32(u.targetNodeSlot);
       return;
     case 'defender':
     case 'raider':

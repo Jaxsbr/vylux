@@ -129,6 +129,14 @@ interface UnitBase {
   attackCooldown: number;
   moveTarget: { x: Fixed; y: Fixed } | null;
 }
+// Phase 3.10.10e (2026-05-08): the velocity / friction / lateral-bias
+// fields added in 3.10.10 + 3.10.10b were reverted. The local-collision
+// machinery they fed produced glitches the playtest read as worse than
+// no collision at all, and slot allocation + formation retention
+// (3.10.10d) solved the structural same-destination case the bias was
+// trying to patch over. Movement is back to the pre-3.10.10 chebyshev
+// step-toward-target model — units pass through each other on the
+// local axis. The 3.10.10d slot + formation work is what's kept.
 
 export interface Worker extends UnitBase {
   kind: 'worker';
@@ -156,6 +164,17 @@ export interface Worker extends UnitBase {
   // walks to the structure tile and ticks down its buildTicksRemaining
   // each tick while in range. Reset to 0 on death + on build complete.
   targetStructureId: number;
+  // Phase 3.10.10d: harvest slot allocation. When AssignWorkerToNode
+  // lands the worker picks the lowest-index unused slot on the target
+  // node (0..HARVEST_SLOT_COUNT-1, or 0 if all are taken — overflow
+  // stacks). The worker walks to `node.center + HARVEST_SLOT_OFFSETS
+  // [slot]` rather than to the node center, so multiple workers
+  // commanded to the same node cluster around it without ever
+  // targeting the same point. Slot is reserved while
+  // `targetNodeId === node.id`; cleared (back to 0) when the worker
+  // drops the node assignment (death, BuildStructureByWorker,
+  // depleted-node early-out, etc).
+  targetNodeSlot: number;
 }
 
 export interface Defender extends UnitBase {

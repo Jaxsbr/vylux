@@ -84,6 +84,54 @@ export const HQ_PERIMETER_OFFSETS: ReadonlyArray<{ dx: number; dy: number }> = [
   { dx:  2, dy: -2 },
 ];
 
+// Phase 3.10.10d: harvest slot allocation. Six hex-arranged points at
+// radius ~0.55 around a resource node. Workers assigned to the node
+// pick the lowest-index unused slot at AssignWorkerToNode time and
+// walk to `node.center + HARVEST_SLOT_OFFSETS[slot]` rather than to
+// the node centre — so multiple workers never target the same point
+// (the structural cause of the same-node deadlock the lateral-bias
+// pass couldn't unstick on its own). Radius matches HARVEST_AT_NODE_REACH
+// so a worker arriving at its slot is right at the harvest threshold.
+// 6 directions covers the typical 1-3 workers-per-node case comfortably;
+// surplus workers (slot 7+) overflow back to slot 0 (will collide with
+// the worker on slot 0, which 3.10.10c's lateral bias handles).
+const HARVEST_SLOT_R: Fixed = fromFloat(0.55);
+const HARVEST_SLOT_R_HALF: Fixed = fromFloat(0.275);
+const HARVEST_SLOT_R_SQRT3_2: Fixed = fromFloat(0.476); // 0.55 * sqrt(3)/2
+export const HARVEST_SLOT_COUNT = 6;
+export const HARVEST_SLOT_OFFSETS: ReadonlyArray<{ dx: Fixed; dy: Fixed }> = [
+  { dx:  HARVEST_SLOT_R,        dy:  0 },
+  { dx:  HARVEST_SLOT_R_HALF,   dy:  HARVEST_SLOT_R_SQRT3_2 },
+  { dx: -HARVEST_SLOT_R_HALF,   dy:  HARVEST_SLOT_R_SQRT3_2 },
+  { dx: -HARVEST_SLOT_R,        dy:  0 },
+  { dx: -HARVEST_SLOT_R_HALF,   dy: -HARVEST_SLOT_R_SQRT3_2 },
+  { dx:  HARVEST_SLOT_R_HALF,   dy: -HARVEST_SLOT_R_SQRT3_2 },
+];
+
+// Phase 3.10.10d: formation offsets for multi-unit MoveUnit. When the
+// player right-clicks a tile with N units selected, the input layer
+// fans out N MoveUnit commands all carrying the same (x, y). Each
+// command, on apply, counts how many other units already have a
+// moveTarget within FORMATION_TOLERANCE of the click point and assigns
+// the next-unused slot — first unit gets the centre, the next 6
+// cluster around it on a hex ring at ~0.7 tile spacing (above the
+// 0.5-tile collision diameter so cluster members don't fight for
+// space). Surplus units (8+) cycle back to slot 0; the lateral-bias
+// pass handles the residual overlap.
+const FORMATION_R: Fixed = fromFloat(0.7);
+const FORMATION_R_HALF: Fixed = fromFloat(0.35);
+const FORMATION_R_SQRT3_2: Fixed = fromFloat(0.606); // 0.7 * sqrt(3)/2
+export const FORMATION_SLOT_COUNT = 7;
+export const FORMATION_OFFSETS: ReadonlyArray<{ dx: Fixed; dy: Fixed }> = [
+  { dx:  0,                  dy:  0 },
+  { dx:  FORMATION_R,        dy:  0 },
+  { dx:  FORMATION_R_HALF,   dy:  FORMATION_R_SQRT3_2 },
+  { dx: -FORMATION_R_HALF,   dy:  FORMATION_R_SQRT3_2 },
+  { dx: -FORMATION_R,        dy:  0 },
+  { dx: -FORMATION_R_HALF,   dy: -FORMATION_R_SQRT3_2 },
+  { dx:  FORMATION_R_HALF,   dy: -FORMATION_R_SQRT3_2 },
+];
+
 // Phase 3.10.5: workers stop at the HQ perimeter (don't walk into the
 // 3.9.3-bumped HQ silhouette to deposit). Threshold is in tile-units²
 // — 2.0² gives an arrival ring just outside the HQ visual.
@@ -125,6 +173,12 @@ export function applyCommand(state: SimState, cmd: Command): void {
       // input layer doesn't have to filter exhaustively (it's correct
       // by construction here).
       if (!canHarvest(u.faction, n)) return;
+      // Phase 3.10.10d: pick a harvest slot before binding the worker
+      // to the node — counted across all currently-assigned workers,
+      // so a multi-worker fan-out (player click on node with 3 workers
+      // selected → 3 sequential AssignWorkerToNode commands in one
+      // frame) gets slots 0, 1, 2 picked in order.
+      u.targetNodeSlot = pickHarvestSlot(state, n.id, u.id);
       u.targetNodeId = n.id;
       u.phase = u.carrying > 0 ? 'returning' : 'movingToNode';
       // Phase 3.3: any node-assign command supersedes a manual park.
@@ -242,10 +296,21 @@ export function applyCommand(state: SimState, cmd: Command): void {
       if (u.kind === 'defender') return;
       const tx = fromInt(cmd.x);
       const ty = fromInt(cmd.y);
-      u.moveTarget = { x: tx, y: ty };
+      // Phase 3.10.10d: formation retention. The input layer fans out
+      // one MoveUnit per selected unit on a multi-select right-click,
+      // all carrying the same (x, y) — without slotting, every unit
+      // would target the exact click point and pile up. Pick the
+      // lowest-index slot whose offset isn't already claimed by another
+      // unit's moveTarget within FORMATION_TOLERANCE_SQ of (tx, ty).
+      // Commands process in order, so the N fan-out gets slots 0..N-1
+      // (or wraps after slot 6).
+      const slot = pickFormationSlot(state, tx, ty, u.id);
+      const offset = FORMATION_OFFSETS[slot];
+      u.moveTarget = { x: add(tx, offset.dx), y: add(ty, offset.dy) };
       if (u.kind === 'worker') {
         u.phase = 'idle';
         u.targetNodeId = 0;
+        u.targetNodeSlot = 0;
         u.harvestTicksRemaining = 0;
       }
       return;
@@ -347,6 +412,7 @@ export function applyCommand(state: SimState, cmd: Command): void {
       w.carrying = 0;
       w.carriedKind = 'energy';
       w.targetNodeId = 0;
+      w.targetNodeSlot = 0;
       w.moveTarget = null;
       w.harvestTicksRemaining = 0;
       w.phase = 'building';
@@ -366,6 +432,7 @@ export function applyCommand(state: SimState, cmd: Command): void {
       w.carrying = 0;
       w.carriedKind = 'energy';
       w.targetNodeId = 0;
+      w.targetNodeSlot = 0;
       w.moveTarget = null;
       w.harvestTicksRemaining = 0;
       w.phase = 'building';
@@ -385,6 +452,69 @@ function canHarvest(faction: Faction, node: ResourceNode): boolean {
   return true;
 }
 
+// Phase 3.10.10d: pick the lowest-index unused harvest slot for a
+// worker about to be assigned to `nodeId`. Excludes the worker itself
+// (so re-assigning to the same node doesn't see the worker's own old
+// slot as taken). Falls back to slot 0 if all are taken — surplus
+// workers stack on slot 0 and get separated by the lateral-bias pass.
+function pickHarvestSlot(state: SimState, nodeId: number, selfId: number): number {
+  const used: boolean[] = [false, false, false, false, false, false];
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (!u.alive || u.kind !== 'worker') continue;
+    if (u.id === selfId) continue;
+    if (u.targetNodeId !== nodeId) continue;
+    const s = u.targetNodeSlot;
+    if (s >= 0 && s < HARVEST_SLOT_COUNT) used[s] = true;
+  }
+  for (let s = 0; s < HARVEST_SLOT_COUNT; s++) {
+    if (!used[s]) return s;
+  }
+  return 0;
+}
+
+// Phase 3.10.10d: pick the lowest-index unused formation slot for a
+// MoveUnit landing at (tx, ty). Slot 0 (the centre) is taken by any
+// unit whose moveTarget is exactly (tx, ty); slots 1..N take the
+// surrounding ring offsets. We look at every alive unit's existing
+// moveTarget (excluding the commanding unit itself) and check whether
+// its position matches `(tx + offset.dx, ty + offset.dy)` for each
+// candidate slot — if so, that slot is taken. The 2-tile tolerance
+// (FORMATION_TOLERANCE_SQ) on the centre check tolerates stale orders
+// from earlier ticks pointing at *nearby* tiles without false-positiving
+// against orders elsewhere on the map.
+function pickFormationSlot(state: SimState, tx: Fixed, ty: Fixed, selfId: number): number {
+  const used: boolean[] = [];
+  for (let s = 0; s < FORMATION_SLOT_COUNT; s++) used.push(false);
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (!u.alive) continue;
+    if (u.id === selfId) continue;
+    if (u.moveTarget === null) continue;
+    // The other unit's moveTarget is the click point + its assigned
+    // formation offset. Recover the slot: try every offset, pick the
+    // one that matches.
+    for (let s = 0; s < FORMATION_SLOT_COUNT; s++) {
+      const off = FORMATION_OFFSETS[s];
+      const cx = add(tx, off.dx);
+      const cy = add(ty, off.dy);
+      if (distSq(u.moveTarget.x, u.moveTarget.y, cx, cy) <= WORKER_REACH_SQ) {
+        used[s] = true;
+        break;
+      }
+    }
+  }
+  // Note: a moveTarget on the far side of the map happens to align
+  // with one of our slot offsets only by coincidence (and the same
+  // bit-equal Fixed value would have to land), so false-positives are
+  // a non-issue — the per-slot exact match is the precise filter we
+  // want.
+  for (let s = 0; s < FORMATION_SLOT_COUNT; s++) {
+    if (!used[s]) return s;
+  }
+  return 0;
+}
+
 // Phase 3.5: passive node regen toward maxReserve. Energy + Flux nodes
 // have regenPerTick === 0 so this is a no-op for them; colour nodes
 // heal a small amount each tick. Capped so the value can't drift past
@@ -399,6 +529,21 @@ function advanceNode(node: ResourceNode): void {
   node.remaining = next > node.maxReserve ? node.maxReserve : next;
 }
 
+// Phase 3.10.10e (2026-05-08): reverted to chebyshev step-toward-target.
+//
+// `clampStep` clips a per-axis delta to ±limit. `moveTowards` returns a
+// new (x, y) one chebyshev step closer to (tx, ty) — each axis moves up
+// to `speed`, capped at the remaining delta. No sqrt; no normalisation;
+// no per-unit velocity stored. The per-axis cap means diagonals cover
+// `speed` per axis (i.e., sqrt(2)·speed total), the same shape used
+// from Phase 1 through 3.10.9.
+function clampStep(delta: Fixed, speed: Fixed): Fixed {
+  if (delta === 0) return 0;
+  if (delta > 0) return delta < speed ? delta : speed;
+  const negSpeed = -speed;
+  return delta > negSpeed ? delta : negSpeed;
+}
+
 function moveTowards(
   curX: Fixed,
   curY: Fixed,
@@ -406,19 +551,9 @@ function moveTowards(
   ty: Fixed,
   speed: Fixed,
 ): { x: Fixed; y: Fixed } {
-  // Chebyshev-style step: move on each axis up to speed, capped at the
-  // remaining delta. No sqrt; no normalisation; deterministic by
-  // construction.
   const dx = sub(tx, curX);
   const dy = sub(ty, curY);
   return { x: add(curX, clampStep(dx, speed)), y: add(curY, clampStep(dy, speed)) };
-}
-
-function clampStep(delta: Fixed, speed: Fixed): Fixed {
-  if (delta === 0) return 0;
-  if (delta > 0) return delta < speed ? delta : speed;
-  const negSpeed = -speed;
-  return delta > negSpeed ? delta : negSpeed;
 }
 
 // Find the nearest live enemy unit within range. Tiebreaker: lowest ID.
@@ -464,6 +599,8 @@ function applyDamage(state: SimState, target: Unit, damage: Fixed): boolean {
       target.carriedKind = 'energy'; // canonical reset for determinism
       target.phase = 'idle';
       target.targetNodeId = 0;
+      // Phase 3.10.10d: free the harvest slot.
+      target.targetNodeSlot = 0;
       // Phase 3.7: reset dump fields to canonical zero. The trail this
       // worker spawned (if any) keeps existing — segments will age out
       // on their own. activeTrailId is just a back-reference for new
@@ -643,9 +780,9 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
           w.y = tgt.y;
           return;
         }
-        const nextPos = moveTowards(w.x, w.y, tgt.x, tgt.y, speed);
-        w.x = nextPos.x;
-        w.y = nextPos.y;
+        const next = moveTowards(w.x, w.y, tgt.x, tgt.y, speed);
+        w.x = next.x;
+        w.y = next.y;
       }
       return;
 
@@ -654,20 +791,30 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
       if (!node) {
         w.phase = 'idle';
         w.targetNodeId = 0;
+        w.targetNodeSlot = 0;
         return;
       }
-      const nextPos = moveTowards(w.x, w.y, node.x, node.y, speed);
-      w.x = nextPos.x;
-      w.y = nextPos.y;
-      // Phase 3.10.9: workers transition to harvesting from the wider
-      // HARVEST_AT_NODE_REACH_SQ so a worker bounced off the node centre
-      // by the soft-collision pass still grabs the harvest. The narrow
-      // WORKER_REACH_SQ (0.06²) is reserved for the post-deposit
-      // movement target snap so a parked worker still has a bit-stable
-      // integer-tile position.
-      if (distSq(w.x, w.y, node.x, node.y) <= HARVEST_AT_NODE_REACH_SQ) {
+      // Phase 3.10.10d: walk to the per-worker harvest slot, not the
+      // node centre. Each worker assigned to this node has a different
+      // slot index (0..HARVEST_SLOT_COUNT-1) picked at command time, so
+      // this resolves to a different point per worker — they cluster
+      // around the node hex-style instead of fighting for the centre.
+      const slot = HARVEST_SLOT_OFFSETS[w.targetNodeSlot % HARVEST_SLOT_COUNT];
+      const slotX = add(node.x, slot.dx);
+      const slotY = add(node.y, slot.dy);
+      const next = moveTowards(w.x, w.y, slotX, slotY, speed);
+      w.x = next.x;
+      w.y = next.y;
+      // Reach check is against the slot point: the worker sits at its
+      // slot (not the node centre) when harvesting. WORKER_REACH_SQ
+      // (0.06²) gives a precise stop at the slot.
+      if (distSq(w.x, w.y, slotX, slotY) <= WORKER_REACH_SQ) {
         w.phase = 'harvesting';
         w.harvestTicksRemaining = HARVEST_TICKS;
+        // Snap to the slot for a bit-stable resting position regardless
+        // of approach trajectory.
+        w.x = slotX;
+        w.y = slotY;
       }
       return;
     }
@@ -677,6 +824,7 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
       if (!node) {
         w.phase = 'idle';
         w.targetNodeId = 0;
+        w.targetNodeSlot = 0;
         return;
       }
       // Phase 3.5: a worker assigned (manually or otherwise) to a
@@ -687,6 +835,7 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
       if (!canHarvest(w.faction, node)) {
         w.phase = 'idle';
         w.targetNodeId = 0;
+        w.targetNodeSlot = 0;
         return;
       }
       w.harvestTicksRemaining -= 1;
@@ -717,6 +866,7 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
         if (actuallyTaken === 0) {
           w.phase = 'idle';
           w.targetNodeId = 0;
+          w.targetNodeSlot = 0;
           return;
         }
         w.phase = 'returning';
@@ -736,9 +886,9 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
         w.targetStructureId = 0;
         return;
       }
-      const nextPos = moveTowards(w.x, w.y, s.x, s.y, speed);
-      w.x = nextPos.x;
-      w.y = nextPos.y;
+      const nextBuild = moveTowards(w.x, w.y, s.x, s.y, speed);
+      w.x = nextBuild.x;
+      w.y = nextBuild.y;
       if (distSq(w.x, w.y, s.x, s.y) <= BUILD_REACH_SQ) {
         s.buildTicksRemaining -= 1;
         if (s.buildTicksRemaining <= 0) {
@@ -754,9 +904,9 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
 
     case 'returning': {
       const hq = state.factions[w.faction];
-      const nextPos = moveTowards(w.x, w.y, hq.hqX, hq.hqY, speed);
-      w.x = nextPos.x;
-      w.y = nextPos.y;
+      const nextRet = moveTowards(w.x, w.y, hq.hqX, hq.hqY, speed);
+      w.x = nextRet.x;
+      w.y = nextRet.y;
       // Phase 3.10.5: deposit at the HQ perimeter, not the centre.
       // Old WORKER_REACH_SQ threshold was 0.06² — workers had to be
       // essentially on top of the HQ tile, which made them disappear
@@ -788,6 +938,7 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
         } else {
           w.phase = 'idle';
           w.targetNodeId = 0;
+          w.targetNodeSlot = 0;
         }
       }
       return;
@@ -824,15 +975,15 @@ function advanceRaider(state: SimState, r: Raider): void {
       r.moveTarget = null;
       return;
     }
-    const nextPos = moveTowards(r.x, r.y, tgt.x, tgt.y, stats.speed);
-    r.x = nextPos.x;
-    r.y = nextPos.y;
+    const next = moveTowards(r.x, r.y, tgt.x, tgt.y, stats.speed);
+    r.x = next.x;
+    r.y = next.y;
     return;
   }
   const enemyHq = state.factions[r.faction === 0 ? 1 : 0];
-  const nextPos = moveTowards(r.x, r.y, enemyHq.hqX, enemyHq.hqY, stats.speed);
-  r.x = nextPos.x;
-  r.y = nextPos.y;
+  const next = moveTowards(r.x, r.y, enemyHq.hqX, enemyHq.hqY, stats.speed);
+  r.x = next.x;
+  r.y = next.y;
 }
 
 function advanceStructure(state: SimState, s: Structure): void {
@@ -920,15 +1071,15 @@ function advanceVanguard(state: SimState, v: Vanguard): void {
       v.moveTarget = null;
       return;
     }
-    const nextPos = moveTowards(v.x, v.y, tgt.x, tgt.y, stats.speed);
-    v.x = nextPos.x;
-    v.y = nextPos.y;
+    const next = moveTowards(v.x, v.y, tgt.x, tgt.y, stats.speed);
+    v.x = next.x;
+    v.y = next.y;
     return;
   }
   const enemyHq = state.factions[v.faction === 0 ? 1 : 0];
-  const nextPos = moveTowards(v.x, v.y, enemyHq.hqX, enemyHq.hqY, stats.speed);
-  v.x = nextPos.x;
-  v.y = nextPos.y;
+  const next = moveTowards(v.x, v.y, enemyHq.hqX, enemyHq.hqY, stats.speed);
+  v.x = next.x;
+  v.y = next.y;
 }
 
 // Generic versions of tryAttackEnemyStructure / tryAttackHq that work
@@ -997,16 +1148,18 @@ export function step(state: SimState, rng: Rng, frame: InputFrame): void {
       advanceUnit(state, state.units[i]);
     }
 
-    // (3.10.9 reverted 2026-05-08): the applyUnitSeparation pass was
-    // removed. Three tuning iterations (rigid axis-aligned → hard
-    // bounding-box → gentle RNG-perturbed) all stayed inside the
-    // limits of "no per-unit velocity stored," and all three read
-    // worse in playtest than no collision at all. Reverted to a
-    // clean substrate; the proper velocity-based steering rewrite
-    // lands in sub-phase 3.10.10. The harvest-reach widening from
-    // 3.10.9 is kept (HARVEST_AT_NODE_REACH_SQ in the
-    // movingToNode→harvesting transition) — independently useful and
-    // doesn't depend on the collision pass.
+    // Phase 3.10.10e (2026-05-08): the velocity / collision / friction
+    // passes from 3.10.10 + 3.10.10b/c were reverted. Local-collision
+    // response (lateral steering bias on contact) was producing visible
+    // glitches the playtest read as worse than no collision at all,
+    // and the structural same-destination case it was patching has
+    // since been solved by 3.10.10d's slot allocation (workers walk to
+    // different points around a node) + formation retention (multi-
+    // unit MoveUnit fans out into hex-ring slots around the click
+    // point). Units now pass through each other on the local axis
+    // between their slot destinations — the same model used through
+    // 3.10.9 and the standard pass-through behaviour AoE / SC2 employ
+    // when slot allocation is doing the heavy lifting.
 
     // 3. Phase 3.7: trail collision sweep. Runs after unit movement
     //    but BEFORE the trails-age pass, so a freshly-laid segment
@@ -1199,13 +1352,18 @@ function recomputeSupplyCaps(state: SimState): void {
   state.factions[1].supplyCap = SUPPLY_CAP_INITIAL + bonus1;
 }
 
-// (Phase 3.10.9 reverted 2026-05-08): the pairwise-separation pass
-// (`applyUnitSeparation`) and its helpers (`scaledShare`,
-// `isCollisionActive`) were removed here. Three tuning iterations of
-// axis-aligned, no-velocity collision shipped and were each read in
-// playtest as worse than no collision at all. Sub-phase 3.10.10
-// rebuilds collision on top of a velocity-based steering layer; the
-// scope is captured in `docs/investigation/04-phase-3-faction-and-map-depth.md` § 3.10.10.
+// (Phase 3.10.10e reverted 2026-05-08): the velocity layer + collision
+// pass + lateral-bias machinery from sub-phases 3.10.10–3.10.10c were
+// removed here. Local-collision response produced visible glitches the
+// playtest read as worse than no collision at all, and the structural
+// same-destination case it was patching is solved cleanly by sub-phase
+// 3.10.10d's slot allocation (workers walk to different points around
+// a node) + formation retention (multi-unit MoveUnit fans out into
+// hex-ring slots around the click point). Movement is back to chebyshev
+// step-toward-target — units pass through each other on the local
+// axis between their slot destinations, the standard pass-through
+// behaviour AoE / SC2 employ when slot allocation is doing the heavy
+// lifting.
 
 function checkWinner(state: SimState): SimState['winner'] {
   // Post-2026-05-07 PvE pivot: HQ destruction is the only path to a
