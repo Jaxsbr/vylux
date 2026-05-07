@@ -2,7 +2,11 @@
 
 ## Purpose
 
-A Tron-inspired isometric real-time strategy game, designed from the ground up to be **deterministic, replayable, and competitively spectated**. See `docs/product/PRD.md` for the product direction; this file describes how the code is laid out. For the current in-game catalog (units, structures, resources, tech, controls), see `docs/manual.md`.
+A Tron-inspired isometric real-time strategy game — **single-player PvE, wave-defense + roguelike-run shape** as of the 2026-05-07 pivot. Built on a deterministic simulation; that property is now valued for engineering reasons (save/load, replays-as-bug-reports, scripted scenarios, AI testing), not for esport-grade lockstep multiplayer.
+
+See `docs/product/PRD.md` for the product direction (lead with §0 — the pivot notice). This file describes how the code is laid out. For the current in-game catalog (units, structures, resources, tech, controls), see `docs/manual.md`.
+
+> **2026-05-07 pivot** — Vylux moved from "competitive 1v1 RTS aimed at Steam release with esport hooks" to "single-player PvE wave-defense + roguelike runs." The deterministic sim, renderer, AI scaffolding, and full catalog all carry forward unchanged — the pivot is a *design* shift, not a code rewrite. The lockstep / WebRTC / observer multiplayer code under `src/net/` is **dormant** — preserved for optionality (see "Dormant code" below), but **not on the active surface**. Don't extend it without a fresh pivot conversation.
 
 ## Documentation contract
 
@@ -86,7 +90,9 @@ Same gate the CI determinism workflow runs (`.github/workflows/determinism.yml`)
 | `sim-driver.ts`   | Fixed-tick driver. `requestAnimationFrame` for both sim catch-up and rendering, capped at `MAX_STEPS_PER_FRAME=5` to prevent spiral-of-death after long pauses. Sim-frontend-agnostic — takes a `commandsForTick` callback. |
 | `player-input.ts` | `PlayerInput` (buildables panel, queues `TrainUnit` commands on click, refreshes affordability from sim each frame) + `MatchEndOverlay` (VICTORY/DEFEAT screen; Play Again reloads the page). |
 
-### `src/net/` — multiplayer transport
+### `src/net/` — multiplayer transport _(DORMANT — see "Dormant code" below)_
+
+> **Dormant.** This module is preserved end-to-end (compiles, tests pass, CI runs it) but is **not on the active product surface** post-pivot. The PvE direction does not need lockstep multiplayer. Don't add features here, don't extend the protocol, don't reference these classes from new product code. If you need to touch a file under `src/net/` for a non-trivial reason, that's a signal the pivot decision is being re-opened — surface it before changing anything.
 
 | File                    | Role |
 | ----------------------- | ---- |
@@ -113,7 +119,15 @@ Tile grid mesh + `tileToWorld(tileX, tileY)` helper. Used by `src/render/scene.t
 
 ## Determinism contract
 
-This is the single most load-bearing property of the codebase (PRD §3.1):
+Post-pivot, this is no longer load-bearing for the *product* (no lockstep multiplayer to be the gate for) but it remains load-bearing for the *engineering*:
+
+- **Save / load works for free** — a run is `(seed, scenario, command_log)`; no full-state serialisation needed.
+- **Replays-as-bug-reports** — a player who hits weird behaviour exports the replay; we reproduce the exact run on our machine.
+- **Scripted scenarios are reproducible** — wave 7 of the bottleneck scenario plays the same every time.
+- **AI testing** — two AI variants race on the same seeds; outcome differences are signal, not noise.
+- **Cross-OS regression catch** — the cross-OS CI workflow flags accidental float introductions early.
+
+We don't go *out of our way* to add new uses of determinism, but we don't break the contract for convenience either — the cost has already been paid in Phases 0–3, and the engineering wins above are real. The rules below are unchanged from the pre-pivot text:
 
 - **No `Math.random()`** anywhere under `src/sim/`. RNG goes through the seeded `Rng` instance.
 - **No `Math.sqrt`, `Math.atan2`, `Math.sin`, `Math.cos`** in sim hot paths. Range checks use squared distance.

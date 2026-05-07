@@ -6,6 +6,8 @@
 
 > **Last sub-phase that touched these numbers:** 3.8 (fog of war + node discovery).
 
+> **2026-05-07 pivot context.** Vylux moved from competitive 1v1 / esport to **single-player PvE** (wave-defense + roguelike-run shape). The catalog below — units, structures, resources, tech, controls, current map — carries forward unchanged into the PvE direction; the pivot is a *design* shift, not a code rewrite. Numbers and behaviours documented here are **what's currently in the game**, not what the PvE direction will eventually call for. Sub-phases 3.11–3.14 will repoint the catalog (enemy AI faction kinds, wave-scheduler, PvE win conditions). Until then, the build still presents as the original skirmish loop. See PRD §0 for the pivot notice and `docs/investigation/04-phase-3-faction-and-map-depth.md` for what's coming.
+
 ---
 
 ## Resources
@@ -143,7 +145,7 @@ The full PRD §6.7 set (military elimination requires HQ + all production destro
 
 **Phase 3.9.6 unit animations.** Newly-trained units scale-in from 40% to full size on spawn (legacy "placement pulse" — already existed in mesh code, surfaced through the wrapper interface and triggered by sim-renderer when it sees a unit ID for the first time). Units that die get a brief emissive flash before the mesh disappears — the visual stays alive in a "dying" pool until the pulse decays, so the player can see the death even if it happens between two right-click moves. Renderer-only; sim is untouched.
 
-**Phase 3.9.7 main menu.** PvAI mode opens to a Tron-styled menu before the match begins — VYLUX title in glowing cyan, PLAY VS AI / MULTIPLAYER / OPTIONS buttons, faction picker placeholder. MULTIPLAYER + OPTIONS are stubs; the existing `?lockstep=host` URL flow is the multiplayer path until lobby UI lands, and OPTIONS waits on the Phase 4 binding-config UI. `?menu=skip` URL param bypasses the menu (used by e2e tests + future deep-link share flows). Match-end overlay's RELOAD button returns to the menu naturally — no separate "back to menu" wire needed.
+**Phase 3.9.7 main menu.** PvAI mode opens to a Tron-styled menu before the match begins — VYLUX title in glowing cyan, PLAY VS AI / MULTIPLAYER / OPTIONS buttons, faction picker placeholder. MULTIPLAYER + OPTIONS are stubs. **Post-2026-05-07 pivot:** MULTIPLAYER is now a relic — the dormant `?lockstep=host` URL flow still works for the dev loop, but multiplayer is not the product direction (see PRD §0). The button itself can stay or be hidden in a future menu pass. OPTIONS was waiting on a v4 binding-config UI commitment that's now been softened (PRD §3.7); whatever options screen lands will be PvE-scoped (volume, difficulty, perhaps a few rebind slots). `?menu=skip` URL param bypasses the menu (used by e2e tests + future deep-link share flows). Match-end overlay's RELOAD button returns to the menu naturally — no separate "back to menu" wire needed.
 
 **Phase 3.10 in-game action bar (context-sensitive).** Replaces the Phase 1 always-on flat buildables panel with an action bar driven by current selection: HQ → TRAIN WORKER; Worker(s) → BUILD FORGE / SPIRE / PYLON + DUMP; Forge → TRAIN DEFENDER / RAIDER / VANGUARD; Spire → RESEARCH TIER 2 / TRAIL+; Pylon → info hint; mixed/empty → guidance text. Each button shows its hotkey letter, faction-coloured cost glyphs (E yellow, F green, C cyan/red), and tooltip-based disabled reasons. HQ + structures are now click-selectable (new selection rings on each); the input controller carries `selectedStructureId` + `selectedHqFaction` slots alongside the unit selection. Workers build buildings (PRD §6.3 "workers gather, deposit, and repair" extended): the player must train a worker before placing a Forge.
 
@@ -181,7 +183,7 @@ Each button shows its hotkey letter, faction-coloured cost glyphs (E energy / F 
 - **Scroll wheel** — zoom in / out within 0.5×–2.0× of the default frustum height.
 - Edge-scroll is intentionally not implemented — most players hate it as a default. May revisit in playtest.
 
-The full keyboard suite (control groups, camera bookmarks, production hotkeys, idle-worker cycle, find-army cycle, queueing, smart-cast) is **Phase 4** — see PRD §3.8 + §6.9.
+The full keyboard suite (control groups, camera bookmarks, production hotkeys, idle-worker cycle, find-army cycle, queueing, smart-cast) was a v4 esport-pillar commitment. **Post-pivot (2026-05-07) it's softened to "comfortable mouse + hotkeys; rebindable bindings deferred"** — see PRD §3.7. The idle-worker hotkey is still planned (genuine quality-of-life); the rest only land if a PvE scenario design demands them.
 
 ---
 
