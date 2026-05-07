@@ -247,6 +247,15 @@ export class SimRenderer {
       if (v) {
         v.group.visible = n.alive
           && (this.bypassVision || n.discoveredBy[this.playerFaction]);
+        // Phase 3.10.9: per-frame remaining-amount label + silhouette
+        // emissive fade. Pure presentation; sim hash is unaffected.
+        // Using maxReserve as the "max" reference works for both
+        // colour nodes (regenerating, real cap) and energy/flux nodes
+        // (cap = initial remaining; the label still shows current and
+        // the silhouette fades correctly as it drains).
+        if (v.group.visible) {
+          v.setRemaining(toFloat(n.remaining), toFloat(n.maxReserve));
+        }
       }
     }
   }

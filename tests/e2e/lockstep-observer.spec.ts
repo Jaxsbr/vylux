@@ -33,9 +33,11 @@ test('observer attaches to a 2-player match and ticks in sync', async ({ context
   // Observer goes first so it's listening before any player frame is
   // sent — same flow a tournament caster would use ("attach to room
   // first, tell players when to start").
-  await observe.goto('/?lockstep=observe');
-  await host.goto('/?lockstep=host');
-  await join.goto('/?lockstep=join');
+  // Phase 3.10.9: ?debug=1 enables the legacy text HUD the assertions
+  // scrape (the player-facing HUD is now DOM cards, not parseable text).
+  await observe.goto('/?lockstep=observe&debug=1');
+  await host.goto('/?lockstep=host&debug=1');
+  await join.goto('/?lockstep=join&debug=1');
 
   await expect(host.locator('#canvas')).toBeVisible();
   await expect(join.locator('#canvas')).toBeVisible();

@@ -1,16 +1,18 @@
 // Phase 3.9.7 — Main menu scene.
+// Phase 3.10.8 (2026-05-07 PvE pivot cleanup) — MULTIPLAYER + OPTIONS
+// buttons removed; PLAY VS AI renamed to START RUN to signal the
+// single-player PvE direction. The dormant `?lockstep=host|join|observe`
+// URL paths still bypass the menu and work for the dev loop, but the
+// menu surface no longer advertises them.
 //
 // Pure DOM (no Three.js) so the same code path covers menu in any
-// run mode without standing up a sim/renderer just to display three
-// buttons. The page loads → bootstrap shows the menu → PLAY VS AI
+// run mode without standing up a sim/renderer just to display the
+// button. The page loads → bootstrap shows the menu → START RUN
 // click triggers a callback → bootstrap continues into the existing
 // scene + match flow.
 //
-// Lockstep / observer URL flows skip the menu entirely (the URL is
-// already explicit about intent). Faction picker is a placeholder
-// — locked to Pulse (cyan / faction 0) until 3.10 lands real
-// asymmetry. Options panel is stub: volume control already lives at
-// the M-key mute toggle, and key-binding UI is Phase 4 territory.
+// Faction picker is a placeholder — locked to Pulse (cyan / faction 0)
+// until sub-phase 3.11 lands enemy AI faction(s).
 
 export interface MainMenuOptions {
   onPlayVsAi(): void;
@@ -56,17 +58,9 @@ export class MainMenu {
       'gap:14px', 'margin-top:24px',
     ].join(';');
 
-    const playBtn = makeMenuButton('PLAY  VS  AI', { primary: true });
+    const playBtn = makeMenuButton('START  RUN', { primary: true });
     playBtn.addEventListener('click', () => opts.onPlayVsAi());
     buttonRow.appendChild(playBtn);
-
-    const mpBtn = makeMenuButton('MULTIPLAYER', { primary: false, disabled: true });
-    mpBtn.title = 'Use ?lockstep=host&room=ABCDEF in the URL for now';
-    buttonRow.appendChild(mpBtn);
-
-    const optBtn = makeMenuButton('OPTIONS', { primary: false, disabled: true });
-    optBtn.title = 'Phase 4 — see PRD §3.8 for the full input surface';
-    buttonRow.appendChild(optBtn);
 
     this.root.appendChild(buttonRow);
 
@@ -80,21 +74,12 @@ export class MainMenu {
     this.root.appendChild(factionRow);
 
     const factionNote = document.createElement('div');
-    factionNote.textContent = '(faction picker locked until 3.10 — phase 3 asymmetry)';
+    factionNote.textContent = '(enemy AI faction(s) land in sub-phase 3.11)';
     factionNote.style.cssText = [
       'font-size:10px', 'letter-spacing:0.18em',
       'color:#5fa3b8', 'opacity:0.45',
     ].join(';');
     this.root.appendChild(factionNote);
-
-    const lockstepHint = document.createElement('div');
-    lockstepHint.textContent = 'lockstep host / join / observe modes — append ?lockstep=host to the URL';
-    lockstepHint.style.cssText = [
-      'position:fixed', 'bottom:16px', 'left:0', 'right:0',
-      'text-align:center', 'font-size:10px', 'letter-spacing:0.18em',
-      'color:#5fa3b8', 'opacity:0.45',
-    ].join(';');
-    this.root.appendChild(lockstepHint);
 
     document.body.appendChild(this.root);
   }

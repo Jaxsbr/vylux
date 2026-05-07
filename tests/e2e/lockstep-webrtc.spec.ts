@@ -29,12 +29,14 @@ test('two-tab WebRTC lockstep handshake reaches matching hashes', async ({ conte
   // Use a fixed valid room code from the confusable-free alphabet.
   const room = 'TEST23';
 
-  await host.goto(`/?lockstep=host&room=${room}`);
+  // Phase 3.10.9: ?debug=1 enables the legacy text HUD the assertions
+  // scrape (the player-facing HUD is now DOM cards, not parseable text).
+  await host.goto(`/?lockstep=host&room=${room}&debug=1`);
   // Stagger the joiner slightly so the host's `peer-joined` path drives
   // the offer (matches the production flow: host creates the room, then
   // the joiner enters the code).
   await host.waitForTimeout(200);
-  await join.goto(`/?lockstep=join&room=${room}`);
+  await join.goto(`/?lockstep=join&room=${room}&debug=1`);
 
   await expect(host.locator('#canvas')).toBeVisible({ timeout: 10_000 });
   await expect(join.locator('#canvas')).toBeVisible({ timeout: 10_000 });

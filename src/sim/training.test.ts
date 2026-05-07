@@ -1290,7 +1290,6 @@ describe('Sim — AI', () => {
       commands: [{ kind: CommandKind.MoveUnit, unitId: r.id, x: 3, y: 17 }],
     });
     expect(r.moveTarget).not.toBeNull();
-    const startX = r.x;
 
     // Walk for a window. The override is to (3,17), so x should stay
     // near 3 (not drift toward 17). Once arrived, moveTarget clears
@@ -1301,9 +1300,12 @@ describe('Sim — AI', () => {
     }
     // moveTarget cleared = arrived.
     expect(r.moveTarget).toBeNull();
+    // x stayed at the override column the whole way: dx=0 from a
+    // column-3 start to a column-3 target means clampStep returns 0
+    // each tick on the x axis, and the arrival snap pins r.x = tgt.x
+    // exactly.
     expect(r.y).toBe(17 * 65536);
-    // x stayed at the override column the whole way (didn't drift to 17).
-    expect(r.x).toBe(startX);
+    expect(r.x).toBe(3 * 65536);
 
     // Run a few more ticks; the raider resumes default behaviour and
     // starts moving toward HQ (17,17), so x should now begin to climb.

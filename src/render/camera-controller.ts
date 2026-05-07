@@ -12,9 +12,37 @@
 // Keyboard pan integrates per-rAF in update() so a held key produces
 // continuous motion rather than one nudge per repeat. Pointer pan
 // converts pixel deltas to world-units via the current frustum width
-// over the canvas pixel width — same scale on both axes since the iso
-// view's screen-x/world-x and screen-y/world-z map linearly under
-// orthographic projection.
+// over the canvas pixel width.
+//
+// Phase 3.10.9 — iso-rotated pan input.
+//
+// The camera sits at +x +y +z and looks at origin, so its right vector
+// in world space is (+x, 0, -z) and its ground-projected up vector is
+// (+x, 0, +z) — both at 45° to the world axes. A naïve "screen-x →
+// world-x, screen-y → world-z" mapping panned the map along the world
+// axes, which to the player looked like "left and right both shift the
+// map diagonally," because their perceived horizontal IS that
+// diagonal in world space.
+//
+// `screenToWorldDelta` rotates a screen-axis (right=+x, down=+y)
+// vector into world (x, z) coords using the iso-camera basis. Both
+// pointer drag and WASD/arrow input flow through it.
+const ISO_R = Math.SQRT1_2; // cos(45°) = sin(45°) ≈ 0.7071
+
+function screenToWorldDelta(sx: number, sy: number): { worldDx: number; worldDz: number } {
+  // Camera right (world) ≈ (+r, 0, -r); camera ground-up (world) ≈
+  // (-r, 0, -r) — i.e. screen-up reveals more of the world along
+  // (-x, -z) (toward the camera position), so screen-DOWN (+sy)
+  // moves the projected basis along (+r, 0, +r). Combined with the
+  // outer negation in panBy that flips drag-direction → target-shift,
+  // the net effect is: drag right pans along +x/-z (the player's
+  // perceived horizontal, from bottom-left to top-right of the iso
+  // grid); drag down pans along +x/+z (the player's perceived
+  // vertical, top-left to bottom-right).
+  const worldDx = (sx + sy) * ISO_R;
+  const worldDz = (-sx + sy) * ISO_R;
+  return { worldDx, worldDz };
+}
 
 import * as THREE from 'three';
 import { GRID_CONSTANTS } from '../grid';
@@ -87,19 +115,25 @@ export class CameraController {
   // wheel zoom apply immediately in their event handlers.
   update(dtSeconds: number): void {
     if (this.heldKeys.size === 0) return;
-    let dx = 0;
-    let dz = 0;
-    if (this.heldKeys.has('w') || this.heldKeys.has('arrowup')) dz -= 1;
-    if (this.heldKeys.has('s') || this.heldKeys.has('arrowdown')) dz += 1;
-    if (this.heldKeys.has('a') || this.heldKeys.has('arrowleft')) dx -= 1;
-    if (this.heldKeys.has('d') || this.heldKeys.has('arrowright')) dx += 1;
-    if (dx === 0 && dz === 0) return;
-    // Normalize so diagonal pan isn't sqrt(2)x faster.
-    const len = Math.hypot(dx, dz);
-    dx /= len;
-    dz /= len;
+    // Resolve held keys into a screen-space intent vector (sx +right,
+    // sy +down). The iso rotation in `screenToWorldDelta` then maps
+    // that intent into world (x, z). Without the rotation, "a" and
+    // "d" would pan the map along the world-x axis — but the player
+    // perceives "left/right" as the iso diagonal.
+    let sx = 0;
+    let sy = 0;
+    if (this.heldKeys.has('w') || this.heldKeys.has('arrowup')) sy -= 1;
+    if (this.heldKeys.has('s') || this.heldKeys.has('arrowdown')) sy += 1;
+    if (this.heldKeys.has('a') || this.heldKeys.has('arrowleft')) sx -= 1;
+    if (this.heldKeys.has('d') || this.heldKeys.has('arrowright')) sx += 1;
+    if (sx === 0 && sy === 0) return;
+    // Normalize so diagonal key combos aren't sqrt(2)× faster.
+    const len = Math.hypot(sx, sy);
+    sx /= len;
+    sy /= len;
     const speed = KEY_PAN_SPEED * dtSeconds;
-    this.panBy(dx * speed, dz * speed);
+    const { worldDx, worldDz } = screenToWorldDelta(sx * speed, sy * speed);
+    this.panBy(worldDx, worldDz);
   }
 
   // ----- event handlers --------------------------------------------------
@@ -124,16 +158,21 @@ export class CameraController {
     const dy = e.clientY - this.lastClientY;
     this.lastClientX = e.clientX;
     this.lastClientY = e.clientY;
-    // Pixel delta → world delta via current frustum width / canvas
-    // pixel width. Drag-pan moves the world *under* the cursor, so
-    // negate the deltas: dragging right pulls the map right (target
-    // shifts left).
+    // Pixel delta → world delta. Two steps:
+    //   1. scale pixels into camera-plane world units via the current
+    //      frustum width / canvas pixel width;
+    //   2. rotate from screen-axis (right=+x, down=+y) into world (x, z)
+    //      using the iso-camera basis (45° rotation).
+    // Drag-pan moves the world *under* the cursor, so we negate the
+    // resulting world delta — dragging the mouse to the player's right
+    // shifts the map right, which means the camera target moves left.
     const c = this.opts.camera;
     const rect = this.opts.canvas.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
     const worldPerPxX = (c.right - c.left) / rect.width;
     const worldPerPxY = (c.top - c.bottom) / rect.height;
-    this.panBy(-dx * worldPerPxX, -dy * worldPerPxY);
+    const { worldDx, worldDz } = screenToWorldDelta(dx * worldPerPxX, dy * worldPerPxY);
+    this.panBy(-worldDx, -worldDz);
   }
 
   private handlePointerUp(e: PointerEvent): void {

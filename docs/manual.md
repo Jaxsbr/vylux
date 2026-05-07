@@ -4,7 +4,9 @@
 
 > **Currency:** this file MUST be updated as part of any sub-phase that adds, removes, or re-tunes a unit, structure, resource, tech, or victory condition. The investigation-doc closing checklist enforces this, and the contract is mirrored in `AGENTS.md`. If the numbers in this file disagree with `src/sim/units-config.ts`, **the config wins** — patch this doc.
 
-> **Last sub-phase that touched these numbers:** 3.8 (fog of war + node discovery).
+> **Last sub-phase that touched these numbers:** 3.10.10d (harvest slot allocation + formation retention) followed by **3.10.10e**, which reverted the local-collision pass + velocity layer + lateral-bias fields from 3.10.10–3.10.10c. The structural fix is slot allocation (workers walk to different points around a node) + formation retention (multi-unit MoveUnit fans out into hex-ring slots around the click point); local collision response was producing visible glitches without earning its complexity. Movement is back to chebyshev step-toward-target — units pass through each other on the local axis between their slot destinations, the standard pass-through behaviour AoE / SC2 use when slot allocation is doing the heavy lifting.
+
+> **2026-05-07 pivot context.** Vylux moved from competitive 1v1 / esport to **single-player PvE** (wave-defense + roguelike-run shape). The catalog below — units, structures, resources, tech, controls, current map — carries forward unchanged into the PvE direction; the pivot is a *design* shift, not a code rewrite. Numbers and behaviours documented here are **what's currently in the game**, not what the PvE direction will eventually call for. Sub-phases 3.11–3.14 will repoint the catalog (enemy AI faction kinds, wave-scheduler, PvE win conditions). Until then, the build still presents as the original skirmish loop. See PRD §0 for the pivot notice and `docs/investigation/04-phase-3-faction-and-map-depth.md` for what's coming.
 
 ---
 
@@ -105,14 +107,14 @@ The Spire's research slot is single-occupancy (Phase 3.7 added a `researchKind` 
 
 ## Victory conditions
 
-Currently a Phase 1 placeholder set:
+Interim post-pivot set (3.10.8 cleanup):
 
-- **HQ destruction** — destroy the enemy HQ. The other faction wins.
-- **Score threshold** — first faction to `WIN_POINTS = 100` wins. Points come from kills (5 per unit) and HQ damage (1 per hit).
-- **Hard timer** — not implemented yet. PRD §6.7 commits to a 25-minute hard timer with score tiebreaker; lands in sub-phase **3.6**.
-- **Resign** — not implemented yet. Lands in 3.6.
+- **HQ destruction** — destroy the enemy HQ. The other faction wins. **Currently the only win/loss path.**
+- **Resign** — not implemented yet. Lands in 3.13 alongside the PvE win conditions.
 
-The full PRD §6.7 set (military elimination requires HQ + all production destroyed, dominance-tick on Flux control, hard timer, resign) is sub-phase **3.6**'s deliverable.
+The previous Phase 1 placeholder set included a 100-point score threshold (kills + HQ damage). That path was esport-balance scaffolding and was **removed on 2026-05-07** as part of the PvE pivot — see PRD §0 + the 3.10.8 cleanup in the Phase 3 investigation doc. The HUD no longer displays a points line; `REPLAY_VERSION` bumped from 10 → 11 because `FactionState.points` was dropped from the canonical hash.
+
+The PvE win-condition set — **survive-N-waves + scenario objective + boss + resign** (PRD §6.7) — lands in sub-phase **3.13**. Until then HQ destruction is the only signal; matches against the existing scripted AI play out as a pure HQ-vs-HQ skirmish.
 
 ---
 
@@ -143,7 +145,7 @@ The full PRD §6.7 set (military elimination requires HQ + all production destro
 
 **Phase 3.9.6 unit animations.** Newly-trained units scale-in from 40% to full size on spawn (legacy "placement pulse" — already existed in mesh code, surfaced through the wrapper interface and triggered by sim-renderer when it sees a unit ID for the first time). Units that die get a brief emissive flash before the mesh disappears — the visual stays alive in a "dying" pool until the pulse decays, so the player can see the death even if it happens between two right-click moves. Renderer-only; sim is untouched.
 
-**Phase 3.9.7 main menu.** PvAI mode opens to a Tron-styled menu before the match begins — VYLUX title in glowing cyan, PLAY VS AI / MULTIPLAYER / OPTIONS buttons, faction picker placeholder. MULTIPLAYER + OPTIONS are stubs; the existing `?lockstep=host` URL flow is the multiplayer path until lobby UI lands, and OPTIONS waits on the Phase 4 binding-config UI. `?menu=skip` URL param bypasses the menu (used by e2e tests + future deep-link share flows). Match-end overlay's RELOAD button returns to the menu naturally — no separate "back to menu" wire needed.
+**Phase 3.9.7 main menu.** PvAI mode opens to a Tron-styled menu before the match begins — VYLUX title in glowing cyan, PLAY VS AI / MULTIPLAYER / OPTIONS buttons, faction picker placeholder. MULTIPLAYER + OPTIONS are stubs. **Post-2026-05-07 pivot:** MULTIPLAYER is now a relic — the dormant `?lockstep=host` URL flow still works for the dev loop, but multiplayer is not the product direction (see PRD §0). The button itself can stay or be hidden in a future menu pass. OPTIONS was waiting on a v4 binding-config UI commitment that's now been softened (PRD §3.7); whatever options screen lands will be PvE-scoped (volume, difficulty, perhaps a few rebind slots). `?menu=skip` URL param bypasses the menu (used by e2e tests + future deep-link share flows). Match-end overlay's RELOAD button returns to the menu naturally — no separate "back to menu" wire needed.
 
 **Phase 3.10 in-game action bar (context-sensitive).** Replaces the Phase 1 always-on flat buildables panel with an action bar driven by current selection: HQ → TRAIN WORKER; Worker(s) → BUILD FORGE / SPIRE / PYLON + DUMP; Forge → TRAIN DEFENDER / RAIDER / VANGUARD; Spire → RESEARCH TIER 2 / TRAIL+; Pylon → info hint; mixed/empty → guidance text. Each button shows its hotkey letter, faction-coloured cost glyphs (E yellow, F green, C cyan/red), and tooltip-based disabled reasons. HQ + structures are now click-selectable (new selection rings on each); the input controller carries `selectedStructureId` + `selectedHqFaction` slots alongside the unit selection. Workers build buildings (PRD §6.3 "workers gather, deposit, and repair" extended): the player must train a worker before placing a Forge.
 
@@ -154,6 +156,20 @@ The full PRD §6.7 set (military elimination requires HQ + all production destro
 **Phase 3.10.6 worker-driven building.** New `BuildStructureByWorker` command (slot 11): the player selects a worker, picks BUILD FORGE / SPIRE / PYLON, then clicks a tile. The structure spawns at full `buildTicksRemaining` with `builtByWorker = true`; the assigned worker walks to the site and ticks construction down each tick while in range. Multiple workers stack contributions naturally (each contributes one tick per tick on site). Construction halts if the worker dies or is given a different command — the structure waits in build phase until another worker is dispatched. AI also uses the new path. Legacy `BuildStructure` (slot 4) retained for tests + back-compat — spawns structures with `builtByWorker = false` so they auto-tick the build phase.
 
 **Phase 3.10.7 multi-worker building + construction visual.** Right-click on an in-progress structure with worker(s) selected fans out `AssignWorkerToBuild` (slot 12) per worker — additional builders accelerate the construction. Structures under construction now show a visible "rising from the ground" animation: the body's y-scale grows from 15% to 100% as build progresses, with a faction-coloured pulsing scaffolding ring at the base that fades when construction completes. Spire's finial only appears past 50% build progress; Pylon's cap past 40% — so the silhouette evolves through the build rather than just fading in.
+
+**Phase 3.10.9 game-feel pass v2.** Four items, all renderer + light-touch sim:
+- **HUD redesigned.** The top-left text-dump moves to a `?debug=1`-gated panel; the player-facing HUD is a top-centre resource bar with five pills — HQ HP, Energy (gold E), Flux (green F), own-Colour (faction-tinted C), Supply (used/cap, turns red when blocked). Glyph colours match the action-bar cost glyphs so a player who reads "F 50" on a build button finds the same green F in the bar.
+- **Resource node visual identity.** Each kind gets a distinct top silhouette + emissive palette layered on the legacy hex base — Energy (gold pylon octahedron), Flux (green crystal cluster), Blue (cyan diamond spire, faction 0), Red (red-orange spike cone, faction 1). Always-on sprite label above each shows the current `remaining` value; emissive intensity fades as the node depletes.
+- **Worker collision** (3.10.9's iteration was reverted on 2026-05-08; the velocity-based rewrite that replaced it lands in 3.10.10 — see below). The widened `movingToNode → harvesting` transition (`HARVEST_AT_NODE_REACH_SQ ≈ 0.55²`) shipped under 3.10.9 and was kept across the revert: a worker arriving slightly off the node centre still picks up the harvest, and the wider arrival ring is what lets the new collision pass cluster workers naturally around a node instead of fighting for the exact tile.
+- **Iso-rotated camera pan.** The camera sits at `(+x, +y, +z)` looking at origin, so its right vector in world space is `(+x, -z)` and its ground-projected screen-down direction is `(+x, +z)` — both 45° off the world axes. Mouse drag and WASD/arrow keys now flow through `screenToWorldDelta` in `camera-controller.ts`, which rotates the screen-axis intent into world coords using that iso basis. Result: dragging right pans the map along the player's perceived horizontal (the bottom-left ↔ top-right diagonal in world coords); dragging down pans along the top-left ↔ bottom-right diagonal. (First-cut up/down direction was inverted; corrected on 2026-05-08.)
+
+**Phase 3.10.10 velocity-based steering + collision rewrite (reverted in 3.10.10e).** A four-cut arc — 3.10.10 (velocity layer + collision pass), 3.10.10b (sustained lateral bias), 3.10.10c (pair-opposite signs) — tried to make local-collision response feel right and never quite landed; the playtest read of every iteration was that the response was producing visible glitches more than it was preventing stacking. Sub-phase **3.10.10e** removed the whole machinery (per-unit `vx, vy`, `accel/maxSpeed`, friction pass, lateral-bias fields, `applyUnitCollisions`, `applyUnitFriction`); movement is back to the pre-3.10.10 chebyshev step-toward-target model where units pass through each other on the local axis. The investigation doc keeps the full record of the arc.
+
+**Phase 3.10.10d harvest slot allocation + formation retention (kept).** Local avoidance can't fix two units that *want to be at the same point* — that's a destination problem, not a collision problem. AoE / SC2 / WC3 all solve it the same way: don't send N units to one point, send them to N different points clustered around a target. Two passes:
+- **Harvest slot allocation.** Each resource node has 6 hex-arranged slot positions at radius `0.55` around its centre (`HARVEST_SLOT_OFFSETS`). When `AssignWorkerToNode` lands, the worker picks the lowest-index unused slot on the target node and stores it in a new `Worker.targetNodeSlot` field (hashed). The `movingToNode` phase walks to `node.center + slot_offset` and the harvest-arrival snap pins the worker exactly to the slot point — so multiple workers commanded to the same node cluster around it on a hex pattern, no two ever targeting the same point. Slot is reserved while `targetNodeId === node.id`; freed (back to `0`) on every code path that drops the assignment (death, BuildStructureByWorker, depleted-node early-out, etc). Surplus workers (slot 7+) wrap back to slot 0 — they pass through the slot-0 worker (no local collision) and harvest at the same hex point.
+- **Formation retention.** A multi-select right-click fans out one `MoveUnit` per selected unit, all to the same tile. Each command, on apply, picks the lowest-index unused formation slot (slot 0 = centre = exact click point; slots 1–6 = hex ring at radius `0.7`) by scanning every alive unit's existing `moveTarget` for matches. Commands process in order, so an N-unit cluster lands in slots `0..min(N-1, 6)` deterministically. Surplus units (slot 7+) wrap back to centre.
+
+`REPLAY_VERSION` ran `13 → 17` across the 3.10.10 arc, then `17 → 18` on the 3.10.10e revert (one shrink: each unit slot loses 5 i32/u32 fields — vx, vy, lateralBiasVx, lateralBiasVy, lateralBiasTicks; `targetNodeSlot` stays). Golden fixtures regenerated. Per-kind tunings: worker `speed = 0.05`; raider `0.08`; vanguard `0.07`; defender `0` (stationary by construction). Net effect: workers commanded to the same node walk to *different* hex points around it and harvest side-by-side — the same-destination deadlock is gone at its root. Multi-unit move orders spread out around the click point instead of stacking on it. Units pass through each other on the local axis between their slot destinations.
 
 ### Action bar (Phase 3.10)
 
@@ -181,7 +197,7 @@ Each button shows its hotkey letter, faction-coloured cost glyphs (E energy / F 
 - **Scroll wheel** — zoom in / out within 0.5×–2.0× of the default frustum height.
 - Edge-scroll is intentionally not implemented — most players hate it as a default. May revisit in playtest.
 
-The full keyboard suite (control groups, camera bookmarks, production hotkeys, idle-worker cycle, find-army cycle, queueing, smart-cast) is **Phase 4** — see PRD §3.8 + §6.9.
+The full keyboard suite (control groups, camera bookmarks, production hotkeys, idle-worker cycle, find-army cycle, queueing, smart-cast) was a v4 esport-pillar commitment. **Post-pivot (2026-05-07) it's softened to "comfortable mouse + hotkeys; rebindable bindings deferred"** — see PRD §3.7. The idle-worker hotkey is still planned (genuine quality-of-life); the rest only land if a PvE scenario design demands them.
 
 ---
 

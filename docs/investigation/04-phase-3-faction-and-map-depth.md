@@ -1,11 +1,13 @@
 # Investigation 04 — Phase 3 Faction & Map Depth
 
-> **Status:** Open — sub-phases 3.0–3.10 closed; 3.11 next (Phase 3 sub-phase numbering shifted; see 2026-04-27 + 2026-05-06 + 2026-05-07 decision-log entries)
-> **Phase:** 3 (Faction & Map Depth)
+> **Status:** Open — sub-phases 3.0–3.10 closed; **3.11–3.14 repointed for the 2026-05-07 PvE pivot**; 3.11 next (now: enemy AI faction(s) for PvE).
+> **Phase:** 3 (Faction & Map Depth — repointed PvE)
 > **Owner:** Jaco
 > **Created:** 2026-04-26
 > **Time-box:** target 8–14 weeks of focused work
-> **Depends on:** Phase 2 architecture (closed). Phase 2.6 alpha logistics are parked but do not block Phase 3.
+> **Depends on:** Phase 2 architecture (closed, now dormant — see PRD §0).
+
+> **2026-05-07 — PvE pivot context.** Sub-phases 3.0–3.10 were built against the v4 PRD's competitive 1v1 esport target. The *mechanics* of those sub-phases (structures, two-resource economy, tech tiers, multi-select, fog, supply, energy dump, game-feel, action bar, worker-driven building) carry forward unchanged into the PvE direction. The remaining sub-phases (3.11–3.14) have been **repointed**: faction "asymmetry" becomes "enemy AI faction(s) with distinct rosters as the player's adversary"; maps-as-data adds seedable runs; win-conditions become PvE (survive-N-waves / scenario objective / boss); the playtest gate becomes "is the run loop fun." See PRD §8 Phase 3 + the 2026-05-07 decision-log entry at the bottom of this doc. Historical decision-log rows above are kept intact as the record of how we got here.
 
 ## Sub-phase status
 
@@ -22,24 +24,27 @@
 | 3.8  | Fog of war + worker resource discovery (scouting)                        | ✅ Closed |
 | 3.9  | Game feel & presentation pass                                            | ✅ Closed |
 | 3.10 | In-game HUD / action-bar redesign (context-sensitive) + worker-build      | ✅ Closed |
-| 3.11 | Faction asymmetry (Faction A + Faction B)                                | Pending  |
-| 3.12 | Maps as data + launch-map starter set                                    | Pending  |
-| 3.13 | Win conditions rework                                                    | Pending  |
-| 3.14 | Playtest balance gate                                                    | Pending  |
+| 3.10.10 | Velocity-based steering + collision rewrite                          | ✅ Closed |
+| 3.11 | Enemy AI faction(s) with distinct rosters _(repointed PvE)_              | Pending  |
+| 3.12 | Scenarios as data + seedable runs _(repointed PvE)_                      | Pending  |
+| 3.13 | PvE win conditions (survive-N-waves + scenario objective + resign)        | Pending  |
+| 3.14 | Run-loop playtest gate ("is the loop fun")                                | Pending  |
 
 Each row links to the design notes in the corresponding `### 3.N — ...` section below.
 
-### Session pickup — current sub-phase: 3.11
+### Session pickup — current sub-phase: 3.11 (enemy AI faction(s) with distinct rosters — repointed PvE)
 
 A new session starting work on the next pending sub-phase should:
 
-1. **Read the 3.11 section below** for scope, exit criterion, and sim-shape impact.
-2. **Read the closed sub-phase sections (3.0 through 3.10)** as worked examples — they show the standard work shape (types → state → commands → step → hash → AI → renderer → UI → tests → fixtures → verify gate). New sub-phases follow the same pattern unless the section explicitly says otherwise.
-3. **Read the Sub-phase closing checklist** further down. Five items: tsc clean, vitest green (regen `tests/determinism/` if sim shape moved), playwright green, `docs/manual.md` updated if catalog changed, status table + decision log updated.
-4. **Sim-shape changes also bump `REPLAY_VERSION`** in `src/sim/replay.ts` — see the comment-header on that constant for the running history. Phase 3 is currently on v10 (after 3.10's worker-driven build).
-5. **`CommandKind` IDs are append-only** — never reuse a slot. Pick the next unused number. See `src/sim/commands.ts` header + the `AGENTS.md` determinism contract.
+1. **Read PRD §0 (the pivot notice) first.** Vylux is now single-player PvE; do not propose new lockstep / ladder / spectator work. `src/net/` is dormant.
+2. **Read the 3.11 section below** for scope, exit criterion, and sim-shape impact (reframed for PvE — enemy AI faction(s), not a second player faction).
+3. **Read the closed sub-phase sections (3.0 through 3.10)** as worked examples — they show the standard work shape (types → state → commands → step → hash → AI → renderer → UI → tests → fixtures → verify gate). The work shape carries forward unchanged; only the *target* of the work has shifted.
+4. **Read the Sub-phase closing checklist** further down. Five items: tsc clean, vitest green (regen `tests/determinism/` if sim shape moved), playwright green, `docs/manual.md` updated if catalog changed, status table + decision log updated.
+5. **Sim-shape changes also bump `REPLAY_VERSION`** in `src/sim/replay.ts` — see the comment-header on that constant for the running history. Phase 3 is currently on v18 (after 3.10.10e's local-collision revert; slot allocation + formation retention from 3.10.10d are kept).
+6. **`CommandKind` IDs are append-only** — never reuse a slot. Pick the next unused number. See `src/sim/commands.ts` header + the `AGENTS.md` determinism contract.
+7. **Multiplayer code under `src/net/` is dormant.** If a sub-phase needs to touch a file there for a non-trivial reason, that's a signal the pivot decision is being re-opened — surface it before changing anything. Tests under `src/net/` should keep passing; they're the safety net that the dormant code stays compilable.
 
-UX micro-decisions not pre-specified in the 3.3 section (drag thresholds, exact behaviour of right-click overload, shift-click toggle vs. add semantics) are judgment calls — make a defensible pick, capture it in the closed sub-phase's "What landed" notes, and Jaco can redirect on review.
+UX micro-decisions not pre-specified in the 3.x sections (drag thresholds, right-click overload, shift-click toggle vs add semantics, between-wave UX details) are judgment calls — make a defensible pick, capture it in the closed sub-phase's "What landed" notes, and Jaco can redirect on review.
 
 ---
 
@@ -467,40 +472,154 @@ The Phase 1 buildables panel was a flat always-on grid of every action the playe
 
 **Exit:** selecting an HQ shows only TRAIN WORKER; selecting a worker shows BUILD options + DUMP; selecting a Forge shows combat training; selecting a Spire shows research. The action bar is empty when nothing is selected. Disabled actions still show but explain why on hover. The player can complete a full match (train workers → build Forge → train raider → win) using the new bar.
 
-### 3.11 — Faction asymmetry (Faction A + Faction B)
+### 3.10.10 — Velocity-based steering + collision rewrite
 
-Both factions assemble their full Phase 3 roster: distinct production-building lists, distinct unit rosters at both tiers, distinct tech-progression shapes. Each faction has its own counter-triangle filling — same roles (eco / frontline / harass / tier-2 specialist), different stats and behaviours.
+> **Queued 2026-05-08.** Sub-phases 3.10.8 (PvE-pivot cleanup) and 3.10.9 (game-feel pass v2) shipped under the existing point-mass movement model. 3.10.9 added a soft-collision separation pass — three tuning iterations (rigid axis-aligned, hard bounding-box, gentle RNG-perturbed) all stayed inside the limits of "no per-unit velocity stored," and the playtest read on the third iteration was still "messy." Rather than tune the same axis-aligned, no-velocity pass a fourth time, **the separation pass was reverted on 2026-05-08** (`REPLAY_VERSION` 12 → 13; golden fixtures regenerated; harvest-reach widening kept) and **3.10.10 will rebuild movement on a velocity-based steering layer.** This is the right floor before the 3.11 enemy-faction work lands more units in the same simulation. The HUD redesign + resource-node visual identity + iso-rotated camera pan from 3.10.9 are unaffected by the revert.
 
-Working naming for now: **Faction A "Pulse"** (cyan) leans mobile/harass with self-healing units; **Faction B "Forge"** (red-orange) leans slow/heavy with siege options. Names + identities subject to playtest; the *shape* is the commitment, not the brand.
+**Scope.**
 
-The energy-dump mechanic from 3.7 locks in here as Pulse-faction-specific (Forge gets an analogous defensive structure or ability). Faction-specific tech trees diverge here; the trail duration research becomes Pulse-only or gets a Forge counterpart.
+- **Per-unit velocity in `SimState`.** Add `vx, vy: Fixed` to the `UnitBase` shape (or a movement-relevant subset). Hashed alongside positions.
+- **Steering toward target.** Replace the Chebyshev `moveTowards` per-axis clamp with a desired-velocity computation: `desired = (targetPos - pos)` clamped to `maxSpeed`, then accelerate `v` toward `desired` by `accel * dt`. Per-kind `accel` and `maxSpeed` on `UnitStats` (workers ~lower accel, raiders ~higher accel + maxSpeed for the harasser feel).
+- **Velocity-based collision response.** When two units overlap, exchange a fraction of their velocity component along the connecting axis (deterministic, sqrt-free via dominant-axis approximation). Stationary units (defenders) reflect the moving unit's normal velocity rather than absorbing it. Workers in dump mode stay collision-exempt (3.10.9 rule preserved).
+- **Friction / damping.** Per-tick velocity decay so units come to rest gracefully when no movement input is present, instead of oscillating around their target. Without friction, the spring-like steering would jitter.
+- **Random kick on head-on collision.** When a pair of moving units collide with opposing velocity vectors, add a small sim-RNG perturbation to each unit's resulting velocity so a perfectly-aligned head-on encounter doesn't degenerate into a 1-D bounce-bounce-bounce loop (the "directional push back with randomness" Jaco's 2026-05-07 review called out).
+- **No new commands.** All movement input is still expressed via `MoveUnit`, `AssignWorkerToNode`, `BuildStructureByWorker`, etc. — only the *resolver* changes. The command-kind enum is untouched.
 
-**Exit:** the two factions feel different to play within the first 60 seconds; a player picking Pulse vs Forge produces a different opening; replays of A-vs-A, A-vs-B, B-vs-B all run deterministically.
+**Sim shape.** Two new `Fixed` fields per unit (vx, vy) → `REPLAY_VERSION` bumps to 13; golden fixtures regenerate. `UnitStats` gains `accel` and (potentially) `maxSpeed` separated from the existing `speed` field. The current `applyUnitSeparation` pass is replaced (not augmented) by the velocity-based collision step inside `advanceUnit`.
 
-### 3.12 — Maps as data + launch-map starter set
+**Out of scope.**
 
-Maps move out of `main.ts`'s hardcoded `SPEC` into JSON files under `src/maps/`. Map data includes: grid dimensions, HQ start positions per faction, energy node positions, Flux node positions, per-faction colour node positions, vision-blocker tile coordinates. Map selection arrives via URL param + (eventually) lobby UI — for Phase 3 dev, URL is enough.
+- Path-finding around obstacles (the current Chebyshev-style direct line is preserved; obstacle-avoidance is a 3.12+ scenario-shape problem).
+- Per-unit turn rate (we'll have units instantly face their velocity vector — that's enough to read on the iso projection).
+- Flocking / boid-style group cohesion. Tempting but YAGNI — the visual problem is "two workers stack invisibly" and the steering+separation should solve it.
 
-Hand-tune 2–3 launch maps with distinct shapes:
-- **Open arena** — symmetric, no choke, harass-favoured.
-- **Bottleneck** — central choke, frontline-favoured.
-- **Three Fluxes** — three contested Flux nodes including a committal third base.
+**Exit.**
 
-**Exit:** match runs on any of the launch maps; both factions can be played on any map; faction × map matchup matrix has nine combinations and replays validate per-pairing.
+- Two workers commanded to the same node end up *side by side* at the node, not stacked, without visible jitter while either is moving.
+- Three workers commanded to the same node form a small natural triangle.
+- A raider walking head-on into another raider produces a visibly-resolved deflection (not a 1-D back-and-forth).
+- Harvest cycle still ticks: a player-faction worker assigned to a node still completes a full gather→return→deposit cycle within 25% of the pre-3.10.10 timing budget. (Some slowdown is acceptable because of friction / steering ramp-up.)
+- All Phase 2 lockstep / observer / desync / replay e2e gates still pass against the new sim shape.
+- Owner playtest read on a 3-minute match is "movement feels grounded; workers don't stack."
 
-### 3.13 — Win conditions rework
+**What landed (2026-05-08).**
 
-Replace the current "100-point threshold or HQ destruction" with the §6.7 set: military elimination requires HQ + all production destroyed; dominance-tick accumulates from sustained Flux control; 25-minute hard timer with tiebreaker by score; resign is a first-class command. End-game pressure compounds via the dominance-tick rate scaling with Flux share.
+- `UnitBase` gains `vx, vy: Fixed`. `UnitStats.speed` renamed to `maxSpeed` and `accel: Fixed` added per kind: worker `0.05 / 0.012`, raider `0.08 / 0.024`, vanguard `0.07 / 0.014`, defender `0 / 0` (stationary by construction).
+- Movement primitive is now `advanceMovementToward(u, tx, ty, maxSpeed, accel)`: per-axis Chebyshev `desired = clamp(target − pos, maxSpeed)`, then `v += clampStep(desired − v, accel)`, then `pos += v`. Replaces every prior `moveTowards` callsite (worker idle / movingToNode / building / returning, raider, vanguard).
+- New step pass `applyUnitCollisions` runs after unit-advance: pairwise scan, AABB pre-reject + d² overlap test against `UNIT_COLLISION_DIAMETER = 0.5` tiles. Connecting axis is the dominant axis of `(dx, dy)`. Stationary kinds (defenders + workers in `harvesting` / parked-`idle` phase) reflect a moving partner's normal-axis velocity; two-moving pairs swap normal-axis velocity (equal-mass elastic). Convergent pairs receive a `±0.012`-tile/tick perpendicular RNG kick drawn from `sim.rng` (two `nextU32()` reads per pair, one per partner — order is fixed for hash determinism even when the pair short-circuits to skip on a stat / kick decision).
+- New step pass `applyUnitFriction` runs after collisions: every alive unit's `vx, vy` decays by `1/64` per tick (`v -= v >> 6`, signed-int round-toward-negative-infinity). Bleeds the RNG kick off the perpendicular axis within ~80 ticks; pulls steering's steady-state speed to `maxSpeed × 63/64`.
+- Workers in dump mode are collision-exempt (3.10.9 carry-over preserved).
+- Phase transitions that move a unit into a stationary state (`movingToNode → harvesting`, manual `MoveUnit` arrival snap, post-deposit `returning → idle`) call `zeroVelocity(u)` so the next tick's integration starts cleanly. Death also zeroes velocity (canonical hash slot for tombstones).
+- `Sim.stateHash()` extends each unit's slot by two `i32` (vx, vy). `REPLAY_VERSION` bumps `13 → 14`. Golden fixtures regenerated via `RECORD_GOLDEN=1 npm test`.
+- `training.test.ts` Phase 3.3 raider-MoveUnit assertion adjusted: under the new model the post-MoveUnit `r.x` mid-flight reflects one accel-tick of residual velocity from the prior march tick (not exactly column 3); the *intent* is preserved by asserting `r.x === 3 * 65536` after arrival (the snap pins it back to the override column).
+- `tsc` clean. `npm test` 158/158 green. `npm run test:e2e` 9/9 green (lockstep, replay, observer, WebRTC, desync, mouse, select, smoke, preview).
 
-**Exit:** all four win paths exercised in scripted matches: kill HQ + production → military win; sustained Flux control → dominance win; timer expiry with one player ahead → tiebreaker win; resign command → loss for the resigning faction.
+**3.10.10b follow-up (2026-05-08, same day) — lateral steering bias.** Owner playtest read on 3.10.10's first cut: collision was "okay-ish" but workers still jittered on contact. Diagnosis: the one-tick perpendicular velocity kick was being overridden the very next tick by the steering pass recomputing `desired = target − pos` from the original goal, so units bounced against each other on the connecting axis until something accidentally drifted them apart. Fix: collision now sets a *sustained* velocity bias on the perpendicular axis, added to desired-velocity each steering tick.
 
-### 3.14 — Playtest balance gate
+- Three new `UnitBase` fields: `lateralBiasVx, lateralBiasVy: Fixed` and `lateralBiasTicks: number`. All three hashed; `REPLAY_VERSION` bumps `14 → 15`; golden fixtures regenerated again.
+- `advanceMovementToward` now reads `desired = clamp(target − pos, maxSpeed)` per axis, *adds the lateral bias*, then re-clamps each axis to `±maxSpeed`. The re-clamp redirects up to `maxSpeed` of intent into the perpendicular axis — that's what makes the detour curve cleanly rather than the unit moving diagonally faster than its kind's cap.
+- `applyUnitCollisions` replaces the prior one-tick perpendicular velocity kick with `setLateralBias(unit, axisIsX, ±LATERAL_BIAS_VEL)`. Tunings: `LATERAL_BIAS_VEL = 0.05` tiles/tick, `LATERAL_BIAS_TICKS_INITIAL = 25`. Direction is sim-RNG signed on first contact; subsequent collision-tick contacts refresh the timer but **don't re-roll the direction**, so the unit commits to one side instead of alternating.
+- Bias is set on every collision pair (not just convergent ones) — that catches the same-direction-chase case (B catching up to A on the same heading) which doesn't register as convergent but also doesn't separate via swap; the bias is what walks them past each other.
+- Bias clears on: death (`applyDamage`), phase transitions into stationary states (`zeroVelocity`, called from `movingToNode → harvesting`, `MoveUnit` arrival snap, post-deposit `returning → idle`), and on `lateralBiasTicks → 0` in the end-of-step decay (folded into `applyUnitFriction` to stay one pass).
+- All 158 unit tests + 9 e2e gates still green.
 
-The actual PRD exit criterion: internal playtests show no obviously dominant strategy or faction at tester skill, two distinct build orders feel competitive per map, no faction is universally map-favoured. This is **not** a numeric tuning gate (winrates ±5% is a Phase 4 / live-service problem). It's a "does this game feel like a game" gate.
+**3.10.10c follow-up (2026-05-08, same day) — pair-opposite collision bias.** Owner playtest on 3.10.10b: "workers get deadlocked as they move to the same target — completely useless." Diagnosis: 3.10.10b drew an independent RNG sign per partner; ~50% of pair-collisions ended up with both signs matching, both partners drifting in lockstep on the perpendicular axis instead of diverging. The no-re-roll refresh rule then locked them in that bad state for the full 25-tick lifetime, refreshed on every subsequent collision-tick contact. Two workers sent to the same node hit this case structurally (same-direction chase, identical heading).
 
-The work in 3.12 is data collection + tuning passes, not new features. Tools in scope: replay-driven balance review, per-faction unit-stat sweeps, map-symmetry diffs.
+- Fix: one `sim.rng.nextU32()` draw per overlapping pair. A gets `+sign`, B gets `-sign` — paired-opposite. Partners always diverge on the perpendicular axis on every contact.
+- The "refresh timer, don't re-roll direction" branch in `setLateralBias` is removed; each collision contact now overwrites direction. For a unit colliding with multiple partners in the same tick, the last pair processed wins — deterministic, and in 3-worker clumps produces a Y-shaped resolution within a tick.
+- Tunings bumped: `LATERAL_BIAS_VEL` `0.05 → 0.10` (double `maxSpeed` — pins the perpendicular axis to ±`maxSpeed` after re-clamp regardless of how much speed budget the connecting axis has taken; previously the connecting axis's full claim left the perpendicular with only the residual budget, giving a much shallower curve), and `LATERAL_BIAS_TICKS_INITIAL` `25 → 30` (1.5 s, generous traversal margin).
+- Sim shape unchanged (same three `UnitBase` fields). Step semantics + tunings change → `REPLAY_VERSION` bumps `15 → 16`, golden fixtures regenerated.
+- All 158 unit tests + 9 e2e gates still green.
 
-**Exit:** ≥30 internal playtest matches recorded across both factions and all launch maps; replays show no faction winning >65% across the set; at least two distinct opening builds appear successful per faction per map.
+**3.10.10d follow-up (2026-05-08, same day) — harvest slot allocation + formation retention.** Owner playtest read on 3.10.10c: collision is better but workers commanded to the same node still legitimately fight for the same space — local avoidance can't solve a *destination* conflict. The standard RTS fix (AoE / SC2 / WC3): don't give multiple units one destination, give them N different destinations clustered around a target.
+
+- **Harvest slot allocation.** Each resource node has 6 hex-arranged slot positions at radius `0.55` around its centre (`HARVEST_SLOT_OFFSETS`). `Worker` gains `targetNodeSlot: number` (hashed). On `AssignWorkerToNode`, `pickHarvestSlot(state, nodeId, selfId)` picks the lowest-index unused slot among workers currently bound to the same node. The `movingToNode` phase walks to `node.center + HARVEST_SLOT_OFFSETS[slot]` (not the node centre) and the arrival snap pins the worker exactly at the slot. Slot reserved while `targetNodeId === node.id`; cleared on death + on every code path that drops the node (BuildStructureByWorker, AssignWorkerToBuild, depleted-node early-out, harvest-fail, foreign-colour mismatch). Surplus workers (slot 7+) wrap back to slot 0; lateral-bias pass handles the residual.
+- **Formation retention.** `MoveUnit` now picks a formation slot via `pickFormationSlot(state, tx, ty, selfId)` — 7 slots (centre + hex ring at radius `0.7`), centre claimed by the unit whose `moveTarget` exactly equals the click point, ring slots claimed by exact-offset matches against existing `moveTarget`s. Commands process in order, so the N-unit fan-out from a multi-select right-click lands in slots `0..min(N-1, 6)`. Sets `unit.moveTarget = (clickPoint + slotOffset)` so each unit goes to a different point.
+- Both pickers are O(units × slot_count) per command, all integer comparisons — cheap.
+- Sim shape moves: `Worker.targetNodeSlot` is a new hashed field. `REPLAY_VERSION` bumps `16 → 17`. Golden fixtures regenerated (3 of 4 changed; combat fixture unchanged because it has no harvest interaction).
+- The lateral-bias collision pass from 3.10.10b/c was kept here as a second-line defence for residual transient overlaps; **subsequently reverted in 3.10.10e** — see below.
+- All 158 unit tests + 9 e2e gates green.
+
+**3.10.10e follow-up (2026-05-08, same day) — local-collision revert.** With slot allocation + formation retention in place, the playtest read on the residual collision pass was that it was *causing* glitches more than preventing stacking — workers near each other would visibly stutter on the connecting axis even though slot allocation had already placed them at distinct hex points. Owner call: drop local collision entirely; settle for pass-through behaviour. The same call AoE / SC2 effectively make once slot allocation is doing the heavy lifting.
+
+- Removed: `vx, vy: Fixed` on `UnitBase`. `UnitStats.maxSpeed` + `UnitStats.accel` (back to a single `speed` field). `lateralBiasVx, lateralBiasVy: Fixed` + `lateralBiasTicks: number` on `UnitBase`. The step passes `applyUnitCollisions` and `applyUnitFriction` are gone, along with the `setLateralBias`, `isStationaryForCollision`, `isCollisionExempt`, `applyFrictionVelocity`, `zeroVelocity` helpers and the `LATERAL_BIAS_*` / `UNIT_COLLISION_*` / `FRICTION_SHIFT` constants.
+- Restored: `moveTowards` + `clampStep` chebyshev step. Each kind's advance function calls `moveTowards(x, y, tx, ty, speed)` and writes the new position directly — no per-unit velocity stored.
+- Kept: `Worker.targetNodeSlot` (3.10.10d) hashed; `pickHarvestSlot` and `pickFormationSlot` helpers; `HARVEST_SLOT_OFFSETS` (6-slot hex ring at radius 0.55) and `FORMATION_OFFSETS` (centre + 6-slot hex ring at radius 0.7) constants; the `AssignWorkerToNode` slot-pick path; the `MoveUnit` formation-pick path; `HARVEST_AT_NODE_REACH_SQ` carry-over (now used by no path — workers reach via the per-slot snap — but kept for symmetry with structures' `BUILD_REACH_SQ`; could prune later if it stays unused).
+- `Sim.stateHash()` shrinks: each unit slot loses 5 i32/u32 fields (vx, vy, lateralBiasVx, lateralBiasVy, lateralBiasTicks). `targetNodeSlot` stays. `REPLAY_VERSION` bumps `17 → 18`. Golden fixtures regenerated.
+- The `training.test.ts` Phase 3.3 raider-MoveUnit assertion (`expect(r.x).toBe(3 * 65536)` after arrival) keeps working under chebyshev — dx=0 from a column-3 start to a column-3 target, no per-axis drift, snap pins r.x to 3*65536 exactly.
+- All 158 unit tests + 9 e2e gates green.
+
+### 3.11 — Enemy AI faction(s) with distinct rosters _(repointed PvE)_
+
+> **Repointed 2026-05-07.** The pre-pivot version of 3.11 (under v4) was "two playable factions, both balanced for 1v1 ladder play." Post-pivot, the player faction is *the* faction (kept as-is from 3.0–3.10's catalog), and **3.11 builds the enemy AI faction(s) that the player fights against in PvE**. The asymmetry now means "the enemy plays differently from the player," not "two playable factions are balanced against each other."
+
+Build at least one (target two) **enemy AI factions** with distinct rosters and threat profiles. The player keeps the current faction-0 catalog (worker / defender / raider / vanguard / Forge / Spire / Pylon); enemy factions get unit kinds the player doesn't have, or stat-curve variants of existing kinds, plus distinct AI behaviour patterns.
+
+Working naming + shape:
+- **Pulse swarm** — fast, fragile, many. Threat profile: overwhelm with raider-equivalents, punish a player who built only frontline. Distinct unit: lightweight raider variant (faster, lower HP).
+- **Forge siege** — slow, heavy, few. Threat profile: walks at HQ slowly but each unit is hard to kill, punishes a player who built only harass. Distinct unit: tier-2 siege analogue.
+
+Both enemy factions reuse the existing `FactionState` shape — the asymmetry lives in `units-config.ts` (per-kind stats), `ai.ts` (behaviour patterns), and a new `factionId` discriminator on the AI's build-order picks. The energy-dump from 3.7 stays player-only for now (it's a player-faction identity mechanic); enemy factions get their own threat tools.
+
+This sub-phase does **not** introduce wave scheduling — that's 3.13's deliverable. 3.11 builds the *adversary*; 3.13 builds *what the adversary does over the course of a run*.
+
+**Exit:** at least one enemy AI faction plays end-to-end against the player on the current single-map skirmish; replays of player-vs-enemy-faction-A and (if landed) player-vs-enemy-faction-B both run deterministically; the two enemy factions feel distinguishable in playtest within the first 60 seconds.
+
+### 3.12 — Scenarios as data + seedable runs _(repointed PvE)_
+
+> **Repointed 2026-05-07.** Pre-pivot, this was "maps as data, 2–3 launch maps for the 1v1 matchup matrix." Post-pivot it's "**scenarios as data** — `(map_layout, starting_resources, enemy_faction, wave_schedule_stub, seed)` — and seed-driven per-run variation." Maps remain hand-tuned; runs vary via seed.
+
+Scenarios move out of `main.ts`'s hardcoded `SPEC` into data files under `src/scenarios/` (or `src/maps/` if scenario + map are still 1:1 at this point — open call, decide in-flight). A scenario at this sub-phase is:
+
+- **Map layout**: grid dimensions, terrain, HQ position(s), energy / flux / colour node positions, vision-blockers.
+- **Starting resources** for the player and the enemy AI.
+- **Enemy AI faction** assigned (drawn from 3.11's set).
+- **Seed** for the run's PRNG (passed into `Sim` at construction; already supported by the sim).
+
+Wave scheduling is a **stub** at this sub-phase — a placeholder field that 3.13 fleshes out. The point of 3.12 is *the data lift*, so 3.13 has somewhere to write the wave schedule.
+
+Hand-tune 2–3 launch scenarios with distinct shapes (carries from the v4 plan):
+- **Open arena** — symmetric, no choke. Tests army composition.
+- **Bottleneck** — central choke. Frontline-favoured.
+- **Three-flux** — three contested Flux nodes including a committal third base.
+
+Scenario selection arrives via URL param (e.g. `?scenario=bottleneck&seed=12345`); a real scenario-pick UI is Phase 4. Per-run variation comes from the seed, not procedural map gen.
+
+**Exit:** the current single hardcoded SPEC is gone from `main.ts`; ≥2 scenarios load from data; the same scenario + seed produces a bit-identical run twice (already true via determinism, but verified explicitly here); replays carry the scenario id + seed.
+
+### 3.13 — PvE win conditions (survive-N-waves + scenario objective + resign)
+
+> **Repointed 2026-05-07.** Pre-pivot, this was "military-elimination + dominance-tick + 25-min timer + resign" for competitive 1v1. Post-pivot, the **PvE win conditions** from PRD §6.7 land here.
+
+Replace the current "100-point threshold or HQ destruction" with:
+
+1. **Survive the scheduled waves.** A scenario defines a wave count (e.g. 8 on standard, 12 on hard) and a wave schedule (per-wave: spawn time, spawn direction, unit composition). Surviving the final wave wins the run. The **wave scheduler** is the new sim component this sub-phase builds — a deterministic state machine that consumes the scenario's wave list and pushes enemy units into the sim at the scheduled tick.
+2. **Scenario objective** (optional per scenario): hold a specific node for N waves, escort a structure to a destination, destroy an enemy spawner. Encoded as data on the scenario; checked each tick by a new `checkScenarioObjective` step pass.
+3. **Boss wave** (boss-scenarios only, stretch): final wave is a single high-HP enemy unit with a designed mechanic. May slip to Phase 5 if mechanic design takes more time than the sub-phase budget.
+4. **Resign** as a first-class command (CommandKind slot 13 — next available after 3.10's slot 12). Replays save on resign.
+
+Loss conditions: HQ destroyed → defeat (already wired); player has no production capacity and HQ is mid-attack → effectively defeat (same code path).
+
+Drop:
+- The 100-point threshold (was esport scaffolding).
+- The 25-minute hard timer (was esport-anti-stalemate scaffolding; PvE has no stalemate concern).
+- The dominance-tick mechanism (was esport positional-win path; PvE replaces with surviving the scheduled escalation).
+
+**Exit:** all PvE win paths exercised in scripted scenarios — survive 8 waves on the open arena → win; lose HQ during wave 5 → defeat; resign command → defeat; (if landed) defeat boss → win. The wave-scheduler ticks deterministically; replays of survival + defeat both round-trip. The point-system code can be removed or marked dead.
+
+### 3.14 — Run-loop playtest gate ("is the loop fun")
+
+> **Repointed 2026-05-07.** Pre-pivot, this was "internal playtests show no obviously dominant strategy or faction at tester skill" — an *esport balance* gate. Post-pivot, it's a **run-loop fun gate** — the only gate that matters for a PvE indie game.
+
+The actual exit criterion: a player who picks up the build cold, plays a 15-minute run, and clicks "new run" because the next seed sounds interesting. This is **not** a balance gate (PvE balance is a long tail through Phase 4 + 5, not a Phase 3 close item). It's a **does this loop make me want to play it again** gate.
+
+Work in scope:
+- **≥20 internal runs** across the 2–3 launch scenarios + both enemy AI factions + 2–3 difficulty seeds.
+- **Per-run logging**: run length, win/loss, wave reached, dominant strategy, "did the player want to start another run" yes/no captured in a quick post-run note.
+- **Tuning passes** on wave cadence, wave composition, starting resources — small numbers, not new mechanics.
+- **No new features.** If a feature is missing for the loop to be fun, that surfaces as a Phase 4 input, not a 3.14 add.
+
+**Exit:** ≥20 logged runs; ≥60% of runs end with the player wanting to start another; at least 2 distinct viable strategies emerge across the playtest set (e.g. "harass-rush enemy spawners" vs "turtle-and-tech to vanguard"). If the loop isn't fun at this gate, the PvE direction itself is in question — **don't paper over a bad fun-gate by moving to Phase 4 anyway**.
 
 ## Success criteria — Phase 3 exit gate
 
@@ -557,6 +676,12 @@ The work in 3.12 is data collection + tuning passes, not new features. Tools in 
 | 2026-05-07 | Sub-phase 3.9 closed. | Game feel + presentation pass: 7 work items shipped — input feedback overlay (move ping / assign pulse / placement burst + cursor states); `autoAssignIdleWorkers` stripped from player paths so newly trained workers wait for orders; visual scale-up of all entities (1.4–2.0× depending on kind) + AI placement offsets nudged to clear bigger silhouettes; Tron-style fog of war (uncover-as-explore metaphor with grid intensity bump 0.4 → 1.2 to give the layer something to obscure); 5-cue WebAudio synthesis layer with `M`-mute toggle; placement + death pulse animations surfaced from latent legacy mesh code; main menu DOM scene with PvAI flow + `?menu=skip` test bypass. Sim shape unchanged across all seven items — `REPLAY_VERSION` stays at 9, no fixture regen needed. Three e2e tests updated to use `?menu=skip`. Two debug specs (fog-debug, menu-debug) dropped at close. All 161 unit tests + 9 e2e gates green. |
 | 2026-05-07 | Sub-phase 3.10 closed. | Selection-driven action bar (HQ/worker/forge/spire/pylon → context-specific buttons; faction-coloured cost glyphs; hotkey badges; tooltip disabled-reasons) replaces the Phase 1 always-on flat panel. New `selectionRing` + raycast registries on structures + HQ. Worker-driven building (`BuildStructureByWorker` slot 11; `AssignWorkerToBuild` slot 12) — workers walk to construction sites + decrement `buildTicksRemaining` while on site, multi-worker stacks throughput. Workers spawn around the HQ perimeter via `FactionState.nextSpawnRotation` round-robin through eight offsets (no more selection-collision with the bigger HQ silhouette); they deposit at the HQ perimeter (`HQ_DEPOSIT_REACH_SQ` widened from 0.06² to 2.0²). Construction visual: y-scale rise from 15% → 100%, faction-coloured pulsing scaffolding ring at the base while building, Spire's finial / Pylon's cap appear past completion thresholds for evolving silhouette. AI dispatches via `pickIdleBuilderWorker` (idle > moving/returning > building, lowest-id tiebreaker). Legacy `BuildStructure` (slot 4) retained for tests + back-compat — spawns structures with `builtByWorker = false` so they auto-tick the build phase. `?test-hooks=1` URL flag exposes `__vyluxTest.{selectHq, selectStructure, selectAllOwnWorkers, sim}` for e2e specs. `REPLAY_VERSION` bumps to 10; golden fixtures regenerated. All 161 unit tests + 9 e2e gates green. |
 | 2026-05-07 | Phase 3 sub-phases renumbered (fourth pass) — new 3.10 inserted: in-game HUD / action-bar redesign (context-sensitive). | Owner feedback after 3.9 landed: the in-match buildables panel reads as "a wall of cards of information" rather than a guided action bar — every command always visible, no cue about what the natural next move is, upgrades indistinguishable squares of text. The fix: make the bar **context-sensitive** (HQ selected → train workers; worker selected → build options; Forge selected → combat units; Spire selected → research) with bigger button affordance, icons, hotkey letters, faction-coloured cost glyphs, and tooltip-based disabled reasons. Sim untouched (same commands, different UI). Slotted as 3.10 before faction asymmetry — same "fix the lens before adding more content" rationale as the 2026-05-06 game-feel insertion. Old 3.10 (asymmetry) → 3.11; 3.11 (maps-as-data) → 3.12; 3.12 (win cond) → 3.13; 3.13 (playtest) → 3.14. 14 sub-phases total. |
+| 2026-05-07 | **PvE pivot — Vylux retires the competitive 1v1 / esport ambition; sub-phases 3.11–3.14 repointed for single-player PvE wave-defense + roguelike-run shape.** | Honest market read: indie competitive 1v1 RTS is one of the hardest possible monetization paths (Stormgate had ex-Blizzard talent + ~$40M and still struggled badly); solo dev + browser tech + a genre that needs concurrent-player critical mass to feel alive was the wrong combination. The PvE shape leverages 80% of what's already built (deterministic sim, renderer, full catalog, AI scaffolding all carry forward unchanged), ships in vertical slices, can be put in front of players immediately, and removes the "owe paying customers a competitive ladder" obligation. **Repointed sub-phases:** 3.11 = enemy AI faction(s) with distinct rosters as the player's adversary (was: two playable factions balanced for ladder); 3.12 = scenarios as data + seedable runs (was: maps as data for the matchup matrix); 3.13 = PvE win conditions — survive-N-waves + scenario objective + resign (was: military elimination + dominance-tick + 25-min timer); 3.14 = run-loop fun gate (was: esport balance gate). **Dormant code:** all of `src/net/` (lockstep, WebRTC, observer, signaling) — preserved end-to-end so optionality isn't paid to delete + rebuild, but **not on the active surface**. **Determinism contract** kept and reframed as engineering hygiene (save/load, replays-as-bug-reports, scripted scenarios, AI testing) rather than esport-grade lockstep prerequisite. **Mechanical-mastery pillar** (full keyboard parity, control groups, camera bookmarks, smart-cast, production-anywhere) softened to "comfortable mouse + hotkeys; rebindable bindings deferred." **PRD §8 Phases 4 + 5 replaced**: new Phase 4 = run loop & meta-progression; new Phase 5 = content + optional Steam release as stretch. Historical decision-log rows above are kept intact as the record of how we got here — text in this doc and in the PRD wins where it contradicts a prior entry. See PRD §0 + AGENTS.md "2026-05-07 pivot" callout. |
+| 2026-05-08 | Sub-phase 3.10.10 closed. | Velocity-based steering + collision rewrite. `UnitBase` gains `vx, vy: Fixed` (hashed alongside `x, y`); `UnitStats.speed` renamed to `maxSpeed` and `accel` added per kind. Movement primitive becomes `advanceMovementToward` — per-axis Chebyshev `desired = clamp(target − pos, maxSpeed)`, then `v += clampStep(desired − v, accel)`, then `pos += v`. New step pass `applyUnitCollisions` runs after unit-advance: pairwise sqrt-free dominant-axis approximation, AABB pre-reject + d² overlap test against `UNIT_COLLISION_DIAMETER = 0.5`. Stationary kinds (defenders + parked / harvesting workers) reflect a moving partner's normal-axis velocity; two-moving pairs swap normal-axis velocity (equal-mass elastic). Convergent pairs receive a `±0.012`-tile/tick perpendicular RNG kick from `sim.rng` so perfectly aligned approaches don't degenerate into 1-D bounces. New step pass `applyUnitFriction` decays every alive unit's `vx, vy` by `1/64` per tick after collision (signed-int right-shift; idle-decel + kick-bleed in one rule). Workers in dump mode stay collision-exempt (3.10.9 carry-over). Phase transitions into stationary states (`movingToNode → harvesting`, `MoveUnit` arrival snap, post-deposit `returning → idle`) zero velocity so the next tick starts cleanly; death also zeroes (canonical hash slot). `REPLAY_VERSION` bumps `13 → 14`; golden fixtures regenerated. `training.test.ts` Phase 3.3 raider-MoveUnit assertion adjusted for the new model — mid-flight `r.x` reflects one accel-tick of residual velocity from the prior tick, but the snap on arrival pins `r.x = 3 * 65536` exactly (preserves the original test intent: arrival snaps to the override column). All 158 unit tests + 9 e2e gates green. |
+| 2026-05-08 | Sub-phase 3.10.10b — lateral steering bias (same-day follow-up to 3.10.10). | Owner playtest on 3.10.10's first cut: collision "okay-ish" but workers still jittered on contact. Diagnosis: the one-tick perpendicular velocity kick was being overridden the next tick by the steering pass recomputing `desired = target − pos` from the original goal, so units bounced against each other on the connecting axis until something accidentally drifted them apart — high-frequency normal-axis oscillation. Fix: collision now sets a *sustained* velocity bias on the perpendicular axis, added to desired-velocity each steering tick for ~1.25 s, redirecting the unit's seek into a curve around the obstacle rather than a 1-D bounce loop. `UnitBase` gains `lateralBiasVx, lateralBiasVy: Fixed` and `lateralBiasTicks: number` (all hashed). `advanceMovementToward` adds the bias to desired-velocity then re-clamps each axis to ±`maxSpeed` — the re-clamp redirects up to `maxSpeed` of intent perpendicular, which is what makes the curve clean. `applyUnitCollisions` replaces the prior one-tick velocity kick with `setLateralBias(unit, axisIsX, ±LATERAL_BIAS_VEL)`; direction picked from `sim.rng` on first contact, refreshed (not re-rolled) on subsequent contacts. Bias set on every collision pair (not just convergent) so the same-direction-chase case also breaks out of lock. Bias clears on death, on `zeroVelocity` (stationary phase transitions), and on `lateralBiasTicks → 0` in the end-of-step decay (folded into `applyUnitFriction`). Tunings: `LATERAL_BIAS_VEL = 0.05` tiles/tick, `LATERAL_BIAS_TICKS_INITIAL = 25`. `REPLAY_VERSION` bumps `14 → 15`; golden fixtures regenerated. All 158 unit tests + 9 e2e gates green. |
+| 2026-05-08 | Sub-phase 3.10.10c — pair-opposite collision bias (same-day follow-up to 3.10.10b). | Owner playtest on 3.10.10b: "workers get deadlocked as they move to the same target — completely useless." Diagnosis: 3.10.10b drew an independent RNG sign per partner, so ~50% of pair-collisions ended up with both partners drifting in lockstep on the perpendicular axis instead of diverging; the no-re-roll refresh rule then locked them in for the full 25-tick lifetime. Two workers sent to the same node hit this case structurally. Fix: one `sim.rng.nextU32()` per pair, A gets `+sign`, B gets `-sign` — paired-opposite, partners always diverge on every contact. The "refresh, don't re-roll" branch in `setLateralBias` is removed; each contact overwrites direction (last pair processed wins for a unit, Y-shaped resolution in 3-worker clumps). Tunings bumped: `LATERAL_BIAS_VEL` 0.05 → 0.10 (perpendicular axis now pins to ±maxSpeed after re-clamp regardless of connecting-axis budget — gives a much sharper curve), `LATERAL_BIAS_TICKS_INITIAL` 25 → 30 (1.5 s). Sim shape unchanged; step semantics + tunings change → `REPLAY_VERSION` bumps 15 → 16, golden fixtures regenerated. All 158 unit tests + 9 e2e gates green. |
+| 2026-05-08 | Sub-phase 3.10.10d — harvest slot allocation + formation retention (same-day follow-up to 3.10.10c). | Owner playtest on 3.10.10c: collision better but workers still legitimately fight for the same space — local avoidance can't solve a destination conflict. The standard RTS fix (AoE / SC2 / WC3): don't send N units to one point, send them to N different points around a target. Two passes: (1) **harvest slot allocation** — each resource node has 6 hex-arranged slot positions at radius 0.55; `Worker` gains hashed `targetNodeSlot`, `AssignWorkerToNode` picks the lowest-index unused slot, `movingToNode` walks to `node.center + slotOffset` and snaps there at arrival; (2) **formation retention** — `MoveUnit` picks one of 7 formation slots (centre + hex ring at 0.7) by checking other units' existing `moveTarget`s, so a multi-select right-click fan-out lands its N units in slots 0..min(N-1, 6) instead of all stacking on the click point. The 3.10.10b/c lateral-bias collision pass is kept as second-line defence for residual transient overlaps — back in its intended role rather than trying to substitute for slot allocation. Sim shape moves; `REPLAY_VERSION` bumps 16 → 17; golden fixtures regenerated. All 158 unit tests + 9 e2e gates green. |
+| 2026-05-08 | Sub-phase 3.10.10e — local-collision revert (same-day follow-up to 3.10.10d). | With slot allocation + formation retention in place, owner playtest read on the residual lateral-bias collision pass: visible glitches without earning their complexity — workers placed at distinct hex slots were still visibly stuttering on local-axis contact. Owner call: drop local collision entirely, settle for pass-through. Removed: `vx, vy` on UnitBase; `maxSpeed` + `accel` on UnitStats (back to a single `speed`); `lateralBiasVx, lateralBiasVy, lateralBiasTicks` on UnitBase; `applyUnitCollisions` + `applyUnitFriction` step passes; `setLateralBias`, `isStationaryForCollision`, `isCollisionExempt`, `applyFrictionVelocity`, `zeroVelocity` helpers; `LATERAL_BIAS_*` / `UNIT_COLLISION_*` / `FRICTION_*` constants. Restored: `moveTowards` + `clampStep` chebyshev. Kept: 3.10.10d's slot/formation work and `Worker.targetNodeSlot` hashed field. Hash shape shrinks (each unit slot loses 5 i32/u32 fields). `REPLAY_VERSION` bumps 17 → 18; golden fixtures regenerated. All 158 unit tests + 9 e2e gates green. |
 
 ## Known follow-ups
 

@@ -64,6 +64,11 @@ export interface UnitVisual {
 
 export interface NodeVisual {
   group: THREE.Group;
+  // Phase 3.10.9: per-frame "remaining" label update. The renderer
+  // calls this each tick with the sim node's current remaining value;
+  // the sprite label updates its text + fades when the node is nearly
+  // empty. Pure presentation — sim hash is unaffected.
+  setRemaining(value: number, max: number): void;
 }
 
 export function buildHqMesh(faction: Faction, tileX: number, tileY: number): HqVisual {
@@ -142,36 +147,189 @@ function wrapUnitVisual(b: LegacyUnitMesh): UnitVisual {
   };
 }
 
-// Phase 3.1: Flux nodes are visually distinct from Energy nodes —
-// bright green rim instead of the legacy pale-cyan. Energy nodes keep
-// the existing look for visual continuity.
+// Phase 3.10.9 — per-kind node visual identity. Each resource type
+// gets a distinct silhouette + emissive palette layered on top of the
+// shared legacy hex base, so a player can read "what kind of node is
+// this" at a glance without consulting a legend or hovering for a
+// tooltip. Matches the action-bar cost-glyph palette (E gold, F green,
+// own colour faction-tinted).
 //
-// Phase 3.5: faction-locked colour nodes get the faction palette
-// (cyan rim for blue / faction 0, red-orange for red / faction 1).
-// Picking the rim colour the same way as the unit faction means the
-// player reads "this is your colour" by sight without consulting a
-// legend.
-const FLUX_RIM_COLOR = 0x66ff44;
-const BLUE_RIM_COLOR = 0x00e5ff;  // matches faction-0 (cyan) HQ + unit emissive
-const RED_RIM_COLOR = 0xff6a33;   // matches faction-1 (red-orange)
+// Energy → warm gold pylon (a tall slim octahedron pointing up).
+// Flux   → green-teal floating crystal cluster (three small octahedra).
+// Blue   → cyan diamond spire (tall stretched octahedron).
+// Red    → red-orange spike (cone, wider base).
+//
+// Each node also carries a sprite-text label that always faces the
+// camera, displaying the current remaining amount. Updated per frame
+// from the sim's `remaining` value via NodeVisual.setRemaining().
+const NODE_PALETTE: Record<ResourceKind, number> = {
+  energy: 0xffd166, // gold — matches action-bar 'E' cost glyph
+  flux:   0xa3ff66, // green — matches action-bar 'F' cost glyph
+  blue:   0x00e5ff, // cyan — matches faction 0 + 'C' cost glyph
+  red:    0xff6a33, // red-orange — matches faction 1 + 'C' cost glyph
+};
 
 export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind = 'energy'): NodeVisual {
   const b = legacyBuildEnergyNode(tileX, tileY);
-  const rim =
-    kind === 'flux' ? FLUX_RIM_COLOR :
-    kind === 'blue' ? BLUE_RIM_COLOR :
-    kind === 'red' ? RED_RIM_COLOR :
-    null;
-  if (rim !== null) {
-    b.group.traverse((obj) => {
-      if (obj.name === 'node-rim' && obj instanceof THREE.Mesh) {
-        const m = obj.material as THREE.MeshStandardMaterial;
-        m.color.set(rim);
-        m.emissive.set(rim);
+  const colour = NODE_PALETTE[kind];
+
+  // Tint the legacy hex-base rim per kind so the disc reads as the
+  // right resource even before the silhouette is in view.
+  b.group.traverse((obj) => {
+    if (obj.name === 'node-rim' && obj instanceof THREE.Mesh) {
+      const m = obj.material as THREE.MeshStandardMaterial;
+      m.color.set(colour);
+      m.emissive.set(colour);
+    }
+  });
+
+  // Kind-specific silhouette on top of the hex base. Built once at
+  // node construction; the sim never moves nodes so no per-frame
+  // position update is needed.
+  const silhouette = buildNodeSilhouette(kind, colour);
+  b.group.add(silhouette);
+
+  // Always-on remaining-amount label. Stays anchored above the
+  // silhouette and faces camera via THREE.Sprite.
+  const label = buildNodeLabel(silhouette.userData.labelHeight as number);
+  b.group.add(label.sprite);
+
+  return {
+    group: b.group,
+    setRemaining(value: number, max: number): void {
+      label.setText(`${Math.max(0, Math.round(value))}`);
+      // Fade the silhouette emissive intensity as the node empties so
+      // a nearly-depleted node reads as "this is dying" before the
+      // hex base alone does.
+      const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
+      const intensity = 0.3 + 1.4 * ratio;
+      silhouette.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          const m = child.material as THREE.MeshStandardMaterial;
+          if (m.emissive) m.emissiveIntensity = intensity;
+        }
+      });
+    },
+  };
+}
+
+function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
+  const group = new THREE.Group();
+  group.name = `node-silhouette-${kind}`;
+
+  const mat = (): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({
+    color: colour,
+    emissive: colour,
+    emissiveIntensity: 1.4,
+  });
+
+  let labelHeight = 0.5; // y above hex base where label sits
+  switch (kind) {
+    case 'energy': {
+      // Gold pylon — tall slim octahedron pointing up. Reads as "the
+      // workhorse resource" — a clean angular spike.
+      const geo = new THREE.OctahedronGeometry(0.18, 0);
+      const mesh = new THREE.Mesh(geo, mat());
+      mesh.scale.set(1, 2.2, 1);
+      mesh.position.y = 0.45;
+      group.add(mesh);
+      labelHeight = 0.95;
+      break;
+    }
+    case 'flux': {
+      // Green crystal cluster — three small octahedra clustered
+      // together at slightly different heights. Reads as "rare,
+      // precious, hand-cut" against energy's clean spike.
+      for (const offset of [
+        { x: 0,    y: 0.50, z: 0,    s: 1.0 },
+        { x: 0.18, y: 0.38, z: 0.10, s: 0.7 },
+        { x: -0.16, y: 0.42, z: -0.08, s: 0.8 },
+      ]) {
+        const geo = new THREE.OctahedronGeometry(0.14, 0);
+        const mesh = new THREE.Mesh(geo, mat());
+        mesh.scale.set(offset.s, offset.s * 1.4, offset.s);
+        mesh.position.set(offset.x, offset.y, offset.z);
+        group.add(mesh);
       }
-    });
+      labelHeight = 0.95;
+      break;
+    }
+    case 'blue': {
+      // Cyan diamond spire — tall narrow octahedron, stretched
+      // vertically. Same shape language as energy but colour-locked
+      // to faction 0 + scaled tall to read as "premium colour pool."
+      const geo = new THREE.OctahedronGeometry(0.16, 0);
+      const mesh = new THREE.Mesh(geo, mat());
+      mesh.scale.set(0.85, 3.0, 0.85);
+      mesh.position.y = 0.55;
+      group.add(mesh);
+      labelHeight = 1.20;
+      break;
+    }
+    case 'red': {
+      // Red-orange spike — wider-based cone, faction 1's colour pool.
+      // The cone shape (vs blue's diamond) reads as faction-asymmetric
+      // even before colour parses.
+      const geo = new THREE.ConeGeometry(0.2, 0.85, 6);
+      const mesh = new THREE.Mesh(geo, mat());
+      mesh.position.y = 0.50;
+      group.add(mesh);
+      labelHeight = 1.05;
+      break;
+    }
   }
-  return { group: b.group };
+
+  group.userData.labelHeight = labelHeight;
+  return group;
+}
+
+interface NodeLabel {
+  sprite: THREE.Sprite;
+  setText(text: string): void;
+}
+
+function buildNodeLabel(height: number): NodeLabel {
+  // Canvas-backed sprite. Width:height ratio fixed at 4:1; the canvas
+  // is small (128×32) so font rendering is sharp at most camera zooms
+  // without paying GPU memory for high-res text textures.
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 32;
+  const ctx = canvas.getContext('2d');
+  if (ctx === null) throw new Error('buildNodeLabel: 2d context unavailable');
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false, // always render on top so labels don't disappear behind silhouettes
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(0.85, 0.21, 1);
+  sprite.position.y = height + 0.15;
+  sprite.renderOrder = 999;
+
+  let lastText = '';
+  function setText(text: string): void {
+    if (text === lastText) return; // skip repaint if value didn't change
+    lastText = text;
+    ctx!.clearRect(0, 0, canvas.width, canvas.height);
+    ctx!.font = 'bold 22px ui-monospace, Menlo, monospace';
+    ctx!.textAlign = 'center';
+    ctx!.textBaseline = 'middle';
+    // Subtle outer glow for legibility against the dark grid.
+    ctx!.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx!.shadowBlur = 6;
+    ctx!.fillStyle = '#cde';
+    ctx!.fillText(text, canvas.width / 2, canvas.height / 2);
+    texture.needsUpdate = true;
+  }
+  setText('—'); // placeholder until first sim sync
+  return { sprite, setText };
 }
 
 // Phase 3.10.3: shared selection ring for structures. Faction-coloured

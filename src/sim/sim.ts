@@ -53,7 +53,10 @@ export class Sim {
       h.writeI32(fs.color);
       h.writeU32(fs.tier2Researched ? 1 : 0);
       h.writeI32(fs.hqHp);
-      h.writeI32(fs.points);
+      // Phase 3.10.8 (2026-05-07 PvE pivot cleanup): the previous slot
+      // here was `points` — removed with the points-threshold win
+      // condition. REPLAY_VERSION bumps to 11 to mark the hash shape
+      // change.
       // Phase 3.6: supply accounting. supplyCap is derived from
       // operational Pylons each end-of-step but stored on FactionState
       // so the hash captures the current cap directly.
@@ -176,6 +179,10 @@ function hashUnit(h: Hasher, u: Unit): void {
   h.writeU32(unitKindToInt(u.kind));
   h.writeI32(u.x);
   h.writeI32(u.y);
+  // Phase 3.10.10e: the per-unit velocity (vx, vy) and lateral-bias
+  // fields added in 3.10.10 + 3.10.10b were dropped along with the
+  // collision / friction passes they fed. Movement is back to chebyshev
+  // step-toward-target; only x, y are hashed for unit position.
   h.writeI32(u.hp);
   h.writeU32(u.attackCooldown);
   // Phase 3.3: moveTarget — presence flag + xy. null hashes the same
@@ -205,6 +212,8 @@ function hashUnit(h: Hasher, u: Unit): void {
       h.writeU32(u.activeTrailId);
       // Phase 3.10.6: structure id this worker is building (0 = none).
       h.writeU32(u.targetStructureId);
+      // Phase 3.10.10d: harvest slot index (0..HARVEST_SLOT_COUNT-1).
+      h.writeU32(u.targetNodeSlot);
       return;
     case 'defender':
     case 'raider':

@@ -66,10 +66,11 @@ export interface FactionState {
   // itself (and the flag — observable in the hash for tests).
   tier2Researched: boolean;
   // HQ hit-points. Reaching 0 ends the match — the OTHER faction wins.
+  // Post-2026-05-07 PvE pivot: HQ destruction is the ONLY win/loss
+  // condition until 3.13's wave-survival lands. The previous
+  // points-threshold path was esport-balance scaffolding and has been
+  // removed; see PRD §0 + §6.7.
   hqHp: Fixed;
-  // Score accumulated from kills + HQ damage. Reaching a threshold also
-  // ends the match (in favour of THIS faction).
-  points: number;
   // Phase 3.6: supply system. supplyUsed sums the supplyCost of every
   // alive unit owned by this faction; supplyCap is the cap that bounds
   // it. Train commands silently reject when supplyUsed + cost > cap.
@@ -128,6 +129,14 @@ interface UnitBase {
   attackCooldown: number;
   moveTarget: { x: Fixed; y: Fixed } | null;
 }
+// Phase 3.10.10e (2026-05-08): the velocity / friction / lateral-bias
+// fields added in 3.10.10 + 3.10.10b were reverted. The local-collision
+// machinery they fed produced glitches the playtest read as worse than
+// no collision at all, and slot allocation + formation retention
+// (3.10.10d) solved the structural same-destination case the bias was
+// trying to patch over. Movement is back to the pre-3.10.10 chebyshev
+// step-toward-target model — units pass through each other on the
+// local axis. The 3.10.10d slot + formation work is what's kept.
 
 export interface Worker extends UnitBase {
   kind: 'worker';
@@ -155,6 +164,17 @@ export interface Worker extends UnitBase {
   // walks to the structure tile and ticks down its buildTicksRemaining
   // each tick while in range. Reset to 0 on death + on build complete.
   targetStructureId: number;
+  // Phase 3.10.10d: harvest slot allocation. When AssignWorkerToNode
+  // lands the worker picks the lowest-index unused slot on the target
+  // node (0..HARVEST_SLOT_COUNT-1, or 0 if all are taken — overflow
+  // stacks). The worker walks to `node.center + HARVEST_SLOT_OFFSETS
+  // [slot]` rather than to the node center, so multiple workers
+  // commanded to the same node cluster around it without ever
+  // targeting the same point. Slot is reserved while
+  // `targetNodeId === node.id`; cleared (back to 0) when the worker
+  // drops the node assignment (death, BuildStructureByWorker,
+  // depleted-node early-out, etc).
+  targetNodeSlot: number;
 }
 
 export interface Defender extends UnitBase {
@@ -340,9 +360,10 @@ export interface SimState {
   // not spliced) so iteration order is bit-stable across the hash.
   trails: Trail[];
   nextEntityId: number;
-  // Set when a faction's HQ is destroyed or a points threshold is hit.
-  // Phase 1.2 fills in the points side; Phase 1.0 only writes this on
-  // HQ kill (which we don't do yet). Keeping the field present keeps
-  // hash format stable across sub-phases.
+  // Set when a faction's HQ is destroyed (the OTHER faction wins).
+  // Post-2026-05-07 PvE pivot: HQ destruction is the only path to a
+  // winner being set until 3.13 lands wave-survival + scenario-objective
+  // win conditions. Earlier sub-phases also wrote this on a points
+  // threshold; that path has been removed.
   winner: Faction | null;
 }

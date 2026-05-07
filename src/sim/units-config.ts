@@ -12,6 +12,11 @@ import type { StructureKind, UnitKind } from './types';
 
 export interface UnitStats {
   maxHp: Fixed;
+  // Phase 3.10.10e: chebyshev step-toward-target speed (per-tick tile
+  // delta, clamped per-axis). The 3.10.10 split into `maxSpeed` +
+  // `accel` was reverted alongside the velocity / friction / collision
+  // machinery; without local collision response there's no need to
+  // store per-unit velocity at all.
   speed: Fixed; // tiles per tick — 0 means stationary
   attackRange: Fixed; // tile units
   attackDamage: Fixed;

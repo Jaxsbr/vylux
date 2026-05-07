@@ -14,7 +14,9 @@ test('AI-vs-AI match runs, ticks advance, units appear', async ({ page }) => {
   });
   page.on('pageerror', (err) => consoleErrors.push(err.message));
 
-  await page.goto('/?menu=skip');
+  // Phase 3.10.9: ?debug=1 enables the legacy text HUD this test
+  // scrapes (the player-facing HUD is now DOM resource cards).
+  await page.goto('/?menu=skip&debug=1');
 
   const canvas = page.locator('#canvas');
   await expect(canvas).toBeVisible();
