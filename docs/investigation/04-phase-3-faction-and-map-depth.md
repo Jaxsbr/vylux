@@ -24,6 +24,7 @@
 | 3.8  | Fog of war + worker resource discovery (scouting)                        | ✅ Closed |
 | 3.9  | Game feel & presentation pass                                            | ✅ Closed |
 | 3.10 | In-game HUD / action-bar redesign (context-sensitive) + worker-build      | ✅ Closed |
+| 3.10.10 | Velocity-based steering + collision rewrite                          | Pending — queued before 3.11 |
 | 3.11 | Enemy AI faction(s) with distinct rosters _(repointed PvE)_              | Pending  |
 | 3.12 | Scenarios as data + seedable runs _(repointed PvE)_                      | Pending  |
 | 3.13 | PvE win conditions (survive-N-waves + scenario objective + resign)        | Pending  |
@@ -31,12 +32,13 @@
 
 Each row links to the design notes in the corresponding `### 3.N — ...` section below.
 
-### Session pickup — current sub-phase: 3.11 (PvE enemy AI faction)
+### Session pickup — current sub-phase: 3.10.10 (velocity-based steering + collision rewrite)
 
 A new session starting work on the next pending sub-phase should:
 
 1. **Read PRD §0 (the pivot notice) first.** Vylux is now single-player PvE; do not propose new lockstep / ladder / spectator work. `src/net/` is dormant.
-2. **Read the 3.11 section below** for scope, exit criterion, and sim-shape impact (now reframed for PvE).
+2. **Read the 3.10.10 section below** for scope, exit criterion, and sim-shape impact. (3.10.10 is queued *before* 3.11 because the current 3.10.9 collision pass shipped as an interim and playtest read it as "still messy" — a velocity-based steering layer is the right floor before adding more units / enemy faction shape on top.)
+3. **Read the 3.11 section below** for scope, exit criterion, and sim-shape impact (now reframed for PvE).
 3. **Read the closed sub-phase sections (3.0 through 3.10)** as worked examples — they show the standard work shape (types → state → commands → step → hash → AI → renderer → UI → tests → fixtures → verify gate). The work shape carries forward unchanged; only the *target* of the work has shifted.
 4. **Read the Sub-phase closing checklist** further down. Five items: tsc clean, vitest green (regen `tests/determinism/` if sim shape moved), playwright green, `docs/manual.md` updated if catalog changed, status table + decision log updated.
 5. **Sim-shape changes also bump `REPLAY_VERSION`** in `src/sim/replay.ts` — see the comment-header on that constant for the running history. Phase 3 is currently on v10 (after 3.10's worker-driven build).
@@ -470,6 +472,36 @@ The Phase 1 buildables panel was a flat always-on grid of every action the playe
 **Open scope decision:** how does the *first* Forge get built? Today the panel offers BUILD FORGE without requiring a worker selection. Routing buildings through worker-selected → BUILD changes the bootstrap flow (the player must train a worker first, then select it to build). That's the SC2 / AoE pattern and matches PRD §6.3 ("workers gather, deposit, **and repair**" — and by extension build). The alternative (HQ selected → BUILD options) is the AoE 4 / Anno pattern. Pick the worker-builder pattern unless playtest pushes back; documented in the closing notes.
 
 **Exit:** selecting an HQ shows only TRAIN WORKER; selecting a worker shows BUILD options + DUMP; selecting a Forge shows combat training; selecting a Spire shows research. The action bar is empty when nothing is selected. Disabled actions still show but explain why on hover. The player can complete a full match (train workers → build Forge → train raider → win) using the new bar.
+
+### 3.10.10 — Velocity-based steering + collision rewrite
+
+> **Queued 2026-05-08.** Sub-phases 3.10.8 (PvE-pivot cleanup) and 3.10.9 (game-feel pass v2) shipped under the existing point-mass movement model. 3.10.9 added a soft-collision separation pass — three tuning iterations (rigid axis-aligned, hard bounding-box, gentle RNG-perturbed) all stayed inside the limits of "no per-unit velocity stored," and the playtest read on the third iteration was still "messy." Rather than tune the same axis-aligned, no-velocity pass a fourth time, **3.10.10 rebuilds movement on a velocity-based steering layer.** This is the right floor before the 3.11 enemy-faction work lands more units in the same simulation.
+
+**Scope.**
+
+- **Per-unit velocity in `SimState`.** Add `vx, vy: Fixed` to the `UnitBase` shape (or a movement-relevant subset). Hashed alongside positions.
+- **Steering toward target.** Replace the Chebyshev `moveTowards` per-axis clamp with a desired-velocity computation: `desired = (targetPos - pos)` clamped to `maxSpeed`, then accelerate `v` toward `desired` by `accel * dt`. Per-kind `accel` and `maxSpeed` on `UnitStats` (workers ~lower accel, raiders ~higher accel + maxSpeed for the harasser feel).
+- **Velocity-based collision response.** When two units overlap, exchange a fraction of their velocity component along the connecting axis (deterministic, sqrt-free via dominant-axis approximation). Stationary units (defenders) reflect the moving unit's normal velocity rather than absorbing it. Workers in dump mode stay collision-exempt (3.10.9 rule preserved).
+- **Friction / damping.** Per-tick velocity decay so units come to rest gracefully when no movement input is present, instead of oscillating around their target. Without friction, the spring-like steering would jitter.
+- **Random kick on head-on collision.** When a pair of moving units collide with opposing velocity vectors, add a small sim-RNG perturbation to each unit's resulting velocity so a perfectly-aligned head-on encounter doesn't degenerate into a 1-D bounce-bounce-bounce loop (the "directional push back with randomness" Jaco's 2026-05-07 review called out).
+- **No new commands.** All movement input is still expressed via `MoveUnit`, `AssignWorkerToNode`, `BuildStructureByWorker`, etc. — only the *resolver* changes. The command-kind enum is untouched.
+
+**Sim shape.** Two new `Fixed` fields per unit (vx, vy) → `REPLAY_VERSION` bumps to 13; golden fixtures regenerate. `UnitStats` gains `accel` and (potentially) `maxSpeed` separated from the existing `speed` field. The current `applyUnitSeparation` pass is replaced (not augmented) by the velocity-based collision step inside `advanceUnit`.
+
+**Out of scope.**
+
+- Path-finding around obstacles (the current Chebyshev-style direct line is preserved; obstacle-avoidance is a 3.12+ scenario-shape problem).
+- Per-unit turn rate (we'll have units instantly face their velocity vector — that's enough to read on the iso projection).
+- Flocking / boid-style group cohesion. Tempting but YAGNI — the visual problem is "two workers stack invisibly" and the steering+separation should solve it.
+
+**Exit.**
+
+- Two workers commanded to the same node end up *side by side* at the node, not stacked, without visible jitter while either is moving.
+- Three workers commanded to the same node form a small natural triangle.
+- A raider walking head-on into another raider produces a visibly-resolved deflection (not a 1-D back-and-forth).
+- Harvest cycle still ticks: a player-faction worker assigned to a node still completes a full gather→return→deposit cycle within 25% of the pre-3.10.10 timing budget. (Some slowdown is acceptable because of friction / steering ramp-up.)
+- All Phase 2 lockstep / observer / desync / replay e2e gates still pass against the new sim shape.
+- Owner playtest read on a 3-minute match is "movement feels grounded; workers don't stack."
 
 ### 3.11 — Enemy AI faction(s) with distinct rosters _(repointed PvE)_
 

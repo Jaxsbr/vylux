@@ -30,11 +30,17 @@
 const ISO_R = Math.SQRT1_2; // cos(45°) = sin(45°) ≈ 0.7071
 
 function screenToWorldDelta(sx: number, sy: number): { worldDx: number; worldDz: number } {
-  // Camera right (world) = (+r, 0, -r); camera up-projection (world) =
-  // (+r, 0, +r). Screen-up corresponds to -sy, so the y contribution
-  // negates here.
-  const worldDx = (sx - sy) * ISO_R;
-  const worldDz = -(sx + sy) * ISO_R;
+  // Camera right (world) ≈ (+r, 0, -r); camera ground-up (world) ≈
+  // (-r, 0, -r) — i.e. screen-up reveals more of the world along
+  // (-x, -z) (toward the camera position), so screen-DOWN (+sy)
+  // moves the projected basis along (+r, 0, +r). Combined with the
+  // outer negation in panBy that flips drag-direction → target-shift,
+  // the net effect is: drag right pans along +x/-z (the player's
+  // perceived horizontal, from bottom-left to top-right of the iso
+  // grid); drag down pans along +x/+z (the player's perceived
+  // vertical, top-left to bottom-right).
+  const worldDx = (sx + sy) * ISO_R;
+  const worldDz = (-sx + sy) * ISO_R;
   return { worldDx, worldDz };
 }
 
