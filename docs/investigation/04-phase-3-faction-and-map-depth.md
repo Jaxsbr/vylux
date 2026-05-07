@@ -475,7 +475,7 @@ The Phase 1 buildables panel was a flat always-on grid of every action the playe
 
 ### 3.10.10 — Velocity-based steering + collision rewrite
 
-> **Queued 2026-05-08.** Sub-phases 3.10.8 (PvE-pivot cleanup) and 3.10.9 (game-feel pass v2) shipped under the existing point-mass movement model. 3.10.9 added a soft-collision separation pass — three tuning iterations (rigid axis-aligned, hard bounding-box, gentle RNG-perturbed) all stayed inside the limits of "no per-unit velocity stored," and the playtest read on the third iteration was still "messy." Rather than tune the same axis-aligned, no-velocity pass a fourth time, **3.10.10 rebuilds movement on a velocity-based steering layer.** This is the right floor before the 3.11 enemy-faction work lands more units in the same simulation.
+> **Queued 2026-05-08.** Sub-phases 3.10.8 (PvE-pivot cleanup) and 3.10.9 (game-feel pass v2) shipped under the existing point-mass movement model. 3.10.9 added a soft-collision separation pass — three tuning iterations (rigid axis-aligned, hard bounding-box, gentle RNG-perturbed) all stayed inside the limits of "no per-unit velocity stored," and the playtest read on the third iteration was still "messy." Rather than tune the same axis-aligned, no-velocity pass a fourth time, **the separation pass was reverted on 2026-05-08** (`REPLAY_VERSION` 12 → 13; golden fixtures regenerated; harvest-reach widening kept) and **3.10.10 will rebuild movement on a velocity-based steering layer.** This is the right floor before the 3.11 enemy-faction work lands more units in the same simulation. The HUD redesign + resource-node visual identity + iso-rotated camera pan from 3.10.9 are unaffected by the revert.
 
 **Scope.**
 

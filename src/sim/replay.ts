@@ -84,7 +84,15 @@ import type { InitialMatchSpec } from './state';
 // reflect both the move intent and the resolved overlap. Existing v11
 // replays still parse but no longer validate against the new sim;
 // golden fixtures regenerated.
-export const REPLAY_VERSION = 12;
+// Phase 3.10.9 partial revert (2026-05-08) bumps to v13. The
+// `applyUnitSeparation` pass and its constants were removed —
+// playtest read all three tuning iterations as worse than no
+// collision. Sim STATE shape is again unchanged; step semantics
+// revert to "advance only" (no separation). HARVEST_AT_NODE_REACH_SQ
+// (the widened movingToNode→harvesting transition) is kept. Golden
+// fixtures regenerated. Velocity-based steering + collision
+// rebuild lands in sub-phase 3.10.10.
+export const REPLAY_VERSION = 13;
 
 export interface ReplayLog {
   version: number;
