@@ -1,8 +1,8 @@
 # Vylux — Product Requirements Document
 
-> **Status:** Draft v5 (PvE pivot — single-player wave-defense + roguelike-run shape; competitive 1v1 / esport ambitions retired). Supersedes v4 (esport pivot) and the prototype-era PRD.
+> **Status:** Draft v5 (PvE pivot — single-player RTS PvAI with Rogue environmental pressure; competitive 1v1 / esport ambitions retired). Supersedes v4 (esport pivot) and the prototype-era PRD.
 > **Owner:** Jaco
-> **Last updated:** 2026-05-07 (Phase 3.0–3.10 implemented under the v4 esport direction; pivot to PvE landed same day; sub-phases 3.11–3.14 repointed)
+> **Last updated:** 2026-05-08 (PvE-shape refinement on the 2026-05-07 pivot: RTS PvAI duel + Rogue mob spawns, replacing the wave-defense framing; 3.11 split into 3.11a/3.11b)
 
 ---
 
@@ -10,11 +10,15 @@
 
 Vylux was originally pitched as a **competitive 1v1 RTS aimed at Steam release with a credible esport footprint**. Phases 0, 1, 2 and sub-phases 3.0–3.10 were built against that target. As of 2026-05-07 the direction has changed:
 
-- **Vylux is now a single-player PvE Tron-grid RTS**, structured around **wave-defense + roguelike runs**: hold the grid against escalating waves of enemy raiders, pick tech upgrades between waves, survive the run, restart with new seeds and unlocks.
+- **Vylux is now a single-player Tron-grid RTS**, structured as **player-vs-AI skirmish on a deterministic sim**, with **Rogue environmental mob spawns** layering continuous neutral-hostile pressure on both sides over the course of a match.
+- **Both factions are playable.** The player picks **Pulse (Swarm)** or **Forge (Siege)** on the main menu; the AI plays the **opposing** faction. The asymmetry is genuine — Pulse is fast / fragile / many; Forge is slow / heavy / few. They share UI architecture but nothing else (roster, voice, colour, motion personality all diverge).
+- **Win condition: destroy the enemy AI faction's HQ.** Loss: own HQ destroyed, or resign. Rogues are *not* a win/lose target — they are environmental pressure that compresses the time both sides have to out-RTS each other.
 - The **deterministic sim, the Tron aesthetic, the catalog (workers / forge / spire / pylon / fog / supply / colour resource / action bar), the AI scaffolding, and the renderer** all carry across the pivot unchanged. The pivot is a *design* shift, not a technical rewrite.
 - The **lockstep / WebRTC / observer multiplayer code** under `src/net/` is **dormant**: preserved for optionality (so we don't pay to delete and rebuild), but **not on the active surface**. No new esport / ladder / spectator / matchmaking work happens without a fresh pivot conversation.
 - The **mechanical-mastery / keyboard-first pillar** (formerly §3.8) is **softened, not retired**: good keyboard control still matters, but full rebindable parity is no longer a launch-blocking commitment. Hotkeys for common actions stay.
-- The **Phase 8 plan is replanned** for Phases 4 and 5 (run loop & meta-progression, then content + optional Steam release). Phases 0–3 remain accurate as a historical record of how we got here; the closed sub-phases (0.x, 1.x, 2.x, 3.0–3.10) are not re-litigated.
+- The **Phase 8 plan is replanned** for Phases 4 and 5 (meta-progression around the PvAI run, then content + optional Steam release). Phases 0–3 remain accurate as a historical record of how we got here; the closed sub-phases (0.x, 1.x, 2.x, 3.0–3.10) are not re-litigated.
+
+> **2026-05-08 — refinement on the pivot.** The 2026-05-07 pivot landed as "single-player PvE wave-defense + roguelike runs." The 2026-05-08 refinement narrows that toward **RTS PvAI + Rogue mob spawns**: the *RTS soul* of the game survives (you still beat an opposing faction to win), and Rogues replace the "scheduled enemy waves" framing as the source of run-pressure. The roguelike-run / between-wave-tech-pick shape is **deferred to Phase 4** rather than landing as part of Phase 3; Phase 3 ships the PvAI skirmish + Rogue environmental layer, and Phase 4 layers meta-progression on top. Sub-phase 3.11 is split into **3.11a** (faction identity & menu — player-pickable, themed UI, persisted choice) and **3.11b** (opposing AI faction + skirmish PvAI win condition).
 
 The prior decision-log entries below — and in `docs/investigation/04-phase-3-faction-and-map-depth.md` — are kept intact as the historical record. Where the current text contradicts a prior entry, the current text wins.
 
@@ -81,19 +85,24 @@ Tron neon-on-charcoal, high-contrast silhouettes, readable at a glance. **No** p
 
 ### 3.5 Depth via asymmetry, not breadth _(was §3.6 in v4)_
 
-Two **gameplay shapes** at launch — the player faction and the enemy AI faction — with **meaningfully different macros** (build-order pressure, unit composition, threat profile) beat six factions with cosmetic differences. The enemy faction(s) are not "just the player faction wearing red" — they have different rosters, different threat curves, different "scary moments" in the run. Adding a second *playable* faction is a stretch (Phase 5+); the first commitment is shipping one playable faction against multiple distinct enemy factions / waves.
+Two **playable factions** at launch — **Pulse (Swarm)** and **Forge (Siege)** — with **meaningfully different macros** (build-order pressure, unit composition, threat profile). The player picks one on the main menu; the AI plays the opposing faction. The asymmetry is genuine — Pulse is fast / fragile / many; Forge is slow / heavy / few. They share **UI architecture** (HUD layout, action bar, build cards) but nothing else: distinct rosters, distinct visual language (cyan vs red, thin/sharp vs heavy/blocky), distinct copy voice (plural-electric vs singular-weighted), distinct AI personalities. They are **not** "the same faction in different colours."
 
-### 3.6 Run-loop pacing is the design centre
+Layered on top of the duel: **Rogue mob spawns** — environmental, neutral-hostile, attacks both sides equally. Rogues create the "scary moments in a run" that earlier framings put on enemy waves; here they emerge from continuous pressure rather than a scheduled curve.
 
-The single most important design lens, and the one most different from v4. A Vylux run is built around a **rhythm of build → wave → recover → tech → harder wave → escalation → climax**. Specifically:
+Six factions with cosmetic differences would beat two real ones; we have two real ones. A third *playable* faction is a Phase 5+ stretch.
 
-- **Build phase** (early): worker economy, first defensive structures, scout the map. ~2–4 minutes of mostly-uninterrupted setup. Gentle early waves to teach without punishing.
-- **Wave phase**: enemy raiders attack from a known direction at a known cadence. The player reads the wave, positions defenders, holds.
-- **Recovery / tech phase**: between waves the player re-economies, repairs, picks a tech upgrade from a small offered set (roguelike-flavour: 3 random options, pick 1).
-- **Escalation**: each wave is harder than the last; resource pressure grows; map control matters more.
-- **Climax**: a final boss-wave or scenario-specific objective, after which the run ends in survival or defeat.
+### 3.6 Match pacing is the design centre
 
-The run is paced so a player who is paying attention can survive; a player who isn't makes mistakes that compound. The pacing curve, not the unit balance, is the load-bearing tuning surface.
+The single most important design lens, and the one most different from v4. A Vylux match is built around a **PvAI duel under continuous Rogue pressure**: both sides build economy, expand, engage, and try to land the killing blow on the other's HQ before Rogue attrition makes the position untenable. Specifically:
+
+- **Opening** (~2–4 min): worker economy, first defensive structures, scout the map. Light Rogue pressure — enough to teach Rogue behaviour without punishing.
+- **Mid-game**: Rogue spawns intensify; both Player and AI must commit forces to defending while still pressing for map control. Tier-2 research is a real timing decision.
+- **Late-game**: Rogue pressure compresses the safe-turtling window. The match resolves in a window where one side commits to an HQ push or attrition forces a mistake.
+- **Resolution**: one HQ falls. No hard timer; no dominance tick.
+
+The run is paced so a player who is paying attention can read both the AI's macro and the Rogue spawn cadence; a player who isn't makes mistakes that compound. The pacing curve, not the unit balance, is the load-bearing tuning surface.
+
+Roguelike between-match meta-progression (unlocks across runs) is layered in **Phase 4**. Between-*match* tech-pick screens are not a Phase 3 commitment.
 
 ### 3.7 Mechanical accessibility, not mastery _(softened from v4 §3.8)_
 
@@ -121,7 +130,7 @@ Three personas, replacing v4's ladder-climber / aspiring-pro / curious-tourist s
 |---|---|---|
 | **Run Player** | A 15–20 minute run that has shape (build, escalate, climax). Variety across runs (different seeds / scenarios / picks). A fair death they can read. | Phase 4 onward (the run-loop is what Phase 4 *is*). |
 | **Tinker / Optimiser** | Multiple viable strategies, meaningful tech-pick decisions, a small unlock tree that opens up over hours. Replays of their best runs (downloadable, not shared). | Phase 4 + 5 — meta-progression + content. |
-| **Curious Tourist** | A playable web build, a 5-minute "what is this" path, a scenario that doesn't require tutorialisation to enjoy. | Phase 3.13 onward (PvE win conditions land an honest first run). |
+| **Curious Tourist** | A playable web build, a 5-minute "what is this" path, a scenario that doesn't require tutorialisation to enjoy. | Phase 3.11b onward (skirmish win condition lands an honest first match; 3.13 adds Rogue pressure). |
 
 The **competitive ladder player and aspiring pro are not in scope** — that was the v4 audience. They're welcome to play but the game isn't tuned for them.
 
@@ -129,13 +138,12 @@ The **competitive ladder player and aspiring pro are not in scope** — that was
 
 ### In scope (target launch shape, web build first)
 
-- **Single-player PvE.** Player vs scripted enemy AI on the deterministic sim.
-- **Wave-defense + roguelike-run structure.** A run is a sequence of waves on a chosen scenario; between waves the player picks one of three offered tech upgrades.
-- **One playable faction at launch.** With distinct units, structures, tech tree, energy-dump mechanic. Phase 5 stretch: second playable faction.
-- **Multiple enemy AI factions.** At least two distinct enemy compositions (e.g. "Pulse swarm — fast, fragile, many" and "Forge siege — slow, heavy, few"). Different waves draw from different enemy factions.
+- **Single-player PvAI skirmish.** Player vs scripted enemy AI on the deterministic sim. Win = destroy enemy HQ; lose = own HQ destroyed or resign.
+- **Two playable factions at launch.** **Pulse (Swarm)** — fast / fragile / many. **Forge (Siege)** — slow / heavy / few. The player picks one on the main menu; the AI plays the opposing faction. Choice persists across visits.
+- **Rogue environmental mob spawns.** Continuous neutral-hostile spawns that pressure both Player and AI from neutral spawn points. **Not a third faction** — no Rogue HQ, no "kill all Rogues" win condition. Rogues exist to compress the time both sides have to out-RTS each other.
+- **Roguelike meta-progression on top of the run.** Between-run unlocks (new tech options, new scenarios, new starting conditions). Between-*match* tech-pick screens are deferred to Phase 4 — they are not a Phase 3 commitment.
 - **3–6 hand-tuned scenarios.** Open arena, bottleneck, three-flux, asymmetric defender, plus 1–2 stretch (gauntlet, boss).
-- **Tech-pick screen between waves.** Roguelike-style 3-of-N offered upgrades; choices accumulate within a run.
-- **Meta-progression.** Persistent unlocks across runs (new tech options, new scenarios, new starting conditions). Not pay-to-progress; just "play more, see more."
+- **Meta-progression.** Persistent unlocks across runs (new tech options, new scenarios, new starting conditions). Not pay-to-progress; just "play more, see more." Lands in Phase 4.
 - **Save / resume.** A run can be saved and resumed (free from determinism — `(seed, command_log)`).
 - **Replays.** Per-run JSON download; headless replay tool. Not a shared social feature.
 - **AI opponent at 2–3 difficulty tiers.** "Easy / standard / hard" per scenario.
@@ -166,20 +174,20 @@ The **competitive ladder player and aspiring pro are not in scope** — that was
 - Microtransactions of any kind.
 - Mod tooling or custom scenario editor for end users (we author scenarios; players play them).
 
-## 6. The match — PvE surface
+## 6. The match — PvAI surface
 
-This section is opinionated. It commits to the **shape** of a run — what systems exist, what they do, how they interact. Concrete numbers (HP, damage, costs, gather rates, tick budgets, wave compositions) are deferred to design docs that come during sub-phases 3.11–3.14 and Phase 4.
+This section is opinionated. It commits to the **shape** of a match — what systems exist, what they do, how they interact. Concrete numbers (HP, damage, costs, gather rates, tick budgets, Rogue spawn cadences) are deferred to design docs that come during sub-phases 3.11–3.14 and Phase 4.
 
 > **Current catalog of what's actually in the game** (units, structures, resources, tech, controls, the launch map): see [`docs/manual.md`](../manual.md). This PRD describes the design intent; the manual describes the current shipped state. They diverge by design — the PRD is forward-looking, the manual is current. When a sub-phase ships a change, the manual updates with it; the PRD updates only when the design intent itself shifts.
 
-The current build's "race to 100 points or HQ destruction" is **not** the run-loop shape. It's the holdover from when this was a competitive 1v1 game; sub-phase 3.13 replaces it with the wave-based shape below.
+The current build's "race to 100 points or HQ destruction" is **not** the match shape. The 100-point race is a holdover from when this was a competitive 1v1 game; sub-phase 3.11b drops it and ships destroy-enemy-HQ as the working win condition. Sub-phase 3.13 layers Rogue mob spawns on top.
 
 ### 6.1 Length & pacing
 
-- **Run length target:** 12–20 minutes for a successful run; 5–15 for a failed one. Long enough for tech decisions, short enough that "one more run" is a tractable ask.
-- **Wave cadence:** 60–90 seconds between waves at the start, narrowing as the run progresses. Final 2–3 waves come faster, putting the player in genuine resource pressure.
-- **Pacing rewards reading the wave.** A player who scouts the next wave's composition and re-positions accordingly outperforms a player who plays the same opener every time. Pacing is **playtest-driven**, not a hard metric.
-- **No hard timer.** v4 had a 25-minute timer to prevent esport stalemates; PvE has no such concern. The run ends when the player wins, dies, or quits.
+- **Match length target:** 12–20 minutes for a hard-fought match; 5–15 for a one-sided one. Long enough for tier-2 tech decisions, short enough that "one more match" is a tractable ask.
+- **Rogue spawn cadence:** Rogue mobs spawn on a deterministic schedule that pressures both sides equally. Cadence intensifies over the course of a match — early Rogues are a teaching nuisance, late Rogues are a real threat to an under-defended position.
+- **Pacing rewards reading both the AI and the Rogues.** A player who scouts the AI's tech choices, watches Rogue spawn directions, and re-positions accordingly outperforms a player who plays the same opener every time. Pacing is **playtest-driven**, not a hard metric.
+- **No hard timer.** v4 had a 25-minute timer to prevent esport stalemates; the PvAI + Rogue model has no such concern (Rogue pressure makes infinite turtling untenable). The match ends when one HQ falls, the player resigns, or the player quits.
 
 ### 6.2 Information model — fog of war _(unchanged from v4 §6.2)_
 
@@ -199,7 +207,7 @@ Vylux ships with **partial fog of war**. The terrain (the grid itself, energy no
 
 The **deposit-based gather loop** (gather → return-to-dropoff → unload) stays. Workers don't trickle.
 
-In PvE, **enemy raids on your harvesters** become a primary failure mode. A player who doesn't defend their workers loses their economy mid-wave; a player who garrisons the right node holds.
+In PvAI + Rogue, **harasser pressure on your harvesters** is a primary failure mode — both AI raiders and Rogue mobs target undefended workers. A player who doesn't garrison the right nodes loses their economy mid-fight.
 
 ### 6.4 Tech & production _(unchanged from v4 §6.4)_
 
@@ -208,53 +216,55 @@ Production is **building-gated, not HQ-only**:
 - **Production buildings** (Forge for combat units, Spire for research, Pylon for supply) — already shipped in Phase 3.0–3.10.
 - **Tech tiers**: Tier 1 from the start, Tier 2 unlocked at the Spire.
 
-In PvE, the tier-2 research becomes a **strategic timing decision**: spend 80 ticks researching now and you're vulnerable to the wave that lands at tick T+80; delay and you face wave N+1 with tier-1 only.
+In PvAI + Rogue, tier-2 research is a **strategic timing decision**: spend 80 ticks researching now and you're vulnerable to whichever Rogue spawn or AI push lands at tick T+80; delay and you fight the next pressure window with tier-1 only.
 
 ### 6.5 Counter structure — units & roles _(largely unchanged from v4 §6.5)_
 
-Three role primitives every wave fields, plus tech-tier counters:
-- **Eco** — workers (player only; enemy waves don't have eco units).
+Three role primitives both factions field, plus tech-tier counters:
+- **Eco** — workers (both factions; harvesters drive the economy).
 - **Frontline** — high HP, holds choke points.
 - **Harass** — low HP, fast, punishes scattered economy.
 - **Specialist** (tier 2+) — siege, anti-frontline, support.
 
-The counter triangle still applies: frontline counters harass, harass counters eco, eco runs from everything. The PvE twist: the **enemy waves are designed to test specific player decisions**. A "pure-harass" wave punishes a player who built only frontline; a "siege" wave punishes a turtle that didn't expand.
+The counter triangle still applies: frontline counters harass, harass counters eco, eco runs from everything. The PvAI twist: **the AI's faction commits it to a known shape** — a Pulse AI is going to bring harass-and-pressure; a Forge AI is going to bring slow-heavy push. Reading the matchup and building counters is the core strategic loop. Rogues add a *third axis*: their composition tilts toward a specific role each spawn (a Rogue harass-cluster punishes turtles that ignored mobile defense; a Rogue siege-cluster punishes positions without anti-armour) — so even a player who has read the AI correctly still has to react to Rogue cadence.
 
 ### 6.6 Map / scenario model
 
 - **Tile-based, isometric.** The grid stays. No height/elevation in launch scope.
-- **Scenarios as data.** A scenario is `(map_layout, starting_resources, wave_schedule, win_condition)` — all data, not code. Sub-phase 3.12 lifts this out of `main.ts`'s hardcoded SPEC.
-- **Hand-tuned + seeded.** Map layouts are hand-tuned; per-run variation comes from **seed-driven wave composition + tech-offer rolls**, not procedural map generation.
+- **Scenarios as data.** A scenario is `(map_layout, starting_resources, ai_faction, rogue_schedule, win_condition, seed)` — all data, not code. Sub-phase 3.12 lifts this out of `main.ts`'s hardcoded SPEC.
+- **Hand-tuned + seeded.** Map layouts are hand-tuned; per-run variation comes from **seed-driven Rogue spawn composition + AI build-order rolls**, not procedural map generation.
 - **3–6 launch scenarios** with distinct shapes:
-  - **Open arena** — symmetric, no choke. Tests army composition.
-  - **Bottleneck** — central choke. Frontline-favoured.
-  - **Three-flux** — three contested Flux nodes. Tests map-control decisions.
-  - **Gauntlet** (stretch) — narrowing arena, waves push you back.
-  - **Boss** (stretch) — single high-HP enemy unit with a designed mechanic.
+  - **Open arena** — symmetric, no choke. Tests army composition and direct PvAI engagement.
+  - **Bottleneck** — central choke. Frontline-favoured; Rogues spawn from neutral edges and force commitments away from the choke.
+  - **Three-flux** — three contested Flux nodes. Tests map-control decisions; Rogues contest the third Flux.
+  - **Gauntlet** (stretch) — narrowing arena, Rogues push both sides toward each other.
+  - **Boss** (stretch) — a single Rogue boss-mob spawns mid-match with a designed mechanic. Both Player and AI must contend with it; whoever survives the boss wave with HQ intact is positioned to close the match.
 
 ### 6.7 Win & loss conditions
 
-PvE win conditions, replacing v4's military-elimination-or-dominance set:
+Skirmish PvAI win conditions, replacing both v4's military-elimination-or-dominance set and the 2026-05-07-pivot's survive-N-waves framing:
 
-1. **Survive the scheduled waves.** The run has a defined wave count (e.g. 8 waves on standard, 12 on hard). Surviving the final wave wins the run.
-2. **Complete the scenario objective.** Some scenarios have a custom objective: hold a specific node for N waves, escort a structure to a destination, destroy an enemy spawner. Scenario-defined.
-3. **Defeat the boss** (boss-scenarios only). Final wave is a single boss enemy with a designed mechanic.
+1. **Destroy the enemy AI faction's HQ.** Primary win condition. Both Player and AI start with one HQ; whoever loses theirs first loses the match. This is the working model for Phase 3 and is preserved into Phase 4.
+2. **Complete the scenario objective** (optional, per scenario). Hold a specific node, control a contested Flux for N ticks, escort a structure to a destination. Scenario-defined; layered on top of the HQ-destroy default, not a replacement.
 
 Loss conditions:
-- **HQ destroyed** → defeat.
-- **All combat-capable units killed and HQ defenseless mid-wave** → defeat (functionally the same as above; just faster).
-- **Resign** is a first-class action (already planned, lands when win-conditions land in 3.13). Replays save on resign.
+- **Own HQ destroyed** → defeat.
+- **Resign** is a first-class action (CommandKind slot 13; lands in 3.11b). Replays save on resign.
+
+**Rogues are not a win/lose target.** They spawn continuously, attack both Player and AI equally, and the run is *not* gated on killing them all. There is no Rogue HQ, no "Rogue king," no "kill all Rogues" condition. Rogues exist purely to compress the time both sides have to out-RTS each other and to make turtling expensive.
 
 There is **no hard timer**. There is no "dominance tick." Both were esport scaffolding.
 
-### 6.8 Run-pressure curve _(replaces v4 §6.8)_
+### 6.8 Match-pressure curve _(replaces v4 §6.8)_
 
-Pressure comes from **wave escalation and resource scarcity**, not from a dominance clock.
+Pressure comes from **AI macro + Rogue cadence + resource scarcity**, not from a dominance clock.
 
-- **Wave difficulty scales** non-linearly: waves 1–3 are gentle, 4–6 punishing, 7+ require real preparation.
-- **Resource nodes deplete** mid-run. The player who didn't expand by wave 5 runs out of Energy at wave 7. Expansion is a real decision under pressure.
-- **Tech picks compound.** A "1.5× harvest rate" pick early sets up a different mid-game than "+50% defender HP." Variety across runs comes from the pick path, not just the seed.
-- **Comebacks come from positional play and lucky tech picks.** A player who lost their main base but holds a forward Forge with a strong tech-pick stack can claw back. There is no rubber-band buff.
+- **Rogue spawn intensity scales** non-linearly: early spawns are gentle, mid-match spawns punishing, late spawns require real preparation. The AI faces the same curve.
+- **Resource nodes deplete** mid-match. The side that didn't expand early runs out of Energy mid-match. Expansion is a real decision under pressure.
+- **AI macro choices compound.** A Forge AI that got its tier-2 research up early plays a different mid-game than one that committed to mass tier-1. Variety across matches comes from the AI's seeded build paths and Rogue composition, not just the map.
+- **Comebacks come from positional play and clever Rogue redirection.** A player who lost their main base but holds a forward Forge can claw back if they read Rogue spawn directions correctly and let Rogues attrit the AI. There is no rubber-band buff.
+
+(Roguelike between-*match* tech-pick compounding is a Phase 4 commitment, not a Phase 3 one.)
 
 ### 6.9 Control & input _(replaces v4 §6.9; aligned with new §3.7)_
 
@@ -293,17 +303,18 @@ Prototype gameplay (HQ, workers, energy, three units) ported onto the determinis
 **Phase 2 — Multiplayer Alpha** _(closed pre-pivot, now dormant)_
 Lockstep over WebRTC, relay server, observer prototype. **The code works and tests pass; it is not on the active product surface.** Don't extend without re-pitching the pivot. See `docs/investigation/03-phase-2-multiplayer-alpha.md`.
 
-**Phase 3 — Faction & Map Depth** _(active — 3.0–3.10 closed; 3.11–3.14 repointed for PvE)_
-Mechanical depth: structures, two-resource economy, fog, supply, action bar, worker-driven building. The remaining sub-phases pivot toward the PvE shape:
-- 3.11 — enemy AI faction(s) — distinct rosters / threat profiles, not "your faction in red".
+**Phase 3 — Faction & Map Depth** _(active — 3.0–3.10 closed; 3.11–3.14 repointed for the 2026-05-07 pivot, refined 2026-05-08)_
+Mechanical depth: structures, two-resource economy, fog, supply, action bar, worker-driven building. The remaining sub-phases pivot toward the RTS-PvAI + Rogue shape:
+- 3.11a — faction identity & menu (player picks Pulse/Forge; themed HUD + end-screens; persisted choice; dramatic selector).
+- 3.11b — opposing AI faction + skirmish PvAI win condition (AI plays the un-picked faction; destroy-enemy-HQ win; resign command).
 - 3.12 — scenarios as data + seedable runs (lifts SPEC out of `main.ts`).
-- 3.13 — PvE win conditions: survive-N-waves + scenario objective + resign.
-- 3.14 — playtest gate: "is the loop fun" — ≥20 internal runs across scenarios; player wants to start another run.
+- 3.13 — Rogue environmental mob spawn system (continuous neutral-hostile pressure on both sides; not a third faction; not a win/lose target).
+- 3.14 — playtest gate: "is the loop fun" — ≥20 internal matches across both faction-picks; player wants to start another match.
 
 See `docs/investigation/04-phase-3-faction-and-map-depth.md` for sub-phase detail.
 
 **Phase 4 — Run loop & meta-progression**
-Roguelike skeleton: between-wave tech-pick screen, per-run upgrade tree, persistent unlocks across runs. Save / resume. Difficulty tiers per scenario. AI tuning per difficulty. Exit: a player can complete 5 distinct successful runs across scenarios + difficulties; meta-unlock economy feels worth pursuing in playtest.
+Roguelike skeleton on top of the PvAI + Rogue match: per-match tech-pick screens, per-run upgrade tree, persistent unlocks across runs. Save / resume. Difficulty tiers per scenario (AI strength + Rogue cadence). AI tuning per difficulty. Exit: a player can complete 5 distinct successful runs across scenarios + difficulties; meta-unlock economy feels worth pursuing in playtest.
 
 **Phase 5 — Content + optional Steam release**
 Hand-tune the full launch scenario set (3–6 distinct shapes); polish; tutorial-by-design (the first scenario teaches without a tutorial UI); audio polish; main-menu run-history view. **Optional:** Tauri/Electron wrap for Steam release if and only if the web build has demonstrated organic interest; this is a stretch goal, not a Phase 5 commitment. Exit: launch-ready web build that a player can find, play, and finish without prior context.
@@ -317,7 +328,7 @@ Hand-tune the full launch scenario set (3–6 distinct shapes); polish; tutorial
 1. **The PvE design isn't fun.** This is the biggest risk by a wide margin. The competitive 1v1 risk was "can we ship it"; the PvE risk is "do people enjoy it once we do." Mitigation: ship a playable run-loop end-to-end fast (sub-phases 3.11–3.13 + a thin Phase 4) and put it in front of real players before authoring 3+ scenarios. If the loop isn't fun at one scenario, no amount of content fixes it.
 2. **Scope blowout via meta-progression.** Roguelike unlock trees are bottomless. Mitigation: the launch unlock tree caps at ~20 nodes. Not 200. We commit to that number in Phase 4's investigation doc.
 3. **Solo-dev throughput.** Same as v4. Mitigation: the PvE pivot reduces the *required* scope (no ladder, no matchmaking, no spectator) by more than it adds (run-loop + meta + scenario authoring). Net throughput should improve.
-4. **Determinism regression during PvE work.** Sub-phases 3.11–3.13 still touch `SimState` (enemy faction state, wave scheduler state, win-condition state). Same mitigation as Phase 3 generally: regenerate fixtures at each sub-phase close, accept mid-flight cross-OS flakiness.
+4. **Determinism regression during PvE work.** Sub-phases 3.11b–3.13 still touch `SimState` (opposing-faction state, Rogue spawner state, win-condition state). Same mitigation as Phase 3 generally: regenerate fixtures at each sub-phase close, accept mid-flight cross-OS flakiness.
 5. **The competitive RTS market is crowded** _(carried from v4)._ Less relevant post-pivot — PvE indie RTS is a less-saturated niche (They Are Billions, Northgard, Tooth and Tail). Still: don't pretend we have a guaranteed audience.
 6. **Engagement-fatigue without multiplayer**. v4's bet was "multiplayer drives long-tail engagement." PvE replaces that with "roguelike replayability." If the seed/pick variety isn't enough, players bounce after 2–3 runs. Mitigation: meta-progression unlocks are the primary lever; scenario variety is secondary.
 
