@@ -180,7 +180,7 @@ export class AudioManager {
   // Phase 3.11a — main-menu faction-switch. Low thump (impact) layered
   // with a faction-coloured chime that arrives ~120ms later, matching
   // the handover timeline (TRIGGER → WASH PEAK).
-  factionSwitch(towardId: 'pulse' | 'forge'): void {
+  factionSwitch(towardId: 'swarm' | 'siege'): void {
     if (this.muted) return;
     const ctx = this.ensureContext();
     if (!ctx || !this.master) return;
@@ -196,14 +196,14 @@ export class AudioManager {
       startAt: t0,
     });
     // Arrival chime — Pulse pings high + bright; Forge tolls low + heavy.
-    const arrivalFreq = towardId === 'pulse' ? 1180 : 330;
+    const arrivalFreq = towardId === 'swarm' ? 1180 : 330;
     this.tone(ctx, this.master, {
       frequency: arrivalFreq,
       durationSec: 0.30,
       attackSec: 0.01,
       releaseSec: 0.26,
       gain: 0.20,
-      type: towardId === 'pulse' ? 'triangle' : 'sawtooth',
+      type: towardId === 'swarm' ? 'triangle' : 'sawtooth',
       startAt: t0 + 0.12,
     });
   }

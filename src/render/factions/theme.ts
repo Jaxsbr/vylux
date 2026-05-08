@@ -1,20 +1,28 @@
 // Phase 3.11a — Per-faction theme.
+// Phase 3.11b (2026-05-08 rename) — `'pulse' | 'forge'` faction-id
+// strings retired; the canonical IDs now match the display names:
+// `'swarm' | 'siege'`. The Forge production-structure kind in the sim
+// is unrelated and untouched.
 //
 // Single source of truth for the faction-identity layer that landed
 // from `tmp-handover-design/` (Claude Design output): palette, type
 // weights + tracking, voice copy, victory / defeat strings.
 //
 // Read by: main menu (selector), in-game HUD (action bar + resource
-// bar tints), end-of-match overlay. The deterministic sim is unaware
-// of which faction the player chose — the choice is presentation only.
+// bar tints), end-of-match overlay. The deterministic sim now also
+// stores `factionId` on FactionState (3.11b) so per-faction stat
+// overrides can be looked up; presentation still owns the palette.
 //
 // Faction id mapping (sim ↔ menu):
-//   Faction 0 (cyan / `blue` colour pool) ↔ 'pulse' (Swarm)
-//   Faction 1 (red  / `red`  colour pool) ↔ 'forge' (Siege)
+//   Faction 0 (cyan / `blue` colour pool) ↔ 'swarm'
+//   Faction 1 (red  / `red`  colour pool) ↔ 'siege'
 
-import type { Faction } from '../../sim/types';
+import type { Faction, FactionId } from '../../sim/types';
 
-export type FactionId = 'pulse' | 'forge';
+// Re-exported here so the menu / HUD layers don't have to reach into
+// `sim/types` directly — keeps the "render reads from sim, sim doesn't
+// reach into render" dependency direction clean.
+export type { FactionId } from '../../sim/types';
 
 export interface FactionTheme {
   readonly id: FactionId;
@@ -47,7 +55,7 @@ export const VY_INK = '#dfe8ee';
 export const VY_PANEL = 'rgba(7,9,12,0.78)';
 
 // Resource info colours stay constant across factions for legibility —
-// a Forge player still reads green Flux as Flux. The handover calls
+// a Siege player still reads green Flux as Flux. The handover calls
 // these out as invariants.
 export const RESOURCE_COLOR = {
   energy: '#ffd34a',
@@ -56,8 +64,8 @@ export const RESOURCE_COLOR = {
   supply: '#b6e8ff',
 } as const;
 
-export const PULSE_THEME: FactionTheme = {
-  id: 'pulse',
+export const SWARM_THEME: FactionTheme = {
+  id: 'swarm',
   faction: 0,
   name: 'SWARM',
   primary:   '#00e5ff',
@@ -88,8 +96,8 @@ export const PULSE_THEME: FactionTheme = {
   defeat:  'THE CURRENT BREAKS',
 };
 
-export const FORGE_THEME: FactionTheme = {
-  id: 'forge',
+export const SIEGE_THEME: FactionTheme = {
+  id: 'siege',
   faction: 1,
   name: 'SIEGE',
   primary:   '#ff4a1a',
@@ -121,8 +129,8 @@ export const FORGE_THEME: FactionTheme = {
 };
 
 export const FACTION_THEMES: Record<FactionId, FactionTheme> = {
-  pulse: PULSE_THEME,
-  forge: FORGE_THEME,
+  swarm: SWARM_THEME,
+  siege: SIEGE_THEME,
 };
 
 export function themeForId(id: FactionId): FactionTheme {
@@ -130,13 +138,17 @@ export function themeForId(id: FactionId): FactionTheme {
 }
 
 export function themeForFaction(f: Faction): FactionTheme {
-  return f === 0 ? PULSE_THEME : FORGE_THEME;
+  return f === 0 ? SWARM_THEME : SIEGE_THEME;
 }
 
 export function opposingTheme(of: FactionTheme): FactionTheme {
-  return of.id === 'pulse' ? FORGE_THEME : PULSE_THEME;
+  return of.id === 'swarm' ? SIEGE_THEME : SWARM_THEME;
 }
 
 export function factionFromId(id: FactionId): Faction {
-  return id === 'pulse' ? 0 : 1;
+  return id === 'swarm' ? 0 : 1;
+}
+
+export function opposingId(id: FactionId): FactionId {
+  return id === 'swarm' ? 'siege' : 'swarm';
 }

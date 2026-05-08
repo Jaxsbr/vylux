@@ -2,7 +2,7 @@
 
 > **Status:** Draft v5 (PvE pivot — single-player RTS PvAI with Rogue environmental pressure; competitive 1v1 / esport ambitions retired). Supersedes v4 (esport pivot) and the prototype-era PRD.
 > **Owner:** Jaco
-> **Last updated:** 2026-05-08 (PvE-shape refinement on the 2026-05-07 pivot: RTS PvAI duel + Rogue mob spawns, replacing the wave-defense framing; 3.11 split into 3.11a/3.11b)
+> **Last updated:** 2026-05-08 (3.11a closed; 3.11b first cut landed — faction-id rename swarm/siege, factionId on FactionState, shared-table-with-overrides, worker speed/harvest asymmetry as proof; replay v19)
 
 ---
 
@@ -305,8 +305,8 @@ Lockstep over WebRTC, relay server, observer prototype. **The code works and tes
 
 **Phase 3 — Faction & Map Depth** _(active — 3.0–3.10 closed; 3.11–3.14 repointed for the 2026-05-07 pivot, refined 2026-05-08)_
 Mechanical depth: structures, two-resource economy, fog, supply, action bar, worker-driven building. The remaining sub-phases pivot toward the RTS-PvAI + Rogue shape:
-- 3.11a — faction identity & menu (player picks Pulse/Forge; themed HUD + end-screens; persisted choice; dramatic selector).
-- 3.11b — opposing AI faction + skirmish PvAI win condition (AI plays the un-picked faction; destroy-enemy-HQ win; resign command).
+- 3.11a — faction identity & menu (player picks Swarm/Siege; themed HUD + end-screens; persisted choice; dramatic selector).
+- 3.11b — opposing AI faction + skirmish PvAI win condition (AI plays the un-picked faction; destroy-enemy-HQ win; resign command). **First cut landed 2026-05-08:** faction-id rename to swarm/siege, `factionId` discriminator on `FactionState` (hashed; replay v18→v19), shared-table-with-overrides in `units-config.ts`, worker speed/harvest asymmetry as proof. Resign command + 100-point-threshold drop + per-kind asymmetry + faction-aware AI macro still to come before close.
 - 3.12 — scenarios as data + seedable runs (lifts SPEC out of `main.ts`).
 - 3.13 — Rogue environmental mob spawn system (continuous neutral-hostile pressure on both sides; not a third faction; not a win/lose target).
 - 3.14 — playtest gate: "is the loop fun" — ≥20 internal matches across both faction-picks; player wants to start another match.

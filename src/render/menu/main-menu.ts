@@ -1,11 +1,13 @@
 // Phase 3.11a — Main menu with faction selector.
+// Phase 3.11b (2026-05-08 rename) — `'pulse' | 'forge'` faction ids
+// retired in favour of `'swarm' | 'siege'` so the identifiers match
+// the display names. The Forge production-structure kind in the sim
+// is unrelated and untouched.
 //
-// Replaces the placeholder "FACTION = PULSE (cyan)" label with a
-// dual-tile faction picker: PULSE (Swarm) on the left, FORGE (Siege)
-// on the right. The selected tile dominates (scale, glow, particles,
-// voice line, START RUN button); the unselected tile dims. Hotkeys
-// A/D + ←/→ toggle; click selects; Space / Enter / clicking START RUN
-// commits.
+// Dual-tile faction picker: SWARM on the left, SIEGE on the right.
+// The selected tile dominates (scale, glow, particles, voice line,
+// START RUN button); the unselected tile dims. Hotkeys A/D + ←/→
+// toggle; click selects; Space / Enter / clicking START RUN commits.
 //
 // Switching plays the dramatic transition from the design handover —
 // a left→right colour-wash sweep with screen-blend tint, plus a
@@ -19,7 +21,7 @@
 // page boots → bootstrap awaits the menu → onCommit fires with the
 // chosen FactionId → bootstrap proceeds into the existing scene flow
 // with playerFaction wired from the pick. localStorage persists the
-// last pick across visits; default Pulse on first visit.
+// last pick across visits; default Swarm on first visit.
 //
 // `?menu=skip` URL flag still bypasses the menu for e2e tests + any
 // future deep-link path; the persisted pick is used in that case.
@@ -153,11 +155,11 @@ export class MainMenu {
     ].join(';');
     this.root.appendChild(selectorRow);
     this.tiles = {
-      pulse: this.buildTile('pulse', 'left'),
-      forge: this.buildTile('forge', 'right'),
+      swarm: this.buildTile('swarm', 'left'),
+      siege: this.buildTile('siege', 'right'),
     };
-    selectorRow.appendChild(this.tiles.pulse.root);
-    selectorRow.appendChild(this.tiles.forge.root);
+    selectorRow.appendChild(this.tiles.swarm.root);
+    selectorRow.appendChild(this.tiles.siege.root);
 
     // Footer hint.
     this.footer = document.createElement('div');
@@ -212,8 +214,8 @@ export class MainMenu {
     this.cursorLayer.appendChild(this.trailLayer);
 
     // Cursor: ring + centre dot, both inheriting `currentColor` so a
-    // single colour update on the wrapper retints both. Pulse ring is
-    // rotated 45° (matches the diamond emblem); Forge stays square.
+    // single colour update on the wrapper retints both. Swarm ring is
+    // rotated 45° (matches the diamond emblem); Siege stays square.
     this.cursor = document.createElement('div');
     this.cursor.style.cssText = [
       'position:absolute', 'left:0', 'top:0',
@@ -305,14 +307,14 @@ export class MainMenu {
 
     const stats = document.createElement('div');
     stats.style.cssText = 'display:flex;gap:18px;font-size:10px;letter-spacing:0.3em;opacity:0.6';
-    appendStat(stats, 'MASS',  id === 'pulse' ? 1 : 5);
-    appendStat(stats, 'SPEED', id === 'pulse' ? 5 : 1);
-    appendStat(stats, 'COUNT', id === 'pulse' ? 5 : 2);
+    appendStat(stats, 'MASS',  id === 'swarm' ? 1 : 5);
+    appendStat(stats, 'SPEED', id === 'swarm' ? 5 : 1);
+    appendStat(stats, 'COUNT', id === 'swarm' ? 5 : 2);
     root.appendChild(stats);
 
     const voice = document.createElement('div');
     voice.style.cssText = 'font-size:13px;text-align:center;margin-top:4px;opacity:0;transition:opacity 250ms ease, color 250ms ease, text-shadow 250ms ease';
-    voice.textContent = id === 'pulse'
+    voice.textContent = id === 'swarm'
       ? '“WE ARE MANY · FLOW FORWARD”'
       : '“STRENGTH HOLDS · WE DO NOT MOVE”';
     root.appendChild(voice);
@@ -379,11 +381,11 @@ export class MainMenu {
     // Ambient particles re-tint to new faction (both parallax layers).
     this.populateAmbientParticles(f);
 
-    // Cursor re-tint. Pulse rotates the ring 45° (matches the diamond
-    // emblem); Forge keeps it square (siege).
+    // Cursor re-tint. Swarm rotates the ring 45° (matches the diamond
+    // emblem); Siege keeps it square.
     this.cursor.style.color = f.primary;
     this.cursorRing.style.boxShadow = `0 0 10px ${f.primary}, inset 0 0 6px ${f.glowSoft}`;
-    this.cursorRing.style.transform = id === 'pulse' ? 'rotate(45deg)' : 'rotate(0deg)';
+    this.cursorRing.style.transform = id === 'swarm' ? 'rotate(45deg)' : 'rotate(0deg)';
   }
 
   // Vertical white neon bar sweeps from one edge of the screen to the
@@ -393,7 +395,7 @@ export class MainMenu {
   private triggerWash(toId: FactionId): void {
     const arriving = themeForId(toId);
     const leaving = themeForId(opposing(toId));
-    const sweepRight = toId === 'forge'; // right tile is Forge — bar moves L → R
+    const sweepRight = toId === 'siege'; // right tile is Siege — bar moves L → R
     const startLeft = sweepRight ? '-12px' : 'calc(100% + 12px)';
     const endLeft   = sweepRight ? 'calc(100% + 12px)' : '-12px';
 
@@ -470,7 +472,7 @@ export class MainMenu {
       ? `0 0 18px ${f.glowHard}, 0 0 42px ${f.glow}, 0 1px 0 rgba(0,0,0,0.6)`
       : 'none';
 
-    t.underline.style.width = selected ? `${id === 'pulse' ? 110 : 90}px` : '0';
+    t.underline.style.width = selected ? `${id === 'swarm' ? 110 : 90}px` : '0';
     t.underline.style.opacity = selected ? '1' : '0';
     t.underline.style.background = f.primary;
     t.underline.style.boxShadow = `0 0 10px ${f.glowHard}`;
@@ -500,8 +502,8 @@ export class MainMenu {
     if (selected) {
       populateParticles(
         t.particles, f,
-        id === 'pulse' ? 40 : 14,
-        /*sizeScale=*/1, /*opacityScale=*/1, /*seedOffset=*/id === 'pulse' ? 113 : 211,
+        id === 'swarm' ? 40 : 14,
+        /*sizeScale=*/1, /*opacityScale=*/1, /*seedOffset=*/id === 'swarm' ? 113 : 211,
         /*twinkle=*/true,
       );
     }
@@ -567,7 +569,7 @@ export class MainMenu {
     const size = 3 + Math.floor(Math.random() * 3); // 3..5px
     const driftX = (Math.random() - 0.5) * 14;
     const driftY = 4 + Math.random() * 12;
-    const rot = this.selected === 'pulse' ? 45 : 0;
+    const rot = this.selected === 'swarm' ? 45 : 0;
     bit.style.cssText = [
       'position:absolute',
       `left:${x}px`, `top:${y}px`,
@@ -593,10 +595,10 @@ export class MainMenu {
     const k = ev.key;
     if (k === 'a' || k === 'A' || k === 'ArrowLeft') {
       ev.preventDefault();
-      if (this.selected !== 'pulse') this.switchTo('pulse');
+      if (this.selected !== 'swarm') this.switchTo('swarm');
     } else if (k === 'd' || k === 'D' || k === 'ArrowRight') {
       ev.preventDefault();
-      if (this.selected !== 'forge') this.switchTo('forge');
+      if (this.selected !== 'siege') this.switchTo('siege');
     } else if (k === ' ' || k === 'Enter') {
       ev.preventDefault();
       this.commit();
@@ -630,7 +632,7 @@ export class MainMenu {
 // --- helpers ---------------------------------------------------------------
 
 function opposing(id: FactionId): FactionId {
-  return id === 'pulse' ? 'forge' : 'pulse';
+  return id === 'swarm' ? 'siege' : 'swarm';
 }
 
 function appendCornerChrome(root: HTMLElement, _f: FactionTheme): void {
@@ -685,11 +687,11 @@ function appendEmblem(parent: HTMLElement, id: FactionId, selected: boolean): vo
   const color = selected ? f.primary : 'rgba(160,180,190,0.45)';
   const grid = document.createElement('div');
   grid.style.cssText = `width:110px;height:110px;position:relative;${
-    id === 'pulse' ? 'transform:rotateZ(45deg);' : ''
+    id === 'swarm' ? 'transform:rotateZ(45deg);' : ''
   }`;
   // 5×5 grid; live-cell pattern matches the handover (Pulse = dispersed
   // diamonds in a swarm cluster; Forge = stronghold with crenellations).
-  const live = id === 'pulse'
+  const live = id === 'swarm'
     ? new Set([2, 5, 6, 7, 10, 12, 14, 17, 18, 19, 22])
     : new Set([0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
   const cell = 14;
@@ -705,8 +707,8 @@ function appendEmblem(parent: HTMLElement, id: FactionId, selected: boolean): vo
       `width:${cell}px`, `height:${cell}px`,
       `background:${on ? color : 'transparent'}`,
       `border:1px solid ${color}`,
-      `opacity:${on ? (selected ? (id === 'pulse' ? 1 : 0.95) : 0.7) : (id === 'pulse' ? 0.25 : 0.22)}`,
-      on && selected ? `box-shadow:0 0 ${id === 'pulse' ? 8 : 6}px ${color}` : '',
+      `opacity:${on ? (selected ? (id === 'swarm' ? 1 : 0.95) : 0.7) : (id === 'swarm' ? 0.25 : 0.22)}`,
+      on && selected ? `box-shadow:0 0 ${id === 'swarm' ? 8 : 6}px ${color}` : '',
     ].filter(Boolean).join(';');
     grid.appendChild(node);
   }

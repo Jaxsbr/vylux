@@ -38,6 +38,12 @@ import {
 export interface InitialMatchSpec {
   seed: number | bigint;
   hqs: { faction0: { x: number; y: number }; faction1: { x: number; y: number } };
+  // Phase 3.11b: which faction-id each slot plays. Faction 0's choice is
+  // the player's pick on the menu; faction 1 plays the opposing id.
+  // Hashed via FactionState.factionId; replays carry it in the header.
+  // Defaults to swarm/siege so legacy callers (tests + headless cli)
+  // don't have to spell it out.
+  factionIds?: { faction0: import('./types').FactionId; faction1: import('./types').FactionId };
   // Resource nodes. The legacy `energy` field carries the starting
   // remaining-amount in tiles' worth of resource; `kind` defaults to
   // 'energy' so existing specs keep working unchanged. Phase 3.1 maps
@@ -67,8 +73,11 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
   const initialColor = fromInt(spec.initialColor ?? 0);
 
   const hqMaxHp = fromInt(spec.hqMaxHp ?? 500);
+  const factionId0 = spec.factionIds?.faction0 ?? 'swarm';
+  const factionId1 = spec.factionIds?.faction1 ?? 'siege';
   const factions: [FactionState, FactionState] = [
     {
+      factionId: factionId0,
       hqX: fromInt(spec.hqs.faction0.x),
       hqY: fromInt(spec.hqs.faction0.y),
       energy: initialEnergy,
@@ -82,6 +91,7 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       nextSpawnRotation: 0,
     },
     {
+      factionId: factionId1,
       hqX: fromInt(spec.hqs.faction1.x),
       hqY: fromInt(spec.hqs.faction1.y),
       energy: initialEnergy,

@@ -8,7 +8,7 @@
 // All fields in Q16.16 fixed-point or integer ticks. No floats.
 
 import { fromFloat, fromInt, type Fixed } from './fixed';
-import type { StructureKind, UnitKind } from './types';
+import type { FactionId, StructureKind, UnitKind } from './types';
 
 export interface UnitStats {
   maxHp: Fixed;
@@ -213,6 +213,72 @@ export const TRAIL_DURATION_RESEARCH_TICKS = 80; // 4 s — same shape as TIER2
 // it's pushing for an army of 6+ combat units.
 export const SUPPLY_CAP_INITIAL = 10;
 export const SUPPLY_CAP_BONUS_PER_PYLON = 8;
+
+// Phase 3.11b: per-faction stat overrides on top of the shared
+// `UNIT_STATS` baseline. Most kinds stay shared (a swarm raider and a
+// siege raider read the same numbers today); only fields that
+// genuinely diverge get an entry here. New asymmetric fields land by
+// adding rows — no callsite churn elsewhere as long as callers go
+// through `unitStatsFor(factionId, kind)`.
+type UnitOverrides = { readonly [K in UnitKind]?: Partial<UnitStats> };
+
+const SWARM_UNIT_OVERRIDES: UnitOverrides = {
+  // Faster movement than baseline; pairs with a slower harvest interval
+  // (factionConfigFor below) so the trade is honest — quick to redeploy
+  // workers, slow to fill a stockpile per gain.
+  worker: { speed: fromFloat(0.055) },
+};
+
+const SIEGE_UNIT_OVERRIDES: UnitOverrides = {
+  // Slower movement than baseline; pairs with a faster harvest interval
+  // — workers commit to a node and bank quickly once they're parked.
+  worker: { speed: fromFloat(0.045) },
+};
+
+function applyOverrides(base: Record<UnitKind, UnitStats>, overrides: UnitOverrides): Record<UnitKind, UnitStats> {
+  const out = { ...base } as Record<UnitKind, UnitStats>;
+  (Object.keys(overrides) as UnitKind[]).forEach((k) => {
+    const o = overrides[k];
+    if (o !== undefined) out[k] = { ...out[k], ...o };
+  });
+  return out;
+}
+
+const FACTION_UNIT_STATS: Record<FactionId, Record<UnitKind, UnitStats>> = {
+  swarm: applyOverrides(UNIT_STATS, SWARM_UNIT_OVERRIDES),
+  siege: applyOverrides(UNIT_STATS, SIEGE_UNIT_OVERRIDES),
+};
+
+export function unitStatsFor(factionId: FactionId, kind: UnitKind): UnitStats {
+  return FACTION_UNIT_STATS[factionId][kind];
+}
+
+// Phase 3.11b: per-faction match-config overrides for non-unit-stat
+// knobs. Today: harvest interval (the trade-off pair to worker speed).
+// Future asymmetry that doesn't fit on UnitStats lands here.
+export interface FactionConfig {
+  // Ticks between successive harvest gains while a worker is parked at
+  // a node. Pairs inversely with worker speed so a faction with fast
+  // workers harvests slowly per tick (compensating for redeployment
+  // mobility) and vice-versa.
+  readonly harvestTicks: number;
+}
+
+const SHARED_FACTION_CONFIG: FactionConfig = {
+  // Baseline: 1 second at 20 Hz. The pre-3.11b HARVEST_TICKS module
+  // constant (still exported from sim/step.ts for the AI's reach
+  // heuristics that don't have a faction-id in scope) reads the same.
+  harvestTicks: 20,
+};
+
+const FACTION_CONFIGS: Record<FactionId, FactionConfig> = {
+  swarm: { ...SHARED_FACTION_CONFIG, harvestTicks: 23 }, // ~13% slower per gain
+  siege: { ...SHARED_FACTION_CONFIG, harvestTicks: 17 }, // ~18% faster per gain
+};
+
+export function factionConfigFor(factionId: FactionId): FactionConfig {
+  return FACTION_CONFIGS[factionId];
+}
 
 // Phase 3.5: tuning knobs for colour nodes. maxReserve is the cap a
 // colour node refills to via passive regen; regenPerTick is added to

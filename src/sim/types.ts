@@ -15,6 +15,21 @@ import type { Fixed } from './fixed';
 
 export type Faction = 0 | 1;
 
+// Phase 3.11b: faction identity. Faction 0/1 is the player-slot
+// discriminator (who owns what entity); FactionId is which *kind* of
+// faction is being played in that slot. The two are orthogonal — a
+// player can pick swarm, in which case faction 0 has factionId
+// 'swarm' and faction 1 has factionId 'siege' (or vice versa).
+//
+// FactionId lives on FactionState so per-faction stat overrides
+// (units-config.ts) and per-faction macro picks (ai.ts) can be looked
+// up from a Faction. Hashed so replays preserve the asymmetry.
+export type FactionId = 'swarm' | 'siege';
+
+export function opposingFactionId(id: FactionId): FactionId {
+  return id === 'swarm' ? 'siege' : 'swarm';
+}
+
 // Phase 3.2: 'vanguard' is the first tier-2 unit. Trained at production
 // buildings once the faction has researched tier-2 at an upgrade
 // structure. Bigger, slower, costs both Energy and Flux. Faction-
@@ -47,6 +62,11 @@ export const FACTION_COLOR: Record<Faction, 'blue' | 'red'> = {
 };
 
 export interface FactionState {
+  // Phase 3.11b: which faction *kind* is being played in this slot.
+  // Hashed; replays carry it in the header so deterministic playback
+  // honours the asymmetry. Per-faction stat overrides + AI macro reads
+  // discriminate on this field.
+  factionId: FactionId;
   hqX: Fixed;
   hqY: Fixed;
   energy: Fixed;

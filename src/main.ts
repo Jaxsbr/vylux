@@ -276,7 +276,7 @@ async function bootstrap(): Promise<void> {
   // from the very first switch.
   const audio = new AudioManager();
 
-  // Phase 3.11a: PvAI menu picks the player's faction (Pulse/Forge);
+  // Phase 3.11a: PvAI menu picks the player's faction (Swarm/Siege);
   // selection persists in localStorage. Lockstep / observer modes
   // already encode intent in the URL and skip the menu. `?menu=skip`
   // short-circuits the await for e2e tests + any future share-link
@@ -326,7 +326,23 @@ async function bootstrap(): Promise<void> {
   }
 
   const scene = createScene(canvas);
-  const match = new Match(SPEC);
+
+  // Phase 3.11b: thread the player's pick into the sim spec. The
+  // opposing faction-id is what the AI plays — visual asymmetry from
+  // 3.11a now backed by sim asymmetry (worker speed + harvest rate as
+  // the first cut). Lockstep / observer modes default both slots to
+  // swarm/siege so existing dev paths still work; the menu pick only
+  // applies to PvAI + observe-local since those are the surfaces that
+  // own faction selection.
+  const factionId0 = mode.kind === 'pva' || mode.kind === 'observe-local'
+    ? (playerFaction === 0 ? pickedFactionId : (pickedFactionId === 'swarm' ? 'siege' : 'swarm'))
+    : 'swarm';
+  const factionId1: FactionId = factionId0 === 'swarm' ? 'siege' : 'swarm';
+  const matchSpec: InitialMatchSpec = {
+    ...SPEC,
+    factionIds: { faction0: factionId0, faction1: factionId1 },
+  };
+  const match = new Match(matchSpec);
   const renderer = new SimRenderer(match.sim, scene.entitiesGroup, playerFaction, isObserver);
 
   // Phase 3.9.1: input-feedback overlay. Observer mode has nothing to
