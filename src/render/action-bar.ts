@@ -37,6 +37,7 @@ import {
 import { FACTION_COLOR } from '../sim/types';
 import type { Sim } from '../sim/sim';
 import { toFloat, type Fixed } from '../sim/fixed';
+import { themeForFaction } from './factions/theme';
 
 // Display helper: Fixed costs (Q16.16) come in as integers like 3276800
 // for 50; the player wants to see "50". toFloat does the divide.
@@ -65,14 +66,16 @@ interface ButtonSpec {
   onClick: () => void;
 }
 
+// Phase 3.11a — faction tints sourced from the shared theme module so
+// the action bar, the menu, and the end-screen agree on the palette.
 const FACTION_TINT: Record<Faction, string> = {
-  0: '#00e5ff',
-  1: '#ff6a33',
+  0: themeForFaction(0).primary,
+  1: themeForFaction(1).primary,
 };
 
 const FACTION_TINT_DIM: Record<Faction, string> = {
-  0: 'rgba(0,229,255,0.55)',
-  1: 'rgba(255,106,51,0.55)',
+  0: themeForFaction(0).glow,
+  1: themeForFaction(1).glow,
 };
 
 export class ActionBar {

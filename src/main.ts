@@ -55,6 +55,8 @@ import { FogOverlay } from './render/fog-overlay';
 import { AudioManager } from './audio/audio-manager';
 import { GameEventDetector } from './render/event-detector';
 import { MainMenu } from './render/menu/main-menu';
+import { loadFactionId } from './render/factions/persistence';
+import { factionFromId, RESOURCE_COLOR, themeForFaction, type FactionId } from './render/factions/theme';
 import { LockstepChannel, type BroadcastChannelLike } from './net/lockstep-channel';
 import { LockstepLoop } from './net/lockstep-loop';
 import { ObserverChannel } from './net/observer-channel';
@@ -192,14 +194,21 @@ interface ResourceCard {
   value: HTMLSpanElement;
 }
 
-function makeResourceCard(letter: string, initial: string, glyphColor: string, large: boolean): ResourceCard {
+function makeResourceCard(
+  letter: string,
+  initial: string,
+  glyphColor: string,
+  large: boolean,
+  factionTint: { primary: string; glowSoft: string; strokeW: number; radius: number },
+): ResourceCard {
   const root = document.createElement('div');
   root.style.cssText = [
     'display:flex', 'align-items:center', 'gap:10px',
     'padding:' + (large ? '10px 18px' : '8px 14px'),
-    'background:rgba(7,11,16,0.78)',
-    'border:1px solid #234', 'border-radius:6px',
-    'box-shadow:0 0 18px rgba(0,0,0,0.55)',
+    'background:rgba(7,9,12,0.78)',
+    `border:${factionTint.strokeW}px solid ${factionTint.primary}`,
+    `border-radius:${factionTint.radius}px`,
+    `box-shadow:0 0 8px ${factionTint.glowSoft}, 0 0 18px rgba(0,0,0,0.55)`,
     'min-width:' + (large ? '94px' : '78px'),
     'transition:border-color 0.15s',
   ].join(';');
@@ -261,26 +270,33 @@ async function bootstrap(): Promise<void> {
 
   const mode = detectRunMode();
 
-  // Phase 3.9.7: PvAI gets a main menu before the match starts.
-  // Lockstep / observer modes already encode intent in the URL and
-  // skip the menu — they're fired off via shared link, not browsed
-  // into. The menu blocks bootstrap until the user clicks PLAY.
-  // `?menu=skip` short-circuits the await for e2e tests + any future
-  // share-link flow that wants to deep-link into a match.
+  // Phase 3.9.5 audio manager — constructed early so the main menu can
+  // fire its faction-switch + click cues. Resumes the AudioContext on
+  // first user gesture (menu interaction qualifies), so the cues land
+  // from the very first switch.
+  const audio = new AudioManager();
+
+  // Phase 3.11a: PvAI menu picks the player's faction (Pulse/Forge);
+  // selection persists in localStorage. Lockstep / observer modes
+  // already encode intent in the URL and skip the menu. `?menu=skip`
+  // short-circuits the await for e2e tests + any future share-link
+  // flow — the persisted pick is honoured in that case.
   const skipMenu = new URLSearchParams(window.location.search).get('menu') === 'skip';
+  let pickedFactionId: FactionId = loadFactionId();
   if (mode.kind === 'pva' && !skipMenu) {
-    await new Promise<void>((resolve) => {
+    pickedFactionId = await new Promise<FactionId>((resolve) => {
       const menu = new MainMenu({
-        onPlayVsAi: () => {
+        audio,
+        onCommit: (picked) => {
           menu.hide();
-          resolve();
+          resolve(picked);
         },
       });
     });
   }
 
   const playerFaction: Faction = mode.kind === 'pva' || mode.kind === 'observe-local'
-    ? 0
+    ? factionFromId(pickedFactionId)
     : mode.localFaction;
   const isObserver = mode.kind === 'observe-local';
 
@@ -323,9 +339,10 @@ async function bootstrap(): Promise<void> {
   // explored bitmap painted on top of the grid plane.
   const fog = new FogOverlay(scene.entitiesGroup, match.sim, playerFaction, isObserver);
 
-  // Phase 3.9.5: audio + event detector. Observer mode runs a no-op
-  // detector (no player faction to attribute events to).
-  const audio = new AudioManager();
+  // Phase 3.9.5: event detector. Observer mode runs a no-op detector
+  // (no player faction to attribute events to). The AudioManager is
+  // constructed earlier (above the menu) so the menu's faction-switch
+  // cues fire from the first interaction.
   const eventDetector = isObserver
     ? null
     : new GameEventDetector(match.sim, playerFaction, audio);
@@ -472,19 +489,29 @@ async function bootstrap(): Promise<void> {
   ].join(';');
   document.body.appendChild(resourceBar);
 
-  const playerColourHex = playerFaction === 0 ? '#00e5ff' : '#ff6a33';
+  // Phase 3.11a: faction colour comes from the shared theme so menu /
+  // HUD / end-screen all read from one palette source.
+  const playerTheme = themeForFaction(playerFaction);
+  const playerColourHex = playerTheme.primary;
+  const factionTint = {
+    primary:  playerTheme.primary,
+    glowSoft: playerTheme.glowSoft,
+    strokeW:  playerTheme.strokeW,
+    radius:   playerTheme.radius,
+  };
 
   // HP card — distinct from the resource pills because losing HQ ends
-  // the match. Slightly larger and faction-coloured.
-  const hpCard = makeResourceCard('HQ', '500', playerColourHex, true);
+  // the match. Slightly larger; glyph reads in faction colour, border
+  // tints to the faction.
+  const hpCard = makeResourceCard('HQ', '500', playerColourHex, true, factionTint);
   resourceBar.appendChild(hpCard.root);
-  const energyCard = makeResourceCard('E', '0', '#ffd166', false);
+  const energyCard = makeResourceCard('E', '0', RESOURCE_COLOR.energy, false, factionTint);
   resourceBar.appendChild(energyCard.root);
-  const fluxCard = makeResourceCard('F', '0', '#a3ff66', false);
+  const fluxCard = makeResourceCard('F', '0', RESOURCE_COLOR.flux, false, factionTint);
   resourceBar.appendChild(fluxCard.root);
-  const colourCard = makeResourceCard('C', '0', playerColourHex, false);
+  const colourCard = makeResourceCard('C', '0', playerColourHex, false, factionTint);
   resourceBar.appendChild(colourCard.root);
-  const supplyCard = makeResourceCard('S', '0/10', '#9ad', false);
+  const supplyCard = makeResourceCard('S', '0/10', RESOURCE_COLOR.supply, false, factionTint);
   resourceBar.appendChild(supplyCard.root);
 
   // Debug panel — opt-in via ?debug=1. Carries the dense diagnostic
@@ -626,8 +653,13 @@ async function bootstrap(): Promise<void> {
   // Useful for capturing bug-report material before a match ends; the
   // saved JSON round-trips through tools/replay.ts to the same final
   // hash. Phase 2.4 deliverable.
+  //
+  // Bail out if any modifier is held — Cmd+R / Ctrl+R is the browser's
+  // refresh shortcut, and without this guard every page refresh fires
+  // the download immediately before the browser navigates away.
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'r' && e.key !== 'R') return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     if (e.target instanceof HTMLInputElement) return;
     triggerDownloadReplay();
   });
@@ -660,6 +692,10 @@ async function bootstrap(): Promise<void> {
   document.body.appendChild(muteIndicator);
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'm' && e.key !== 'M') return;
+    // Skip on modifier — Cmd+M minimises the window on macOS and we
+    // don't want that to flip the mute state on its way out. Mirrors
+    // the same guard on the R-replay binding.
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     if (e.target instanceof HTMLInputElement) return;
     audio.setMuted(!audio.isMuted());
     muteIndicator.textContent = audio.isMuted()

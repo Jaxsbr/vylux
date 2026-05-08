@@ -177,6 +177,37 @@ export class AudioManager {
     }
   }
 
+  // Phase 3.11a — main-menu faction-switch. Low thump (impact) layered
+  // with a faction-coloured chime that arrives ~120ms later, matching
+  // the handover timeline (TRIGGER → WASH PEAK).
+  factionSwitch(towardId: 'pulse' | 'forge'): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.master) return;
+    const t0 = ctx.currentTime;
+    // Low impact thump — sub frequency, square envelope.
+    this.tone(ctx, this.master, {
+      frequency: 90,
+      durationSec: 0.18,
+      attackSec: 0.005,
+      releaseSec: 0.16,
+      gain: 0.32,
+      type: 'sawtooth',
+      startAt: t0,
+    });
+    // Arrival chime — Pulse pings high + bright; Forge tolls low + heavy.
+    const arrivalFreq = towardId === 'pulse' ? 1180 : 330;
+    this.tone(ctx, this.master, {
+      frequency: arrivalFreq,
+      durationSec: 0.30,
+      attackSec: 0.01,
+      releaseSec: 0.26,
+      gain: 0.20,
+      type: towardId === 'pulse' ? 'triangle' : 'sawtooth',
+      startAt: t0 + 0.12,
+    });
+  }
+
   // Generic envelope-shaped tone. Centralised so each cue above stays
   // a one-line param list and the envelope shape is consistent.
   private tone(ctx: AudioContext, dest: GainNode, opts: {

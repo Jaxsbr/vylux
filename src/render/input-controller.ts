@@ -30,6 +30,7 @@ import type { Faction, UnitKind } from '../sim/types';
 import { GRID_CONSTANTS } from '../grid';
 import { tileFloatToWorld } from './scene';
 import { toFloat } from '../sim/fixed';
+import { themeForFaction } from './factions/theme';
 
 // Pixel distance the pointer must move past the down-point before a
 // left-button-drag is treated as a drag-rect rather than a click.
@@ -115,11 +116,14 @@ export class InputController {
     opts.canvas.addEventListener('contextmenu', this.onContextMenu);
     window.addEventListener('keydown', this.onKeyDown);
 
+    // Phase 3.11a: drag-rect tints to the player's faction so a Forge
+    // player gets a red selection overlay instead of cyan.
+    const ft = themeForFaction(opts.playerFaction);
     this.dragRectEl = document.createElement('div');
     this.dragRectEl.style.cssText = [
       'position:fixed', 'pointer-events:none', 'display:none',
-      'border:1px solid #00e5ff', 'background:rgba(0,229,255,0.12)',
-      'box-shadow:0 0 6px rgba(0,229,255,0.6)', 'z-index:5',
+      `border:1px solid ${ft.primary}`, `background:${ft.glowSoft}`,
+      `box-shadow:0 0 6px ${ft.glow}`, 'z-index:5',
     ].join(';');
     document.body.appendChild(this.dragRectEl);
   }

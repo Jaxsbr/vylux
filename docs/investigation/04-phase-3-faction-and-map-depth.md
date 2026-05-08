@@ -1,13 +1,15 @@
 # Investigation 04 — Phase 3 Faction & Map Depth
 
-> **Status:** Open — sub-phases 3.0–3.10 closed; **3.11–3.14 repointed for the 2026-05-07 PvE pivot**; 3.11 next (now: enemy AI faction(s) for PvE).
-> **Phase:** 3 (Faction & Map Depth — repointed PvE)
+> **Status:** Open — sub-phases 3.0–3.10 + 3.11a closed; **3.11b–3.14 repointed for the 2026-05-07 PvE pivot, refined 2026-05-08**; 3.11b next (opposing AI faction + skirmish PvAI win condition — sim work, less-certain scope, revisit before starting).
+> **Phase:** 3 (Faction & Map Depth — repointed PvAI + Rogue)
 > **Owner:** Jaco
 > **Created:** 2026-04-26
 > **Time-box:** target 8–14 weeks of focused work
 > **Depends on:** Phase 2 architecture (closed, now dormant — see PRD §0).
 
 > **2026-05-07 — PvE pivot context.** Sub-phases 3.0–3.10 were built against the v4 PRD's competitive 1v1 esport target. The *mechanics* of those sub-phases (structures, two-resource economy, tech tiers, multi-select, fog, supply, energy dump, game-feel, action bar, worker-driven building) carry forward unchanged into the PvE direction. The remaining sub-phases (3.11–3.14) have been **repointed**: faction "asymmetry" becomes "enemy AI faction(s) with distinct rosters as the player's adversary"; maps-as-data adds seedable runs; win-conditions become PvE (survive-N-waves / scenario objective / boss); the playtest gate becomes "is the run loop fun." See PRD §8 Phase 3 + the 2026-05-07 decision-log entry at the bottom of this doc. Historical decision-log rows above are kept intact as the record of how we got here.
+
+> **2026-05-08 — refinement on the pivot.** The PvE direction is preserved, but its *shape* is refined. Instead of "wave-defense + roguelike runs against a scripted enemy AI," Vylux is now an **RTS PvAI duel** — the player picks **Pulse (Swarm)** or **Forge (Siege)** on the main menu and the AI plays the **opposing** faction. The win condition is **destroy the enemy HQ**. Layered on top: **Rogue mob spawns** — continuous neutral-hostile environmental pressure on both sides. Rogues are *not* a third faction; there is no Rogue HQ, no "kill all Rogues" win condition. They exist to make turtling expensive. **Sub-phase 3.11 is split** into 3.11a (faction identity & menu — presentation only) and 3.11b (opposing AI faction + skirmish PvAI win condition — sim work). **Sub-phase 3.13** is rewritten around the Rogue spawn system. Roguelike between-match tech-pick screens are deferred to Phase 4. See the 2026-05-08 decision-log entry at the bottom of this doc.
 
 ## Sub-phase status
 
@@ -25,19 +27,20 @@
 | 3.9  | Game feel & presentation pass                                            | ✅ Closed |
 | 3.10 | In-game HUD / action-bar redesign (context-sensitive) + worker-build      | ✅ Closed |
 | 3.10.10 | Velocity-based steering + collision rewrite                          | ✅ Closed |
-| 3.11 | Enemy AI faction(s) with distinct rosters _(repointed PvE)_              | Pending  |
-| 3.12 | Scenarios as data + seedable runs _(repointed PvE)_                      | Pending  |
-| 3.13 | PvE win conditions (survive-N-waves + scenario objective + resign)        | Pending  |
-| 3.14 | Run-loop playtest gate ("is the loop fun")                                | Pending  |
+| 3.11a | Faction identity & menu (player picks; themed HUD/end-screens; persisted) | ✅ Closed |
+| 3.11b | Opposing AI faction + skirmish PvAI win condition _(less certain scope)_  | Pending  |
+| 3.12 | Scenarios as data + seedable runs _(repointed PvAI + Rogue)_              | Pending  |
+| 3.13 | Rogue environmental mob spawn system _(repointed 2026-05-08)_             | Pending  |
+| 3.14 | Match-loop playtest gate ("is the loop fun")                              | Pending  |
 
 Each row links to the design notes in the corresponding `### 3.N — ...` section below.
 
-### Session pickup — current sub-phase: 3.11 (enemy AI faction(s) with distinct rosters — repointed PvE)
+### Session pickup — current sub-phase: 3.11b (opposing AI faction + skirmish PvAI win condition)
 
 A new session starting work on the next pending sub-phase should:
 
-1. **Read PRD §0 (the pivot notice) first.** Vylux is now single-player PvE; do not propose new lockstep / ladder / spectator work. `src/net/` is dormant.
-2. **Read the 3.11 section below** for scope, exit criterion, and sim-shape impact (reframed for PvE — enemy AI faction(s), not a second player faction).
+1. **Read PRD §0 (the pivot notice + 2026-05-08 refinement) first.** Vylux is single-player PvAI + Rogue mob spawns; do not propose new lockstep / ladder / spectator work. `src/net/` is dormant.
+2. **Read the 3.11b section below** for scope (the open questions on `factionId` placement + per-kind vs per-faction stat tables + energy-dump tuning are intentionally unsettled). 3.11a's identity layer (`src/render/factions/theme.ts` + `persistence.ts`, themed HUD/menu/end-screen) is in place — 3.11b layers the sim half on top of it.
 3. **Read the closed sub-phase sections (3.0 through 3.10)** as worked examples — they show the standard work shape (types → state → commands → step → hash → AI → renderer → UI → tests → fixtures → verify gate). The work shape carries forward unchanged; only the *target* of the work has shifted.
 4. **Read the Sub-phase closing checklist** further down. Five items: tsc clean, vitest green (regen `tests/determinism/` if sim shape moved), playwright green, `docs/manual.md` updated if catalog changed, status table + decision log updated.
 5. **Sim-shape changes also bump `REPLAY_VERSION`** in `src/sim/replay.ts` — see the comment-header on that constant for the running history. Phase 3 is currently on v18 (after 3.10.10e's local-collision revert; slot allocation + formation retention from 3.10.10d are kept).
@@ -549,77 +552,193 @@ The Phase 1 buildables panel was a flat always-on grid of every action the playe
 - The `training.test.ts` Phase 3.3 raider-MoveUnit assertion (`expect(r.x).toBe(3 * 65536)` after arrival) keeps working under chebyshev — dx=0 from a column-3 start to a column-3 target, no per-axis drift, snap pins r.x to 3*65536 exactly.
 - All 158 unit tests + 9 e2e gates green.
 
-### 3.11 — Enemy AI faction(s) with distinct rosters _(repointed PvE)_
+### 3.11a — Faction identity & menu _(repointed 2026-05-08)_
 
-> **Repointed 2026-05-07.** The pre-pivot version of 3.11 (under v4) was "two playable factions, both balanced for 1v1 ladder play." Post-pivot, the player faction is *the* faction (kept as-is from 3.0–3.10's catalog), and **3.11 builds the enemy AI faction(s) that the player fights against in PvE**. The asymmetry now means "the enemy plays differently from the player," not "two playable factions are balanced against each other."
+> **Repointed 2026-05-08.** Replaces the post-pivot "single enemy AI faction" framing with **player-pickable factions on a dramatic main-menu selector + faction-themed in-game UI throughout**. This sub-phase is presentation-only — no new sim shape. AI opponent is the existing `tickAi` recoloured to the opposing faction; proper roster asymmetry lands in 3.11b.
 
-Build at least one (target two) **enemy AI factions** with distinct rosters and threat profiles. The player keeps the current faction-0 catalog (worker / defender / raider / vanguard / Forge / Spire / Pylon); enemy factions get unit kinds the player doesn't have, or stat-curve variants of existing kinds, plus distinct AI behaviour patterns.
+Build the **identity layer**: the player picks **Pulse (Swarm)** or **Forge (Siege)** on the main menu, and the choice propagates through every visible surface — title wordmark, HUD, action bar, build cards, end-of-match screens. The choice persists across visits via `localStorage`.
 
-Working naming + shape:
-- **Pulse swarm** — fast, fragile, many. Threat profile: overwhelm with raider-equivalents, punish a player who built only frontline. Distinct unit: lightweight raider variant (faster, lower HP).
-- **Forge siege** — slow, heavy, few. Threat profile: walks at HQ slowly but each unit is hard to kill, punishes a player who built only harass. Distinct unit: tier-2 siege analogue.
+The design handover is in `tmp-handover-design/` — palette, type, copy, voice, selector layout, victory/defeat strings per faction, plus explicit Three.js translation notes for CSS-only effects (radial gradients → fullscreen quad shader; `mix-blend-mode: screen` → additive blending; corner chrome / grid lines → plain rects). Build from that, don't re-design.
 
-Both enemy factions reuse the existing `FactionState` shape — the asymmetry lives in `units-config.ts` (per-kind stats), `ai.ts` (behaviour patterns), and a new `factionId` discriminator on the AI's build-order picks. The energy-dump from 3.7 stays player-only for now (it's a player-faction identity mechanic); enemy factions get their own threat tools.
+**What's in scope:**
 
-This sub-phase does **not** introduce wave scheduling — that's 3.13's deliverable. 3.11 builds the *adversary*; 3.13 builds *what the adversary does over the course of a run*.
+- **Main menu — faction selector.** Dual-tile layout (Pulse left, Forge right or per handover); selected tile dominates (scale, glow, particles, full colour); unselected dims. Keyboard hotkeys (A / D per handover) plus mouse. Selection persists.
+- **Selector drama on switch.** Colour wash sweep across the screen + particle burst + sound cue when the player flips factions. The transition is the moment the choice acquires emotional weight; don't ship it as a silent radio button.
+- **Themed title screen.** "VYLUX" wordmark + subtitle re-render in the selected faction's palette (per handover: title sits on near-white ink with the faction colour carrying through glow + underline, not on the glyphs themselves — preserves legibility against same-hue particle wash).
+- **Themed HUD during play.** Resource bar strokes, action-bar card borders, selection highlights, build-progress glow all take the player's faction colour. Resource info colours (E yellow / F green / HP white / S cyan-white) stay constant across factions for legibility — that's a handover invariant.
+- **Themed end-of-match screens.** "{FACTION} — VICTORY" / "{FACTION} — DEFEATED", full-screen, faction-coloured, with the faction's voice copy ("THE CURRENT HOLDS" vs "THE ANVIL HOLDS" etc).
+- **Faction-coloured AI opponent.** The existing AI plays the opposing faction *visually* — recoloured units + structures. Behaviour stays as-is (tickAi unchanged); proper opposing-faction sim work is 3.11b.
+- **localStorage persistence.** Key like `vylux.faction = 'pulse' | 'forge'`; default to Pulse on first visit; restore on subsequent visits. Read once at app boot; write on selector commit.
 
-**Exit:** at least one enemy AI faction plays end-to-end against the player on the current single-map skirmish; replays of player-vs-enemy-faction-A and (if landed) player-vs-enemy-faction-B both run deterministically; the two enemy factions feel distinguishable in playtest within the first 60 seconds.
+**What's explicitly out of scope:**
 
-### 3.12 — Scenarios as data + seedable runs _(repointed PvE)_
+- Sim-shape changes. No new `FactionState` fields, no new `UnitKind`s, no new commands. `REPLAY_VERSION` should not bump. Existing fixtures should still validate.
+- Asymmetric AI behaviour. The AI plays the *visual* opposing faction; the actual unit composition + macro decisions stay as the current `tickAi`.
+- Skirmish win condition redesign — that's 3.11b. The current "100-point threshold or HQ destruction" still ships in 3.11a; it just gets re-skinned for win/loss screens.
+- Sound design. If sound feels like a launch-blocker for the menu drama, capture as a `Phase 4 — audio polish` task.
 
-> **Repointed 2026-05-07.** Pre-pivot, this was "maps as data, 2–3 launch maps for the 1v1 matchup matrix." Post-pivot it's "**scenarios as data** — `(map_layout, starting_resources, enemy_faction, wave_schedule_stub, seed)` — and seed-driven per-run variation." Maps remain hand-tuned; runs vary via seed.
+**Sim-shape impact:** none. This is renderer + UI work + a single localStorage read/write. No replay version bump, no fixture regen, no `CommandKind` slot consumed. The deterministic sim is unaware of which faction the player is "playing" — that's a presentation concept, not a sim concept, until 3.11b.
 
-Scenarios move out of `main.ts`'s hardcoded `SPEC` into data files under `src/scenarios/` (or `src/maps/` if scenario + map are still 1:1 at this point — open call, decide in-flight). A scenario at this sub-phase is:
+**Exit:**
+- Main menu loads with the persisted faction selected (or Pulse on first visit).
+- Selector flip plays the dramatic transition (colour wash + particles + sound).
+- HUD + action bar + build cards render in the selected faction's colour during a match.
+- End-of-match screen renders themed per faction with faction-voice copy.
+- All existing tests still pass; `Sim.stateHash()` unchanged; replays from before 3.11a still round-trip.
 
-- **Map layout**: grid dimensions, terrain, HQ position(s), energy / flux / colour node positions, vision-blockers.
-- **Starting resources** for the player and the enemy AI.
-- **Enemy AI faction** assigned (drawn from 3.11's set).
-- **Seed** for the run's PRNG (passed into `Sim` at construction; already supported by the sim).
+**What landed (closed 2026-05-08):**
 
-Wave scheduling is a **stub** at this sub-phase — a placeholder field that 3.13 fleshes out. The point of 3.12 is *the data lift*, so 3.13 has somewhere to write the wave schedule.
+- `src/render/factions/theme.ts` — single source of truth for the faction-identity layer: `FactionTheme` shape, `PULSE_THEME` + `FORGE_THEME` records (palette: primary / bright / dim / deep / glow tiers, type weights + tracking, radius + stroke, voice copy, victory + defeat strings), `RESOURCE_COLOR` invariants (E yellow / F green / HP white / S cyan-white — same across factions for legibility per the handover), helpers `themeForId`, `themeForFaction`, `opposingTheme`, `factionFromId`. Sim ↔ menu mapping locked: `Faction 0 ↔ 'pulse'`, `Faction 1 ↔ 'forge'`.
+- `src/render/factions/persistence.ts` — `localStorage` key `vylux.faction`, default `'pulse'`, fail-soft on storage-blocked.
+- `src/render/menu/main-menu.ts` — full rewrite. Dual-tile selector (Pulse left / Forge right), 5×5 emblem grid (Pulse = dispersed swarm pattern rotated 45°, Forge = solid stronghold with crenellations), corner chrome, ambient + selected-tile particle layers, MASS / SPEED / COUNT stat bars, voice tagline under selected tile. Switch transition matches the handover timeline: 0ms key-down + low thump, ~120ms vertical neon bar centred (sweeps L→R for Forge, R→L for Pulse) over a directional `linear-gradient` (`mix-blend-mode: screen`) that blends leaving + arriving glow, 350ms 40-particle burst, 600ms settle. Inputs: A/D + ←/→ to switch, click on a tile to select (click again to commit), Space/Enter to commit, click START RUN to commit. `animating` lock and ~420ms settle gate so rapid hammering is bounded but never deadlocks. localStorage written on switch + on commit.
+- `src/audio/audio-manager.ts` — new `factionSwitch(towardId)` cue: 90 Hz sawtooth thump (180 ms) layered with an arrival chime delayed 120 ms — Pulse gets a bright triangle ping at 1180 Hz, Forge a heavy sawtooth toll at 330 Hz. AudioContext is now constructed in `bootstrap()` *before* the menu so the menu's interaction qualifies as the resume gesture and the very first switch plays sound.
+- `src/main.ts` — `MainMenu` resolves with the picked `FactionId`; `playerFaction` (sim Faction) is derived from it via `factionFromId`. `?menu=skip` honours the persisted (or default) pick. `makeResourceCard` now takes a `factionTint` so the resource bar borders + glow read in the player's faction colour; HQ glyph + Colour-resource glyph use the faction primary; E (yellow) + F (green) + S (cyan-white) glyphs stay constant per the handover invariant.
+- `src/render/action-bar.ts` — `FACTION_TINT` + `FACTION_TINT_DIM` re-sourced from `themeForFaction` so action-bar buttons pull from the same palette as the menu and end-screen.
+- `src/render/input-controller.ts` — drag-rect re-tinted from the player's faction theme (Forge player gets a red selection rect, Pulse gets cyan).
+- `src/render/player-input.ts` — `MatchEndOverlay` rebuilt: `{FACTION} · VICTORY` / `{FACTION} · DEFEATED` headline at 80px in faction primary on victory or near-white desaturated on defeat, faction voice tagline below in italic-quote framing (`"THE CURRENT HOLDS"` / `"THE ANVIL HOLDS"` / `"THE CURRENT BREAKS"` / `"THE FORGE GOES COLD"`), radial-gradient backdrop tinted to the deep faction colour on victory or charcoal grid lines on defeat, NEW RUN + DOWNLOAD REPLAY buttons re-skinned per faction.
+- Docs: PRD §0 + §3.5 + §6 + §8 carry the 2026-05-08 refinement; manual §1 has a 3.11a notes block.
 
-Hand-tune 2–3 launch scenarios with distinct shapes (carries from the v4 plan):
-- **Open arena** — symmetric, no choke. Tests army composition.
-- **Bottleneck** — central choke. Frontline-favoured.
-- **Three-flux** — three contested Flux nodes including a committal third base.
+**UX micro-decisions made in flight (Jaco can redirect):**
 
-Scenario selection arrives via URL param (e.g. `?scenario=bottleneck&seed=12345`); a real scenario-pick UI is Phase 4. Per-run variation comes from the seed, not procedural map gen.
+- Wash bar is a vertical 6 px white neon strip that *translates* (handover called for it explicitly); the directional `linear-gradient` underneath uses `mix-blend-mode: screen` so leaving + arriving glow stack additively without us having to colour-pick the cross-fade.
+- Title glyphs in the wordmark + selected-tile heading sit on **near-white ink** (`#f4fbff`); the faction colour comes through the underline, the glow, and the subtitle text — keeps "VYLUX" + "SWARM" / "SIEGE" legible against same-hue particle wash. This is the handover's call; preserved verbatim.
+- A/D and ←/→ both toggle. Space and Enter both commit. (Handover only specified A/D; arrow keys and Enter added because they're zero-cost RTS-muscle-memory.)
+- Click semantics: click an *unselected* tile → switch (with full transition). Click the *selected* tile → commit. START RUN is also rendered inside the selected tile and commits on click. This was the simplest way to make a single-mouse-click commit possible without adding a separate "confirm" affordance.
+- Build label top-right reads `BUILD 3.11.0 · PVAI` — placeholder, no version-string source plumbed yet. Capture if it should read from `package.json`.
+- The handover spec's between-match tech-pick screens are *not* in 3.11a (deferred to Phase 4 per the 2026-05-08 refinement); only the menu + HUD + end-screen identity layer landed here.
+- No new tests were added — exit gate is "sim untouched, all existing tests + e2e still pass." Verified at close: `npx tsc --noEmit` clean, `npm run test` 158/158, `npm run test:e2e` 9/9.
 
-**Exit:** the current single hardcoded SPEC is gone from `main.ts`; ≥2 scenarios load from data; the same scenario + seed produces a bit-identical run twice (already true via determinism, but verified explicitly here); replays carry the scenario id + seed.
+**Polish landed in the same session, after the close gate (still no sim work):**
 
-### 3.13 — PvE win conditions (survive-N-waves + scenario objective + resign)
+- **Parallax ambient layer.** The single ambient-particle div was split into a far layer (60 dots, 0.75× size, 0.55× opacity, ±14/10 px range, 320 ms ease) and a near layer (26 dots, 1.55× size, 1.05× opacity, ±36/24 px range, 220 ms ease). A `pointermove` listener on `window` translates each layer against cursor fraction `(clientX/W − 0.5, clientY/H − 0.5)` so cursor-right drifts the layers leftward — depth via opposing motion. Layers are inset slightly outside the viewport (`inset:-30/-50px`) so the translation never reveals an empty edge.
+- **Tile-particle twinkle.** The dots inside the selected tile were static while the ambient layers parallaxed — read as wrong. Each tile particle now runs a `vy-twinkle` CSS keyframe (random 2.4–4.4 s duration, negative delay so dots mount mid-animation, opacity 1 → 0.18 → 0.85 → 0.30 with small ±2 px drift). Keyframe block injected once via `ensureTwinkleKeyframes()` on first menu construction. Ambient layers themselves don't twinkle — parallax already gives them motion.
+- **Faction cursor.** Native cursor hidden inside the menu surface only (`this.root.style.cursor = 'none'`); restored implicitly when the menu unmounts. Custom cursor is a 24×24 ring + 4×4 centre dot, both inheriting `currentColor` so a single colour update on the wrapper retints both. Pulse rotates the ring 45° (echoes the diamond emblem); Forge stays square (siege).
+- **Cursor trail.** Every ~14 px of pointer travel emits a 3–5 px faction-coloured bit (rotated 45° for Pulse, square for Forge) that drifts down + slightly sideways and fades over ~700 ms via CSS transition; self-cleans after 740 ms `setTimeout`. Distance gate keeps slow cursors from spewing while fast cursors still leave a continuous trail.
+- **Cmd+R replay download bug fix.** Pre-existing latent bug, surfaced during 3.11a playtest: `src/main.ts:656` keydown handler that saves a replay on plain `R` didn't check for modifiers, so every browser refresh on macOS fired `triggerDownloadReplay()` before the navigation completed. Guarded with `if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;`. Plain-`R` mid-match saves still work.
 
-> **Repointed 2026-05-07.** Pre-pivot, this was "military-elimination + dominance-tick + 25-min timer + resign" for competitive 1v1. Post-pivot, the **PvE win conditions** from PRD §6.7 land here.
+---
 
-Replace the current "100-point threshold or HQ destruction" with:
+### 3.11b — Opposing AI faction + skirmish PvAI win condition _(repointed 2026-05-08)_
 
-1. **Survive the scheduled waves.** A scenario defines a wave count (e.g. 8 on standard, 12 on hard) and a wave schedule (per-wave: spawn time, spawn direction, unit composition). Surviving the final wave wins the run. The **wave scheduler** is the new sim component this sub-phase builds — a deterministic state machine that consumes the scenario's wave list and pushes enemy units into the sim at the scheduled tick.
-2. **Scenario objective** (optional per scenario): hold a specific node for N waves, escort a structure to a destination, destroy an enemy spawner. Encoded as data on the scenario; checked each tick by a new `checkScenarioObjective` step pass.
-3. **Boss wave** (boss-scenarios only, stretch): final wave is a single high-HP enemy unit with a designed mechanic. May slip to Phase 5 if mechanic design takes more time than the sub-phase budget.
-4. **Resign** as a first-class command (CommandKind slot 13 — next available after 3.10's slot 12). Replays save on resign.
+> **Repointed 2026-05-08.** Sim work — the AI now actually plays the opposing faction's roster + macro, and the skirmish win condition (destroy enemy HQ) replaces the legacy "100-point threshold or HQ destruction." Builds on 3.11a's identity layer. Scope is **less certain** than 3.11a; revisit before starting work.
 
-Loss conditions: HQ destroyed → defeat (already wired); player has no production capacity and HQ is mid-attack → effectively defeat (same code path).
+This is the sim half of 3.11. The AI no longer plays "the player's faction in red"; it plays **the opposing faction**, with the opposing faction's roster, macro shape, and behaviour patterns. The skirmish win condition simplifies to **destroy the enemy HQ** — the legacy 100-point threshold is dropped.
 
-Drop:
-- The 100-point threshold (was esport scaffolding).
-- The 25-minute hard timer (was esport-anti-stalemate scaffolding; PvE has no stalemate concern).
-- The dominance-tick mechanism (was esport positional-win path; PvE replaces with surviving the scheduled escalation).
+Working faction shapes (per PRD §3.5):
+- **Pulse (Swarm)** — fast / fragile / many. Lightweight raiders, harass-and-pressure macro, faster build orders, lower HP per unit. Punishes a turtle.
+- **Forge (Siege)** — slow / heavy / few. Heavy frontline + tier-2 siege analogue, slow build orders, higher HP per unit. Punishes a harass-only player.
 
-**Exit:** all PvE win paths exercised in scripted scenarios — survive 8 waves on the open arena → win; lose HQ during wave 5 → defeat; resign command → defeat; (if landed) defeat boss → win. The wave-scheduler ticks deterministically; replays of survival + defeat both round-trip. The point-system code can be removed or marked dead.
+Both factions reuse the existing `FactionState` shape — the asymmetry lives in:
+- `units-config.ts` — per-kind stats per faction (HP, damage, speed, train-time, costs).
+- `ai.ts` — behaviour patterns + build-order picks discriminated by `factionId`.
+- A new `factionId: 'pulse' | 'forge'` discriminator on `FactionState` (or equivalent — finalise during the sim-shape pass).
 
-### 3.14 — Run-loop playtest gate ("is the loop fun")
+The energy-dump (3.7) stays as a per-faction identity mechanic — both factions get one, with faction-specific flavour (Pulse = fast pulse-trail; Forge = slow heavy stomp). Confirm in-flight.
 
-> **Repointed 2026-05-07.** Pre-pivot, this was "internal playtests show no obviously dominant strategy or faction at tester skill" — an *esport balance* gate. Post-pivot, it's a **run-loop fun gate** — the only gate that matters for a PvE indie game.
+**Win condition changes:**
+- **Win:** opposing HQ destroyed.
+- **Loss:** own HQ destroyed.
+- **Resign:** first-class command (CommandKind slot 13 — append-only).
+- **Drop:** the 100-point threshold (was esport scaffolding); the 25-minute hard timer (was esport anti-stalemate scaffolding); the dominance-tick mechanism. Point-system code can be removed or marked dead.
 
-The actual exit criterion: a player who picks up the build cold, plays a 15-minute run, and clicks "new run" because the next seed sounds interesting. This is **not** a balance gate (PvE balance is a long tail through Phase 4 + 5, not a Phase 3 close item). It's a **does this loop make me want to play it again** gate.
+**Sim-shape impact:** moderate.
+- `FactionState.factionId` added (or equivalent). Existing single-faction tests update.
+- `units-config.ts` indexed by `(factionId, unitKind)` rather than just `unitKind`.
+- `ai.ts` `tickAi` takes `factionId` and dispatches per-faction macro.
+- `Sim.stateHash()` serialises `factionId`. Hash format change → bumps `REPLAY_VERSION`. Pre-3.11b fixtures don't validate; regenerate.
+- New `CommandKind: 'Resign'` at slot 13 (append-only — see `src/sim/commands.ts` header).
+
+**Exit:**
+- A Pulse-vs-Forge match plays end-to-end on the current single-map skirmish.
+- Opposing-HQ destruction wins the match; own-HQ destruction loses; resign loses.
+- The two factions feel meaningfully different in playtest within 60 seconds (asymmetric pacing readable from the early-game).
+- Replays of Pulse-as-player and Forge-as-player both round-trip deterministically.
+- Cross-OS hashes match for both faction matchups on regenerated fixtures.
+
+**Open questions to settle in-flight (don't pre-decide):**
+- Whether `factionId` lives on `FactionState` directly or on a new `Player` wrapper.
+- Whether unit kinds fork per faction (Pulse-raider, Forge-raider as distinct kinds) or share kinds with per-faction stat tables. Lean toward shared-kind + stat-table for now; revisit if behaviour divergence demands.
+- Energy-dump per-faction tuning. Same mechanic, different numbers? Or different mechanic per faction? Capture the in-flight call in the close-out notes.
+
+### 3.12 — Scenarios as data + seedable runs _(repointed 2026-05-08)_
+
+> **Repointed 2026-05-08.** Pre-pivot (v4): "maps as data, 2–3 launch maps for the 1v1 matchup matrix." Post-pivot (2026-05-07): "scenarios as data + enemy AI faction + wave schedule." Refined (2026-05-08): "scenarios as data + AI faction + Rogue spawn schedule + seed." Maps remain hand-tuned; per-match variation comes from the seed.
+
+Scenarios move out of `main.ts`'s hardcoded `SPEC` into data files under `src/scenarios/`. A scenario at this sub-phase is:
+
+- **Map layout**: grid dimensions, terrain, HQ position(s) for both Player and AI, energy / flux / colour node positions, vision-blockers, neutral Rogue spawn points.
+- **Starting resources** for the Player and the AI.
+- **AI faction** assigned (the opposing faction to the player's pick — Pulse or Forge from 3.11b).
+- **Rogue spawn schedule (stub)** — a placeholder field that 3.13 fleshes out. The point of 3.12 is *the data lift*, so 3.13 has somewhere to write the schedule.
+- **Seed** for the match's PRNG (passed into `Sim` at construction; already supported by the sim).
+
+Hand-tune 2–3 launch scenarios with distinct shapes:
+- **Open arena** — symmetric, no choke. Tests army composition and direct PvAI engagement.
+- **Bottleneck** — central choke. Frontline-favoured; Rogue spawn points sit on neutral edges.
+- **Three-flux** — three contested Flux nodes including a committal third base; Rogues contest the third Flux.
+
+Scenario selection arrives via URL param (e.g. `?scenario=bottleneck&seed=12345`); a real scenario-pick UI is Phase 4. Per-match variation comes from the seed, not procedural map gen.
+
+**Exit:** the current single hardcoded SPEC is gone from `main.ts`; ≥2 scenarios load from data; the same scenario + seed produces a bit-identical match twice (already true via determinism, but verified explicitly here); replays carry the scenario id + seed + the player's faction pick.
+
+### 3.13 — Rogue environmental mob spawn system _(repointed 2026-05-08)_
+
+> **Repointed 2026-05-08.** Pre-pivot (v4): "military-elimination + dominance-tick + 25-min timer + resign." Post-pivot (2026-05-07): "PvE win conditions — survive-N-waves + scenario objective + boss." Refined (2026-05-08): the win conditions land in **3.11b** (destroy enemy HQ + resign); 3.13 instead builds the **Rogue mob spawn system** — continuous neutral-hostile environmental pressure on both Player and AI. Rogues are not a third faction; they have no HQ and no win/lose role.
+
+Build the **Rogue spawner** — a deterministic sim component that pushes neutral-hostile mob clusters into the match on a seeded schedule. Rogues attack both Player and AI; the schedule is **fair** (over the course of a match, both sides face equivalent Rogue pressure).
+
+**Design model:**
+
+- **Continuous spawning, not waves.** Rogues spawn on a schedule throughout the match — early sparse, late dense. There is no "final wave" and no "survive N waves" gate. The match still ends on HQ destruction (3.11b's win condition), not on Rogue count.
+- **Spawn-fair, not target-fair.** When a Rogue cluster spawns, it splits into sub-clusters that head toward each side's territory (e.g. cluster of 10 → 5 head Player-side, 5 head AI-side). Spawn-fair is simpler to keep deterministic and easier to read on a minimap than target-fair.
+- **No mid-spawn rebalancing.** The Rogue scheduler is **fully predetermined per seed**. If the Player kills their 5 Rogues quickly, the AI's 5 don't redirect — the match continues to follow the seeded schedule. This is a determinism + replay simplification, not a balance commitment; revisit if playtest shows it's a problem.
+- **Rogues are neutral-hostile mobs.** No HQ, no win/lose role, no "Rogue faction state." Each spawned Rogue is a unit with HP, damage, AI behaviour (attack-nearest-enemy-of-either-faction). When killed, they don't respawn from corpses; new Rogues come from the next spawn event.
+- **Visual identity.** Distinct-from-both-factions palette — corrupted-glitch / sickly-yellow / static-noise white. The player must be able to tell at a glance: "that's a Rogue, not the AI's Pulse harasser." Add to the design handover before this sub-phase ships.
+
+**Sim components:**
+
+- `RogueSpawner` state on `SimState` — current schedule index, next spawn tick.
+- `RogueSchedule` — list of `(spawnTick, position, composition, splitRule)` entries on the scenario data.
+- `Rogue` units — distinct from `Unit` faction-membership; treat as a third "owner" tag (`'rogue'`) alongside the two factions. AI behaviour: attack-nearest-enemy-of-either-faction within aggression radius.
+- `Sim.stateHash()` serialises the spawner state + Rogue units. Hash format change → bumps `REPLAY_VERSION` again. Pre-3.13 fixtures don't validate; regenerate.
+- No new `CommandKind` (Rogue spawning is sim-driven, not player-driven).
+
+**Win-condition interaction:**
+
+- **Win condition stays**: destroy enemy HQ (from 3.11b). Rogues *do not* defeat the AI directly — even if Rogues happen to take the AI's HQ to 0 HP, that still counts as "AI HQ destroyed" and the player wins. (Open question: do we attribute Rogue kills to the player? Probably yes — simpler.)
+- **Loss stays**: own HQ destroyed (whether by AI or Rogues — both routes lead to the same defeat).
+- **No "kill all Rogues" condition.** Rogues continue to spawn until the match ends.
+
+**Drop (carryover from earlier 3.13 framings):**
+- 100-point threshold (already dropped in 3.11b).
+- 25-minute timer (Rogue pressure replaces stalemate prevention).
+- Survive-N-waves framing (replaced by continuous Rogue spawning + HQ-destroy win).
+- Scenario objectives — deferred to a later phase if playtest demands; not a Phase 3 commitment.
+
+**Exit:**
+- Rogues spawn deterministically per seed across the launch scenarios.
+- Both Player and AI experience equivalent Rogue pressure over the course of a match (verified by tooling: log spawn events with target sides, assert symmetric distribution).
+- A full match (Pulse-vs-Forge + Rogue spawns) plays end-to-end and replays round-trip deterministically across OSes (post-fixture-regen).
+- The Rogue visual identity reads as "neither faction" within 60 seconds of first contact in playtest.
+
+**Open questions to settle in-flight:**
+- Do Rogue kills attribute to the killing faction (for any per-faction kill stats)? Default: yes.
+- If the AI dies to Rogues mid-match, does the match end immediately (Player wins by AI-HQ-destroyed) or continue with Rogues now harassing the Player only? Default: ends immediately. (Cleaner; matches 3.11b's win condition exactly.)
+- Rogue cluster composition over time — are they always the same kinds (e.g. 60% harass / 40% frontline) or does the schedule include "boss-rogue" spawns at fixed intervals? Open. Lean toward fixed proportions for 3.13; "boss-rogue" stretch lands in Phase 4 / 5.
+
+### 3.14 — Match-loop playtest gate ("is the loop fun")
+
+> **Repointed 2026-05-07, refined 2026-05-08.** Pre-pivot (v4), this was "internal playtests show no obviously dominant strategy or faction" — an *esport balance* gate. Post-pivot, it's a **match-loop fun gate** — the only gate that matters for a PvE indie game.
+
+The actual exit criterion: a player who picks up the build cold, plays a 15-minute match, and clicks "new match" because they want to try the *other* faction (or the same faction on a different scenario). This is **not** a balance gate (balance is a long tail through Phase 4 + 5, not a Phase 3 close item). It's a **does this loop make me want to play it again** gate.
 
 Work in scope:
-- **≥20 internal runs** across the 2–3 launch scenarios + both enemy AI factions + 2–3 difficulty seeds.
-- **Per-run logging**: run length, win/loss, wave reached, dominant strategy, "did the player want to start another run" yes/no captured in a quick post-run note.
-- **Tuning passes** on wave cadence, wave composition, starting resources — small numbers, not new mechanics.
+- **≥20 internal matches** across the 2–3 launch scenarios + **both faction-picks** (player-as-Pulse and player-as-Forge) + 2–3 difficulty seeds (which scale Rogue cadence + AI strength).
+- **Per-match logging**: match length, win/loss, dominant strategy, Rogue pressure felt (low/medium/high), "did the player want to start another match" yes/no, and "did they want to swap factions" yes/no — captured in a quick post-match note.
+- **Tuning passes** on Rogue spawn cadence, AI macro aggression, starting resources — small numbers, not new mechanics.
 - **No new features.** If a feature is missing for the loop to be fun, that surfaces as a Phase 4 input, not a 3.14 add.
 
-**Exit:** ≥20 logged runs; ≥60% of runs end with the player wanting to start another; at least 2 distinct viable strategies emerge across the playtest set (e.g. "harass-rush enemy spawners" vs "turtle-and-tech to vanguard"). If the loop isn't fun at this gate, the PvE direction itself is in question — **don't paper over a bad fun-gate by moving to Phase 4 anyway**.
+**Exit:** ≥20 logged matches; ≥60% of matches end with the player wanting to start another; ≥40% of those re-pick the *opposite* faction at some point (signal that the asymmetry is doing real work); at least 2 distinct viable strategies emerge per faction. If the loop isn't fun at this gate, the PvAI + Rogue direction itself is in question — **don't paper over a bad fun-gate by moving to Phase 4 anyway**.
 
 ## Success criteria — Phase 3 exit gate
 
@@ -682,6 +801,8 @@ Work in scope:
 | 2026-05-08 | Sub-phase 3.10.10c — pair-opposite collision bias (same-day follow-up to 3.10.10b). | Owner playtest on 3.10.10b: "workers get deadlocked as they move to the same target — completely useless." Diagnosis: 3.10.10b drew an independent RNG sign per partner, so ~50% of pair-collisions ended up with both partners drifting in lockstep on the perpendicular axis instead of diverging; the no-re-roll refresh rule then locked them in for the full 25-tick lifetime. Two workers sent to the same node hit this case structurally. Fix: one `sim.rng.nextU32()` per pair, A gets `+sign`, B gets `-sign` — paired-opposite, partners always diverge on every contact. The "refresh, don't re-roll" branch in `setLateralBias` is removed; each contact overwrites direction (last pair processed wins for a unit, Y-shaped resolution in 3-worker clumps). Tunings bumped: `LATERAL_BIAS_VEL` 0.05 → 0.10 (perpendicular axis now pins to ±maxSpeed after re-clamp regardless of connecting-axis budget — gives a much sharper curve), `LATERAL_BIAS_TICKS_INITIAL` 25 → 30 (1.5 s). Sim shape unchanged; step semantics + tunings change → `REPLAY_VERSION` bumps 15 → 16, golden fixtures regenerated. All 158 unit tests + 9 e2e gates green. |
 | 2026-05-08 | Sub-phase 3.10.10d — harvest slot allocation + formation retention (same-day follow-up to 3.10.10c). | Owner playtest on 3.10.10c: collision better but workers still legitimately fight for the same space — local avoidance can't solve a destination conflict. The standard RTS fix (AoE / SC2 / WC3): don't send N units to one point, send them to N different points around a target. Two passes: (1) **harvest slot allocation** — each resource node has 6 hex-arranged slot positions at radius 0.55; `Worker` gains hashed `targetNodeSlot`, `AssignWorkerToNode` picks the lowest-index unused slot, `movingToNode` walks to `node.center + slotOffset` and snaps there at arrival; (2) **formation retention** — `MoveUnit` picks one of 7 formation slots (centre + hex ring at 0.7) by checking other units' existing `moveTarget`s, so a multi-select right-click fan-out lands its N units in slots 0..min(N-1, 6) instead of all stacking on the click point. The 3.10.10b/c lateral-bias collision pass is kept as second-line defence for residual transient overlaps — back in its intended role rather than trying to substitute for slot allocation. Sim shape moves; `REPLAY_VERSION` bumps 16 → 17; golden fixtures regenerated. All 158 unit tests + 9 e2e gates green. |
 | 2026-05-08 | Sub-phase 3.10.10e — local-collision revert (same-day follow-up to 3.10.10d). | With slot allocation + formation retention in place, owner playtest read on the residual lateral-bias collision pass: visible glitches without earning their complexity — workers placed at distinct hex slots were still visibly stuttering on local-axis contact. Owner call: drop local collision entirely, settle for pass-through. Removed: `vx, vy` on UnitBase; `maxSpeed` + `accel` on UnitStats (back to a single `speed`); `lateralBiasVx, lateralBiasVy, lateralBiasTicks` on UnitBase; `applyUnitCollisions` + `applyUnitFriction` step passes; `setLateralBias`, `isStationaryForCollision`, `isCollisionExempt`, `applyFrictionVelocity`, `zeroVelocity` helpers; `LATERAL_BIAS_*` / `UNIT_COLLISION_*` / `FRICTION_*` constants. Restored: `moveTowards` + `clampStep` chebyshev. Kept: 3.10.10d's slot/formation work and `Worker.targetNodeSlot` hashed field. Hash shape shrinks (each unit slot loses 5 i32/u32 fields). `REPLAY_VERSION` bumps 17 → 18; golden fixtures regenerated. All 158 unit tests + 9 e2e gates green. |
+| 2026-05-08 | **Refinement on the 2026-05-07 PvE pivot — direction sharpens from "wave-defense + roguelike runs" to "RTS PvAI duel + Rogue mob spawns."** | Owner-driven design conversation (no code touched) reframed the PvE shape. The RTS soul of the game is preserved: the player picks one of two factions on the main menu — **Pulse (Swarm)** or **Forge (Siege)** — and the AI plays the opposing faction. Win condition simplifies to **destroy the enemy HQ** (drops the survive-N-waves framing entirely). **Rogues** enter as a *third concept, not a third faction*: continuous neutral-hostile mob spawns that pressure both Player and AI on a deterministic per-seed schedule. Rogues have no HQ, no win/lose role, no "Rogue king" — they exist purely to compress the time both sides have to out-RTS each other and to make turtling expensive. Spawn-fair model: when a Rogue cluster spawns it splits sub-clusters toward both sides equally; no mid-spawn rebalancing (scheduler is fully predetermined per seed). **Sub-phase 3.11 is split** into **3.11a** (faction identity & menu — presentation only, no sim shape change, builds from the `tmp-handover-design/` Claude Design output: palette, type, copy, dual-tile selector, dramatic colour-wash transition + particles + sound, localStorage persistence, themed HUD/end-screens) and **3.11b** (opposing AI faction + skirmish PvAI win condition — sim work; `factionId` discriminator; per-faction stat tables in `units-config.ts`; per-faction macro in `ai.ts`; `Resign` command at slot 13; drops 100-point threshold + 25-min timer + dominance-tick). 3.11a is the immediate priority; 3.11b's scope is *less certain* and revisited before work starts. **Sub-phase 3.13 is rewritten** around the Rogue spawn system (continuous environmental pressure; deterministic schedule on the scenario; `RogueSpawner` state on `SimState`; Rogue units with `'rogue'` owner tag distinct from faction-membership). Roguelike between-*match* tech-pick screens are deferred to Phase 4 — they were a 2026-05-07 commitment that doesn't survive the 2026-05-08 framing as a Phase 3 deliverable. **PRD updated**: §0 pivot notice gains a 2026-05-08 refinement block; §3.5 rewritten for two playable factions + Rogue mob spawns; §5 in-scope updated; §6 retitled "PvAI surface" with §6.1 / §6.5 / §6.6 / §6.7 / §6.8 rewritten; §8 Phase 3 sub-phase one-liners updated; §9 risk #4 updated; Phase 4 description updated. **Investigation doc updated**: status table split 3.11 into 3.11a/3.11b; sections rewritten in place. Historical decision-log rows above are kept intact as the record of how we got here — text in this doc and in the PRD wins where it contradicts a prior entry. |
+| 2026-05-08 | Sub-phase 3.11a closed. | Faction identity & menu — presentation only, sim untouched. New `src/render/factions/theme.ts` (single source of truth: `PULSE_THEME` + `FORGE_THEME` palettes, type weights + tracking, voice copy, victory + defeat strings; `RESOURCE_COLOR` invariants for E / F / HP / S; sim ↔ menu mapping `Faction 0 ↔ pulse`, `Faction 1 ↔ forge`) and `src/render/factions/persistence.ts` (`localStorage` key `vylux.faction`, default Pulse, fail-soft). Main menu rewritten to a dual-tile selector with 5×5 emblem grids, ambient + selected-tile particle layers, MASS / SPEED / COUNT stat bars, voice tagline; switch transition matches the handover timeline (0ms thump, ~120ms vertical neon bar sweep with directional `mix-blend-mode: screen` gradient, 350ms 40-particle burst, 600ms settle); inputs A/D + ←/→ switch, Space/Enter or click-on-selected commits. `AudioManager.factionSwitch(towardId)` cue added (90 Hz sawtooth thump + delayed Pulse-bright-ping / Forge-heavy-toll). HUD threaded through faction theme: `makeResourceCard` borders + glow take faction tint, action-bar `FACTION_TINT` re-sources from theme, drag-rect tints to player's faction. End-overlay rebuilt: `{FACTION} · VICTORY/DEFEATED` headline + faction voice tagline (`"THE CURRENT HOLDS"` / `"THE ANVIL HOLDS"` / `"THE CURRENT BREAKS"` / `"THE FORGE GOES COLD"`) + radial-gradient backdrop on victory or charcoal grid lines on defeat + re-skinned NEW RUN / DOWNLOAD REPLAY buttons. AudioContext now constructed in `bootstrap()` *before* the menu so the menu interaction qualifies as the resume gesture. `?menu=skip` honours the persisted (or default) pick. PRD §0 + §3.5 + §6 + §8 already carried the 2026-05-08 refinement; manual §1 has a 3.11a notes block. **Sim shape unchanged**: no `SimState` fields, no new `UnitKind`s, no new `CommandKind` slots, `REPLAY_VERSION` not bumped (still v18), pre-3.11a fixtures still validate. `npx tsc --noEmit` clean, `npm run test` 158/158, `npm run test:e2e` 9/9. UX micro-decisions: arrow keys + Enter accepted alongside A/D + Space (zero-cost RTS muscle memory); click-on-selected-tile commits (single-mouse-click commit path); near-white ink for "VYLUX" + tile headlines per the handover (faction colour comes through underline + glow, not the glyphs). Next: 3.11b sim work — open questions on `factionId` placement and per-kind vs per-faction stat tables intentionally unsettled. |
 
 ## Known follow-ups
 

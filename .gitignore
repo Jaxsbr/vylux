@@ -31,3 +31,6 @@ dist/
 test-results/
 playwright-report/
 coverage/
+
+# Design-handover scratch — referenced from docs but not part of the build.
+tmp-handover-design/
