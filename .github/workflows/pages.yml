@@ -1,0 +1,58 @@
+name: pages
+
+# Deploy the Vite build to GitHub Pages on every push to main. The
+# project page lives at https://jaxsbr.github.io/vylux/, so the build
+# step sets `VITE_BASE=/vylux/` to prefix asset paths accordingly.
+# Local dev + e2e tests keep the default `/` — VITE_BASE is only set in
+# this workflow.
+#
+# Multiplayer / lockstep modes need a signaling server which isn't
+# deployed; the menu's PvAI flow works standalone, so that's the
+# supported entry point on Pages. URL flags like `?lockstep=...` will
+# fail-loud on the production origin until a signaling endpoint is
+# wired in (Phase 4 territory at the earliest).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deploy in flight at a time; cancel any in-progress
+# run when a newer commit arrives.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Build (with Pages base path)
+        run: npm run build
+        env:
+          VITE_BASE: /vylux/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
