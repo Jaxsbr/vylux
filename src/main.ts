@@ -56,7 +56,7 @@ import { AudioManager } from './audio/audio-manager';
 import { GameEventDetector } from './render/event-detector';
 import { MainMenu } from './render/menu/main-menu';
 import { loadFactionId } from './render/factions/persistence';
-import { factionFromId, themeForFaction, type FactionId } from './render/factions/theme';
+import { factionFromId, RESOURCE_COLOR, themeForFaction, type FactionId } from './render/factions/theme';
 import { LockstepChannel, type BroadcastChannelLike } from './net/lockstep-channel';
 import { LockstepLoop } from './net/lockstep-loop';
 import { ObserverChannel } from './net/observer-channel';
@@ -505,13 +505,13 @@ async function bootstrap(): Promise<void> {
   // tints to the faction.
   const hpCard = makeResourceCard('HQ', '500', playerColourHex, true, factionTint);
   resourceBar.appendChild(hpCard.root);
-  const energyCard = makeResourceCard('E', '0', '#ffd166', false, factionTint);
+  const energyCard = makeResourceCard('E', '0', RESOURCE_COLOR.energy, false, factionTint);
   resourceBar.appendChild(energyCard.root);
-  const fluxCard = makeResourceCard('F', '0', '#a3ff66', false, factionTint);
+  const fluxCard = makeResourceCard('F', '0', RESOURCE_COLOR.flux, false, factionTint);
   resourceBar.appendChild(fluxCard.root);
   const colourCard = makeResourceCard('C', '0', playerColourHex, false, factionTint);
   resourceBar.appendChild(colourCard.root);
-  const supplyCard = makeResourceCard('S', '0/10', '#9ad', false, factionTint);
+  const supplyCard = makeResourceCard('S', '0/10', RESOURCE_COLOR.supply, false, factionTint);
   resourceBar.appendChild(supplyCard.root);
 
   // Debug panel — opt-in via ?debug=1. Carries the dense diagnostic
@@ -692,6 +692,10 @@ async function bootstrap(): Promise<void> {
   document.body.appendChild(muteIndicator);
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'm' && e.key !== 'M') return;
+    // Skip on modifier — Cmd+M minimises the window on macOS and we
+    // don't want that to flip the mute state on its way out. Mirrors
+    // the same guard on the R-replay binding.
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     if (e.target instanceof HTMLInputElement) return;
     audio.setMuted(!audio.isMuted());
     muteIndicator.textContent = audio.isMuted()
