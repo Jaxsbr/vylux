@@ -46,6 +46,11 @@ export class Sim {
     // Factions — fixed length 2, fixed field order.
     for (let f = 0; f < 2; f++) {
       const fs = s.factions[f];
+      // Phase 3.11b: faction-id discriminator. 0 = swarm, 1 = siege.
+      // Hashed so a swarm-vs-siege match can't be replayed as
+      // siege-vs-swarm — the per-faction stat overrides would diverge
+      // and the replay would desync. REPLAY_VERSION bumps to 19.
+      h.writeU32(fs.factionId === 'swarm' ? 0 : 1);
       h.writeI32(fs.hqX);
       h.writeI32(fs.hqY);
       h.writeI32(fs.energy);

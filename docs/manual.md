@@ -8,7 +8,9 @@
 
 > **2026-05-07 pivot context, refined 2026-05-08.** Vylux is single-player **RTS PvAI + Rogue mob spawns**: the player picks a faction on the main menu, the AI plays the opposing faction, and Rogues (continuous neutral-hostile mob spawns) layer environmental pressure on both sides. The catalog below — units, structures, resources, tech, controls, current map — carries forward unchanged; the pivot is a *design* shift, not a code rewrite. Numbers and behaviours documented here are **what's currently in the game**. Sub-phases 3.11b / 3.13 / 3.14 will land the opposing-faction asymmetric roster, the Rogue spawn system, and the playtest gate. **3.11a (this sub-phase)** is presentation-only: faction picker on the main menu, themed HUD, themed end-of-match screen — the sim shape is unchanged. See PRD §0 for the pivot notice + 2026-05-08 refinement and `docs/investigation/04-phase-3-faction-and-map-depth.md` for what's coming.
 
-> **2026-05-08 — sub-phase 3.11a (faction identity & menu).** The main menu now shows a dual-tile faction picker — **PULSE (Swarm)** on the left, **FORGE (Siege)** on the right. The selected tile dominates (scale, glow, particles, voice line, START RUN button); the unselected tile dims. **A / D** or **← / →** toggles; **click** on a tile selects, **click again** (or **Space / Enter**) commits. The pick persists in `localStorage` (`vylux.faction`) — first visit defaults to Pulse. The chosen faction propagates through the in-game HUD (resource bar, action bar, HQ glow, drag-rect) and the end-of-match screen ("{FACTION} — VICTORY" / "{FACTION} — DEFEATED" with the faction's voice copy). The AI takes the opposing faction in sim — visually re-coloured, behaviour unchanged from prior sub-phases until 3.11b. `?menu=skip` still bypasses the picker and uses the persisted (or default) faction.
+> **2026-05-08 — sub-phase 3.11a (faction identity & menu).** The main menu now shows a dual-tile faction picker — **SWARM** on the left, **SIEGE** on the right. The selected tile dominates (scale, glow, particles, voice line, START RUN button); the unselected tile dims. **A / D** or **← / →** toggles; **click** on a tile selects, **click again** (or **Space / Enter**) commits. The pick persists in `localStorage` (`vylux.faction`) — first visit defaults to Swarm. The chosen faction propagates through the in-game HUD (resource bar, action bar, HQ glow, drag-rect) and the end-of-match screen ("{FACTION} — VICTORY" / "{FACTION} — DEFEATED" with the faction's voice copy). `?menu=skip` still bypasses the picker and uses the persisted (or default) faction.
+
+> **2026-05-08 — sub-phase 3.11b first cut.** The faction-id strings retired their internal `'pulse' | 'forge'` codenames in favour of `'swarm' | 'siege'` (display names already matched). The sim now stores `factionId` on `FactionState` — hashed and round-tripped through replays — so `units-config.ts` can dispatch per-faction stat overrides off the shared `UNIT_STATS` baseline. **First asymmetric tweak (proof of plumbing, not the final tuning):** Swarm workers move slightly faster (`speed = 0.055` vs `0.05`-baseline) but harvest slightly slower per gain (`harvestTicks = 23` vs `20`); Siege workers move slightly slower (`0.045`) but harvest slightly faster (`17`). All other unit stats (HP / damage / range / costs / vision / train time) stay shared. The AI's opposing-faction macro, the Resign command, and the drop of the legacy 100-point threshold are still to land before 3.11b closes. **`REPLAY_VERSION` bumps 18 → 19.**
 
 ---
 
@@ -48,12 +50,14 @@ There's no separate scout-mode command; right-click-moving a worker (or marching
 
 | Kind | Tier | HP | Speed | Range | Damage | Cooldown | Cost | Supply | Train time | Trained at |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **Worker** | T1 (eco) | 40 | 0.05 | — | 0 | — | 50 E + 5 C | 1 | instant | HQ |
+| **Worker** | T1 (eco) | 40 | 0.055 / 0.045 (per faction) | — | 0 | — | 50 E + 5 C | 1 | instant | HQ |
 | **Defender** | T1 (frontline) | 120 | 0 (stationary) | 1.5 | 10 | 20 ticks (1.0 s) | 80 E + 10 C | 2 | 30 ticks (1.5 s) | Forge |
 | **Raider** | T1 (harass) | 50 | 0.08 | 1.0 | 15 | 15 ticks (0.75 s) | 120 E + 10 C | 2 | 40 ticks (2.0 s) | Forge |
 | **Vanguard** | T2 | 150 | 0.07 | 1.5 | 30 | 18 ticks (0.9 s) | 200 E + 30 F + 25 C | 4 | 80 ticks (4.0 s) | Forge (requires tier 2) |
 
 `E` = Energy, `F` = Flux, `C` = own-faction colour (blue for faction 0, red for faction 1). `Supply` = supplyCost — consumed against the faction's `supplyCap` while the unit is alive (Phase 3.6).
+
+**Worker speed + harvest interval are faction-asymmetric (Phase 3.11b first cut).** Swarm workers move at `speed = 0.055` and harvest one gain every `23` ticks; Siege workers move at `speed = 0.045` and harvest one gain every `17` ticks. The trade-off is intentional: Swarm out-paces in re-deploy / scout, Siege out-paces at the harvest slot. All other unit stats remain shared across factions until later 3.11b passes diverge them.
 
 Speeds are **tiles per sim tick** (sim runs at 20 Hz; multiply by 20 for tiles/second).
 

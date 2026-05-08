@@ -167,7 +167,16 @@ import type { InitialMatchSpec } from './state';
 // Hash format shrinks: each unit slot loses 5 i32/u32 fields (vx, vy,
 // lateralBiasVx, lateralBiasVy, lateralBiasTicks). Golden fixtures
 // regenerated.
-export const REPLAY_VERSION = 18;
+// Phase 3.11b bumps to v19 (2026-05-08). FactionState gains `factionId:
+// 'swarm' | 'siege'`; hashed as a u32 slot per faction (0=swarm,
+// 1=siege). Initial pick threads in via InitialMatchSpec.factionIds —
+// the replay format already serialises the full spec so the existing
+// header carries the choice automatically; only the bump is needed.
+// Per-faction stat overrides (worker speed + harvest interval at this
+// cut) read off `state.factions[f].factionId`, so a swarm-vs-siege
+// match would diverge from the same inputs played as siege-vs-swarm.
+// Golden fixtures regenerated.
+export const REPLAY_VERSION = 19;
 
 export interface ReplayLog {
   version: number;

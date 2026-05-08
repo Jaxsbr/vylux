@@ -60,6 +60,8 @@ import {
   TRAIL_KILL_RANGE_SQ,
   TRAIL_SEGMENT_LIFETIME,
   UNIT_STATS,
+  factionConfigFor,
+  unitStatsFor,
 } from './units-config';
 
 // Worker-loop tuning still lives here for now. Per-kind stats moved to
@@ -764,7 +766,14 @@ function advanceWorker(state: SimState, w: Worker): void {
 }
 
 function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void {
-  const baseSpeed = UNIT_STATS.worker.speed;
+  // Phase 3.11b: per-faction worker speed + harvest interval. Swarm
+  // workers move faster but bank slower per gain; siege workers move
+  // slower but bank faster — the trade-off pair lives entirely in
+  // units-config.ts so a future sub-phase that retunes the asymmetry
+  // doesn't have to touch this file.
+  const factionId = state.factions[w.faction].factionId;
+  const baseSpeed = unitStatsFor(factionId, 'worker').speed;
+  const harvestInterval = factionConfigFor(factionId).harvestTicks;
   const speed = dumping ? (baseSpeed * DUMP_SPEED_MULTIPLIER) as Fixed : baseSpeed;
   switch (w.phase) {
     case 'idle':
@@ -810,7 +819,7 @@ function advanceWorkerPhase(state: SimState, w: Worker, dumping: boolean): void 
       // (0.06²) gives a precise stop at the slot.
       if (distSq(w.x, w.y, slotX, slotY) <= WORKER_REACH_SQ) {
         w.phase = 'harvesting';
-        w.harvestTicksRemaining = HARVEST_TICKS;
+        w.harvestTicksRemaining = harvestInterval;
         // Snap to the slot for a bit-stable resting position regardless
         // of approach trajectory.
         w.x = slotX;
