@@ -35,9 +35,20 @@ const MOVE_PING_LIFETIME_MS = 600;
 const ASSIGN_PULSE_LIFETIME_MS = 500;
 const PLACEMENT_BURST_LIFETIME_MS = 350;
 
+// All click-feedback cues sit above the fog overlay (y=0.05,
+// renderOrder=1) so the cue is never obscured by fog, even if the
+// overlay's alpha is tuned up later.
+const CUE_Y = 0.07;
+const CUE_RENDER_ORDER = 2;
+
 interface Ping {
-  mesh: THREE.Mesh;
-  material: THREE.MeshBasicMaterial;
+  // A cue may be a single mesh (ring, burst) or a small group (cross).
+  // We keep both shapes addressable so update() can animate scale +
+  // fade uniformly; materials live in a list so the fade hits each
+  // sub-mesh.
+  object: THREE.Object3D;
+  materials: THREE.MeshBasicMaterial[];
+  geometries: THREE.BufferGeometry[];
   ageMs: number;
   lifetimeMs: number;
   startScale: number;
@@ -56,17 +67,19 @@ export class FeedbackOverlay {
 
   // Fired by the input controller when the player commits a MoveUnit.
   // tileX/tileY come from the picker's rounded ground intersection (the
-  // same tile coords the sim command carries).
+  // same tile coords the sim command carries). Renders as a faction-
+  // coloured X-mark — the standard RTS "destination" glyph, easier to
+  // spot than a thin ring against the dark grid.
   spawnMovePing(tileX: number, tileY: number, faction: Faction): void {
-    this.spawnRing({
+    this.spawnCross({
       tileX,
       tileY,
       color: FACTION_COLOR[faction],
       lifetimeMs: MOVE_PING_LIFETIME_MS,
-      innerRadius: 0.2,
-      outerRadius: 0.32,
-      startScale: 0.6,
-      endScale: 1.8,
+      armLength: 0.55,
+      armThickness: 0.12,
+      startScale: 1.4,
+      endScale: 0.85,
     });
   }
 
@@ -124,13 +137,68 @@ export class FeedbackOverlay {
     const mesh = new THREE.Mesh(geo, material);
     mesh.rotation.x = -Math.PI / 2;
     const w = tileFloatToWorld(opts.tileX, opts.tileY);
-    // Sit just above the grid plane to avoid z-fighting with tile lines.
-    mesh.position.set(w.x, 0.04, w.z);
+    mesh.position.set(w.x, CUE_Y, w.z);
+    mesh.renderOrder = CUE_RENDER_ORDER;
     mesh.scale.set(opts.startScale, opts.startScale, 1);
     this.group.add(mesh);
     this.pings.push({
-      mesh,
-      material,
+      object: mesh,
+      materials: [material],
+      geometries: [geo],
+      ageMs: 0,
+      lifetimeMs: opts.lifetimeMs,
+      startScale: opts.startScale,
+      endScale: opts.endScale,
+    });
+  }
+
+  // Two crossed rectangles forming an X, parented under a group so a
+  // single scale on the group animates the whole glyph.
+  private spawnCross(opts: {
+    tileX: number;
+    tileY: number;
+    color: number;
+    lifetimeMs: number;
+    armLength: number;
+    armThickness: number;
+    startScale: number;
+    endScale: number;
+  }): void {
+    const group = new THREE.Group();
+    const materials: THREE.MeshBasicMaterial[] = [];
+    const geometries: THREE.BufferGeometry[] = [];
+    // Camera azimuth is 45° (equal x,z offset), so world XZ axes project
+    // to screen diagonals. Align the arms with world X and world Z (rot
+    // 0 and π/2) and they read as an X on screen; rotating them ±π/4 in
+    // world space — which is what feels "diagonal" — actually lines them
+    // up with the screen axes and reads as a +.
+    for (const rot of [0, Math.PI / 2]) {
+      const geo = new THREE.PlaneGeometry(opts.armLength, opts.armThickness);
+      const mat = new THREE.MeshBasicMaterial({
+        color: opts.color,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const arm = new THREE.Mesh(geo, mat);
+      arm.rotation.x = -Math.PI / 2;
+      arm.rotation.z = rot;
+      materials.push(mat);
+      geometries.push(geo);
+      group.add(arm);
+    }
+    const w = tileFloatToWorld(opts.tileX, opts.tileY);
+    group.position.set(w.x, CUE_Y, w.z);
+    group.scale.set(opts.startScale, opts.startScale, opts.startScale);
+    // Draw after the fog overlay (renderOrder 1) so the X is never
+    // obscured even if the overlay's alpha drifts up in a future tweak.
+    group.traverse(o => { o.renderOrder = CUE_RENDER_ORDER; });
+    this.group.add(group);
+    this.pings.push({
+      object: group,
+      materials,
+      geometries,
       ageMs: 0,
       lifetimeMs: opts.lifetimeMs,
       startScale: opts.startScale,
@@ -146,27 +214,27 @@ export class FeedbackOverlay {
       const p = this.pings[i];
       p.ageMs += dtMs;
       if (p.ageMs >= p.lifetimeMs) {
-        this.group.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        p.material.dispose();
+        this.group.remove(p.object);
+        for (const g of p.geometries) g.dispose();
+        for (const m of p.materials) m.dispose();
         this.pings.splice(i, 1);
         continue;
       }
       const t = p.ageMs / p.lifetimeMs;
       const scale = p.startScale + (p.endScale - p.startScale) * t;
-      p.mesh.scale.set(scale, scale, 1);
-      // Quadratic fade-out so the ring is bright at impact and tails
+      p.object.scale.set(scale, scale, scale);
+      // Quadratic fade-out so the cue is bright at impact and tails
       // off cleanly. Linear felt sluggish on the way out.
       const fade = (1 - t) * (1 - t);
-      p.material.opacity = 0.95 * fade;
+      for (const m of p.materials) m.opacity = 0.95 * fade;
     }
   }
 
   dispose(): void {
     for (const p of this.pings) {
-      this.group.remove(p.mesh);
-      p.mesh.geometry.dispose();
-      p.material.dispose();
+      this.group.remove(p.object);
+      for (const g of p.geometries) g.dispose();
+      for (const m of p.materials) m.dispose();
     }
     this.pings.length = 0;
     this.group.parent?.remove(this.group);
