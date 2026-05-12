@@ -410,12 +410,12 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
   return {
     group: b.group,
     setRemaining(value: number, max: number): void {
-      // The remaining amount used to render as a floating sprite label
-      // above the silhouette; it's now surfaced via the selection
-      // portrait sub-text instead. The silhouette emissive fade stays —
-      // a nearly-depleted node still reads as "dying" at a glance.
+      // Shade fill dims as the node empties so a nearly-depleted node
+      // still reads as "dying" at a glance — but the range is kept
+      // narrow to preserve the outlined-and-shaded look (a full-bright
+      // body would compete with the building emissive palette).
       const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
-      const intensity = 0.3 + 1.4 * ratio;
+      const intensity = 0.05 + 0.25 * ratio;
       silhouette.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           const m = child.material as THREE.MeshStandardMaterial;
@@ -430,28 +430,49 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
   const group = new THREE.Group();
   group.name = `node-silhouette-${kind}`;
 
-  const mat = (): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({
-    color: colour,
+  // Outlined-and-shaded style to match HQ + work pod: a dark body with
+  // low-emissive faction-coloured shade fill, wrapped in bright
+  // EdgesGeometry trim lines. The body holds the silhouette mass; the
+  // edges carry the resource's identity colour.
+  const bodyMat = (): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({
+    color: 0x0d1117,
     emissive: colour,
-    emissiveIntensity: 1.4,
+    emissiveIntensity: 0.18,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
   });
+  const edgeMat = (): THREE.LineBasicMaterial => new THREE.LineBasicMaterial({ color: colour });
 
-  let labelHeight = 0.5; // y above hex base where label sits
+  const addOutlined = (
+    geo: THREE.BufferGeometry,
+    y: number,
+    scale: THREE.Vector3 | null,
+    name: string,
+  ): THREE.Mesh => {
+    const mesh = new THREE.Mesh(geo, bodyMat());
+    mesh.position.y = y;
+    if (scale !== null) mesh.scale.copy(scale);
+    mesh.name = name;
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat());
+    edges.position.y = y;
+    if (scale !== null) edges.scale.copy(scale);
+    edges.name = `${name}-edge`;
+    group.add(mesh, edges);
+    return mesh;
+  };
+
   switch (kind) {
     case 'energy': {
-      // Gold pylon — tall slim octahedron pointing up. Reads as "the
-      // workhorse resource" — a clean angular spike.
+      // Gold pylon — tall slim octahedron pointing up; same geometry as
+      // the original solid silhouette but rendered in the outlined +
+      // shade-filled idiom shared with HQ and work pods.
       const geo = new THREE.OctahedronGeometry(0.18, 0);
-      const mesh = new THREE.Mesh(geo, mat());
-      mesh.scale.set(1, 2.2, 1);
-      mesh.position.y = 0.45;
-      group.add(mesh);
-      labelHeight = 0.95;
+      addOutlined(geo, 0.45, new THREE.Vector3(1, 2.2, 1), 'energy-spike');
       break;
     }
   }
 
-  group.userData.labelHeight = labelHeight;
   return group;
 }
 
