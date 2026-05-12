@@ -70,32 +70,34 @@ export class ActionBar {
 
     this.bar = document.createElement('div');
     this.bar.style.cssText = [
-      'position:fixed', 'left:50%', 'transform:translateX(-50%)',
-      'bottom:18px', 'z-index:8',
-      'display:flex', 'flex-direction:column', 'align-items:center',
+      'position:fixed', 'right:18px', 'bottom:18px', 'z-index:8',
+      'display:flex', 'flex-direction:column', 'align-items:flex-end',
       'gap:8px',
       'font-family:ui-monospace,Menlo,monospace',
       'pointer-events:auto',
+      // Keep the bar narrow enough that the portrait on the left has
+      // breathing room; buttons wrap below when more than ~3 fit.
+      'max-width:min(60vw,560px)',
     ].join(';');
 
     this.hint = document.createElement('div');
     this.hint.style.cssText = [
       'font-size:10px', 'letter-spacing:0.32em',
       'color:rgba(154,170,180,0.6)',
-      'min-height:14px', 'text-align:center',
+      'min-height:14px', 'text-align:right',
     ].join(';');
     this.bar.appendChild(this.hint);
 
     this.buttonContainer = document.createElement('div');
     this.buttonContainer.style.cssText = [
-      'display:flex', 'gap:10px',
+      'display:flex', 'flex-wrap:wrap', 'gap:10px',
       'background:rgba(7,9,12,0.78)',
       'padding:10px 14px',
       'border:1px solid rgba(0,229,255,0.18)',
       'border-radius:6px',
       'box-shadow:0 0 12px rgba(0,229,255,0.12)',
-      'min-height:74px', 'min-width:240px',
-      'align-items:center', 'justify-content:center',
+      'min-height:74px', 'min-width:140px',
+      'align-items:center', 'justify-content:flex-end',
     ].join(';');
     this.bar.appendChild(this.buttonContainer);
 

@@ -49,6 +49,7 @@ import { SimRenderer } from './render/sim-renderer';
 import { startSimDriver, TICK_HZ } from './render/sim-driver';
 import { DesyncOverlay, MatchEndOverlay } from './render/player-input';
 import { ActionBar } from './render/action-bar';
+import { SelectionPortrait } from './render/selection-portrait';
 import { InputController } from './render/input-controller';
 import { CameraController } from './render/camera-controller';
 import { FeedbackOverlay } from './render/feedback';
@@ -402,6 +403,11 @@ async function bootstrap(): Promise<void> {
     onResearchAutoResumeSelected: () => { audio.click(); input!.researchAutoResume(); },
   }, document.body);
 
+  // Bottom-left selection HUD — portrait + name for whatever the player
+  // currently has selected. Observer mode omits it for the same reason
+  // ActionBar is omitted (no friendly faction to anchor the readout to).
+  const portrait = isObserver ? null : new SelectionPortrait(playerFaction, document.body);
+
   const role: 'pva' | 'host' | 'join' | 'observe' = (() => {
     switch (mode.kind) {
       case 'pva': return 'pva';
@@ -667,6 +673,7 @@ async function bootstrap(): Promise<void> {
     const selStructure = input?.getSelectedStructureId() ?? null;
     const selHq = input?.getSelectedHqFaction() ?? null;
     panel?.refresh(match.sim, selection, selStructure, selHq);
+    portrait?.refresh(match.sim, selection, selStructure, selHq);
     renderer.applyInputVisuals(selection, selStructure, selHq);
 
     if (s.winner !== null) matchEnd.show(playerFaction, s.winner);
