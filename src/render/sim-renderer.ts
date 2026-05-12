@@ -81,6 +81,32 @@ export class SimRenderer {
     this.spawnHqs();
   }
 
+  // Currently outlined group (gray hover tint applied to its edge
+  // LineSegments) + saved original colours so we can restore on unhover.
+  private hoverGroup: THREE.Group | null = null;
+  private readonly hoverHalos: HoverHaloRef[] = [];
+
+  // Mutate the hovered entity's edge LineSegments to a faint gray. Last
+  // hovered entity's edges are restored on every change so the tint
+  // tracks the cursor cleanly. Materials are per-instance (each tier /
+  // mesh constructs its own LineBasicMaterial), so this mutation is
+  // safe — it doesn't leak across entities.
+  setHover(hovered: { kind: 'unit' | 'structure' | 'hq' | 'node'; id?: number; faction?: Faction } | null): void {
+    let group: THREE.Group | null = null;
+    if (hovered !== null) {
+      switch (hovered.kind) {
+        case 'unit':      group = hovered.id !== undefined ? this.unitMeshes.get(hovered.id)?.group ?? null : null; break;
+        case 'structure': group = hovered.id !== undefined ? this.structureMeshes.get(hovered.id)?.group ?? null : null; break;
+        case 'node':      group = hovered.id !== undefined ? this.nodeMeshes.get(hovered.id)?.group ?? null : null; break;
+        case 'hq':        group = hovered.faction !== undefined ? this.hqMeshes[hovered.faction]?.group ?? null : null; break;
+      }
+    }
+    if (group === this.hoverGroup) return;
+    if (this.hoverGroup !== null) restoreOutlineColors(this.hoverGroup, this.hoverHalos);
+    this.hoverGroup = group;
+    if (group !== null) applyHoverOutlineTint(group, this.hoverHalos);
+  }
+
   capturePrev(): void {
     this.prevUnitPos.clear();
     for (const u of this.sim.state.units) {
@@ -414,3 +440,59 @@ export class SimRenderer {
     this.prevUnitPos.clear();
   }
 }
+
+// Hover-outline glow. We keep the entity's original edge colour
+// (siege red, swarm cyan, gold for resource nodes) and fake a bloom
+// by adding TWO halo duplicates of each LineSegments — slightly
+// scaled up, additive-blended, transparent. The original sharp line
+// stays at the entity's silhouette; the halos sit just outside it
+// like a soft outer light. Two layers give the gradient that a real
+// bloom pass would, without postprocessing.
+const HOVER_HALO_LAYERS: ReadonlyArray<{ scale: number; opacity: number }> = [
+  { scale: 1.08, opacity: 0.85 },
+  { scale: 1.18, opacity: 0.4 },
+];
+
+interface HoverHaloRef {
+  parent: THREE.Object3D;
+  mesh: THREE.LineSegments;
+  material: THREE.LineBasicMaterial;
+}
+
+function applyHoverOutlineTint(group: THREE.Group, halos: HoverHaloRef[]): void {
+  group.traverse((obj) => {
+    if (!(obj instanceof THREE.LineSegments)) return;
+    const sourceMat = obj.material as THREE.LineBasicMaterial;
+    const parent = obj.parent;
+    if (parent === null) return;
+    for (const layer of HOVER_HALO_LAYERS) {
+      const haloMat = new THREE.LineBasicMaterial({
+        color: sourceMat.color.clone(),
+        transparent: true,
+        opacity: layer.opacity,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const halo = new THREE.LineSegments(obj.geometry, haloMat);
+      halo.position.copy(obj.position);
+      halo.rotation.copy(obj.rotation);
+      halo.scale.copy(obj.scale).multiplyScalar(layer.scale);
+      halo.name = `${obj.name}-hover-halo`;
+      // Renderers depth-sort halo + source so the additive layer over
+      // the same pixels still contributes. depthWrite false keeps the
+      // halo from poisoning the buffer for things drawn after.
+      halo.renderOrder = obj.renderOrder + 1;
+      parent.add(halo);
+      halos.push({ parent, mesh: halo, material: haloMat });
+    }
+  });
+}
+
+function restoreOutlineColors(_group: THREE.Group, halos: HoverHaloRef[]): void {
+  for (const h of halos) {
+    h.parent.remove(h.mesh);
+    h.material.dispose();
+  }
+  halos.length = 0;
+}
+

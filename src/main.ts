@@ -676,6 +676,7 @@ async function bootstrap(): Promise<void> {
     panel?.refresh(match.sim, selection, selStructure, selHq, selNode);
     portrait?.refresh(match.sim, selection, selStructure, selHq, selNode);
     renderer.applyInputVisuals(selection, selStructure, selHq);
+    renderer.setHover(input?.getHoveredEntity() ?? null);
 
     if (s.winner !== null) matchEnd.show(playerFaction, s.winner);
   }
