@@ -113,8 +113,9 @@ export class ActionBar {
     selectedUnitIds: ReadonlySet<number>,
     selectedStructureId: number | null,
     selectedHqFaction: Faction | null,
+    selectedNodeId: number | null = null,
   ): void {
-    const { hint, specs } = this.computeView(sim, selectedUnitIds, selectedStructureId, selectedHqFaction);
+    const { hint, specs } = this.computeView(sim, selectedUnitIds, selectedStructureId, selectedHqFaction, selectedNodeId);
     // Refresh-skip key must include the label too — the in-progress
     // research button paints its label as `RESEARCHING (Xs)` and the
     // seconds tick down each frame. Without the label in the key,
@@ -133,8 +134,17 @@ export class ActionBar {
     selectedUnitIds: ReadonlySet<number>,
     selectedStructureId: number | null,
     selectedHqFaction: Faction | null,
+    selectedNodeId: number | null,
   ): { hint: string; specs: ButtonSpec[] } {
     const fs = sim.state.factions[this.faction];
+
+    // Nodes have no actions today — short-circuit so the hint doesn't
+    // fall through to "SELECT YOUR HQ OR A WORKER" while a node is
+    // clearly selected on screen. The portrait sub-text carries the
+    // node readout.
+    if (selectedNodeId !== null) {
+      return { hint: '', specs: [] };
+    }
 
     // 1. HQ selected → TRAIN WORKER + cap meter in the hint.
     if (selectedHqFaction === this.faction) {

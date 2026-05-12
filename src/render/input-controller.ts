@@ -89,6 +89,11 @@ export class InputController {
   // mixed structure-and-units selection.
   private selectedStructureId: number | null = null;
   private selectedHqFaction: Faction | null = null;
+  // Node selection is read-only — there are no node-actions today, but
+  // the selection drives the bottom-left portrait (remaining-energy
+  // readout). Mutual-exclusion mirrors the other slots: selecting a
+  // node clears everything else.
+  private selectedNodeId: number | null = null;
   // When set, the next left-click places a structure of this kind at
   // the clicked tile. null = normal click flow (select / assign / drag).
   // Phase 3.0 introduced this for production buildings; Phase 3.2
@@ -303,10 +308,11 @@ export class InputController {
         this.selectedUnitIds.clear();
         this.selectedUnitIds.add(unitHit);
       }
-      // Selecting a unit clears any structure / HQ focus — see the
-      // mutual-exclusion rule at the field declarations.
+      // Selecting a unit clears any structure / HQ / node focus — see
+      // the mutual-exclusion rule at the field declarations.
       this.selectedStructureId = null;
       this.selectedHqFaction = null;
+      this.selectedNodeId = null;
       return;
     }
 
@@ -316,6 +322,7 @@ export class InputController {
     if (structureHit !== null) {
       this.selectedUnitIds.clear();
       this.selectedHqFaction = null;
+      this.selectedNodeId = null;
       this.selectedStructureId = structureHit;
       return;
     }
@@ -325,7 +332,20 @@ export class InputController {
     if (hqHit !== null) {
       this.selectedUnitIds.clear();
       this.selectedStructureId = null;
+      this.selectedNodeId = null;
       this.selectedHqFaction = hqHit;
+      return;
+    }
+
+    // Node pick — fires when nothing else hits and no worker is queued
+    // for assign-to-node. Selection is purely informational; the
+    // portrait will read its sub-text from the node's remaining value.
+    const nodeHitOnDown = this.pickLiveNode(e);
+    if (nodeHitOnDown !== null) {
+      this.selectedUnitIds.clear();
+      this.selectedStructureId = null;
+      this.selectedHqFaction = null;
+      this.selectedNodeId = nodeHitOnDown;
       return;
     }
 
@@ -498,6 +518,7 @@ export class InputController {
     this.selectedUnitIds.clear();
     this.selectedStructureId = null;
     this.selectedHqFaction = null;
+    this.selectedNodeId = null;
   }
 
   getSelectedStructureId(): number | null {
@@ -508,6 +529,10 @@ export class InputController {
     return this.selectedHqFaction;
   }
 
+  getSelectedNodeId(): number | null {
+    return this.selectedNodeId;
+  }
+
   // Phase 3.10.3: programmatic selection for test hooks. Production
   // input still goes through the pointer pickers — these methods exist
   // so e2e specs can drive the action bar without computing canvas
@@ -515,12 +540,14 @@ export class InputController {
   selectHqProgrammatic(faction: Faction): void {
     this.selectedUnitIds.clear();
     this.selectedStructureId = null;
+    this.selectedNodeId = null;
     this.selectedHqFaction = faction;
   }
 
   selectStructureProgrammatic(structureId: number): void {
     this.selectedUnitIds.clear();
     this.selectedHqFaction = null;
+    this.selectedNodeId = null;
     this.selectedStructureId = structureId;
   }
 
@@ -528,6 +555,7 @@ export class InputController {
     this.selectedUnitIds.clear();
     this.selectedStructureId = null;
     this.selectedHqFaction = null;
+    this.selectedNodeId = null;
     for (const u of this.opts.sim.state.units) {
       if (!u.alive || u.faction !== this.opts.playerFaction || u.kind !== 'worker') continue;
       this.selectedUnitIds.add(u.id);

@@ -672,8 +672,9 @@ async function bootstrap(): Promise<void> {
     const selection = input?.getSelectedUnitIds() ?? EMPTY_SELECTION;
     const selStructure = input?.getSelectedStructureId() ?? null;
     const selHq = input?.getSelectedHqFaction() ?? null;
-    panel?.refresh(match.sim, selection, selStructure, selHq);
-    portrait?.refresh(match.sim, selection, selStructure, selHq);
+    const selNode = input?.getSelectedNodeId() ?? null;
+    panel?.refresh(match.sim, selection, selStructure, selHq, selNode);
+    portrait?.refresh(match.sim, selection, selStructure, selHq, selNode);
     renderer.applyInputVisuals(selection, selStructure, selHq);
 
     if (s.winner !== null) matchEnd.show(playerFaction, s.winner);

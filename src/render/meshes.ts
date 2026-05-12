@@ -383,9 +383,6 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
 // Blue   → cyan diamond spire (tall stretched octahedron).
 // Red    → red-orange spike (cone, wider base).
 //
-// Each node also carries a sprite-text label that always faces the
-// camera, displaying the current remaining amount. Updated per frame
-// from the sim's `remaining` value via NodeVisual.setRemaining().
 const NODE_PALETTE: Record<ResourceKind, number> = {
   energy: 0xffd166, // gold
 };
@@ -410,18 +407,13 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
   const silhouette = buildNodeSilhouette(kind, colour);
   b.group.add(silhouette);
 
-  // Always-on remaining-amount label. Stays anchored above the
-  // silhouette and faces camera via THREE.Sprite.
-  const label = buildNodeLabel(silhouette.userData.labelHeight as number);
-  b.group.add(label.sprite);
-
   return {
     group: b.group,
     setRemaining(value: number, max: number): void {
-      label.setText(`${Math.max(0, Math.round(value))}`);
-      // Fade the silhouette emissive intensity as the node empties so
-      // a nearly-depleted node reads as "this is dying" before the
-      // hex base alone does.
+      // The remaining amount used to render as a floating sprite label
+      // above the silhouette; it's now surfaced via the selection
+      // portrait sub-text instead. The silhouette emissive fade stays —
+      // a nearly-depleted node still reads as "dying" at a glance.
       const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
       const intensity = 0.3 + 1.4 * ratio;
       silhouette.traverse((child) => {
@@ -461,55 +453,6 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
 
   group.userData.labelHeight = labelHeight;
   return group;
-}
-
-interface NodeLabel {
-  sprite: THREE.Sprite;
-  setText(text: string): void;
-}
-
-function buildNodeLabel(height: number): NodeLabel {
-  // Canvas-backed sprite. Width:height ratio fixed at 4:1; the canvas
-  // is small (128×32) so font rendering is sharp at most camera zooms
-  // without paying GPU memory for high-res text textures.
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 32;
-  const ctx = canvas.getContext('2d');
-  if (ctx === null) throw new Error('buildNodeLabel: 2d context unavailable');
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true,
-    depthWrite: false,
-    depthTest: false, // always render on top so labels don't disappear behind silhouettes
-  });
-  const sprite = new THREE.Sprite(material);
-  sprite.scale.set(0.85, 0.21, 1);
-  sprite.position.y = height + 0.15;
-  sprite.renderOrder = 999;
-
-  let lastText = '';
-  function setText(text: string): void {
-    if (text === lastText) return; // skip repaint if value didn't change
-    lastText = text;
-    ctx!.clearRect(0, 0, canvas.width, canvas.height);
-    ctx!.font = 'bold 22px ui-monospace, Menlo, monospace';
-    ctx!.textAlign = 'center';
-    ctx!.textBaseline = 'middle';
-    // Subtle outer glow for legibility against the dark grid.
-    ctx!.shadowColor = 'rgba(0,0,0,0.85)';
-    ctx!.shadowBlur = 6;
-    ctx!.fillStyle = '#cde';
-    ctx!.fillText(text, canvas.width / 2, canvas.height / 2);
-    texture.needsUpdate = true;
-  }
-  setText('—'); // placeholder until first sim sync
-  return { sprite, setText };
 }
 
 // Phase 3.10.3: shared selection ring for structures. Faction-coloured
