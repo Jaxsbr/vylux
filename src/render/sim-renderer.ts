@@ -29,6 +29,7 @@ import {
   type WorkPodVisual,
 } from './meshes';
 import { tileFloatToWorld } from './scene';
+import type { Exploration } from './exploration';
 
 interface PrevPosition {
   x: number;
@@ -45,6 +46,7 @@ export class SimRenderer {
   // the filter entirely (sees both factions' state).
   private readonly playerFaction: Faction;
   private readonly bypassVision: boolean;
+  private readonly exploration: Exploration | null;
 
   private readonly hqMeshes: [HqVisual | null, HqVisual | null] = [null, null];
   private readonly unitMeshes = new Map<number, UnitVisual>();
@@ -64,11 +66,18 @@ export class SimRenderer {
   // HQ raycast registry for the input controller.
   private readonly hqGroupView = new Map<Faction, THREE.Group>();
 
-  constructor(sim: Sim, entitiesGroup: THREE.Group, playerFaction: Faction, bypassVision = false) {
+  constructor(
+    sim: Sim,
+    entitiesGroup: THREE.Group,
+    playerFaction: Faction,
+    bypassVision = false,
+    exploration: Exploration | null = null,
+  ) {
     this.sim = sim;
     this.entitiesGroup = entitiesGroup;
     this.playerFaction = playerFaction;
     this.bypassVision = bypassVision;
+    this.exploration = exploration;
     this.spawnHqs();
   }
 
@@ -90,6 +99,7 @@ export class SimRenderer {
     this.lastAnimMs = nowMs;
 
     this.collectVisionSources();
+    this.exploration?.update();
     this.syncHqs();
     this.syncNodes();
     this.syncStructures();
@@ -140,6 +150,17 @@ export class SimRenderer {
       if (distSq(v.x, v.y, x, y) <= v.radiusSq) return true;
     }
     return false;
+  }
+
+  // Persistent reveal: an enemy entity is shown if it sits on any tile
+  // the player has ever explored. Falls back to live vision when no
+  // Exploration tracker is wired (older test paths).
+  private isPositionExplored(x: Fixed, y: Fixed): boolean {
+    if (this.bypassVision) return true;
+    if (this.exploration) {
+      return this.exploration.isPositionExplored(toFloat(x), toFloat(y));
+    }
+    return this.isPositionVisible(x, y);
   }
 
   // Read-only mesh registries used by the input controller for raycasting.
@@ -211,7 +232,7 @@ export class SimRenderer {
       // Phase 3.8: enemy HQ hidden until in the player's vision.
       // Friendly HQ always visible.
       const isOwn = f === this.playerFaction;
-      v.group.visible = isOwn || this.bypassVision || this.isPositionVisible(fs.hqX, fs.hqY);
+      v.group.visible = isOwn || this.bypassVision || this.isPositionExplored(fs.hqX, fs.hqY);
       const maxHp = fs.hqHp > 0 ? Math.max(toFloat(fs.hqHp), 0.0001) : 0;
       // Read max from spec — we don't have it on FactionState, so derive
       // from initial state by tracking max separately. Simpler: cap
@@ -286,7 +307,7 @@ export class SimRenderer {
       // until in current vision.
       const isOwn = s.faction === this.playerFaction;
       v.group.visible = s.alive
-        && (isOwn || this.bypassVision || this.isPositionVisible(s.x, s.y));
+        && (isOwn || this.bypassVision || this.isPositionExplored(s.x, s.y));
       if (!s.alive) continue;
       // Build progress ratio (0..1) drives the rising silhouette + dim
       // body / scaffolding fade.
@@ -321,7 +342,7 @@ export class SimRenderer {
       // below uses the fresh sim coords either way.
       const isOwn = u.faction === this.playerFaction;
       const visible = u.alive
-        && (isOwn || this.bypassVision || this.isPositionVisible(u.x, u.y));
+        && (isOwn || this.bypassVision || this.isPositionExplored(u.x, u.y));
 
       if (!u.alive) {
         // Phase 3.9.6: unit died this tick. Move the visual into the

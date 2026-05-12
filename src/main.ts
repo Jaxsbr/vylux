@@ -52,6 +52,7 @@ import { InputController } from './render/input-controller';
 import { CameraController } from './render/camera-controller';
 import { FeedbackOverlay } from './render/feedback';
 import { FogOverlay } from './render/fog-overlay';
+import { Exploration } from './render/exploration';
 import { AudioManager } from './audio/audio-manager';
 import { GameEventDetector } from './render/event-detector';
 import { MainMenu } from './render/menu/main-menu';
@@ -329,7 +330,12 @@ async function bootstrap(): Promise<void> {
     factionIds: { faction0: factionId0, faction1: factionId1 },
   };
   const match = new Match(matchSpec);
-  const renderer = new SimRenderer(match.sim, scene.entitiesGroup, playerFaction, isObserver);
+  // Phase: persistent fog reveal — shared explored-tile bitmap consumed
+  // by both SimRenderer (enemy entity visibility) and FogOverlay (alpha
+  // baseline). Decouples "have we ever seen this tile?" from "is this
+  // tile in current vision?" so enemies stay visible on uncovered map.
+  const exploration = new Exploration(match.sim, playerFaction, isObserver);
+  const renderer = new SimRenderer(match.sim, scene.entitiesGroup, playerFaction, isObserver, exploration);
 
   // Phase 3.9.1: input-feedback overlay. Observer mode has nothing to
   // confirm so the overlay is omitted in that path; otherwise the
@@ -339,7 +345,7 @@ async function bootstrap(): Promise<void> {
   // Phase 3.9.4: fog of war overlay. Observer mode bypasses (sees the
   // whole map). Player + lockstep modes get the per-faction fog +
   // explored bitmap painted on top of the grid plane.
-  const fog = new FogOverlay(scene.entitiesGroup, match.sim, playerFaction, isObserver);
+  const fog = new FogOverlay(scene.entitiesGroup, match.sim, isObserver, exploration);
 
   // Phase 3.9.5: event detector. Observer mode runs a no-op detector
   // (no player faction to attribute events to). The AudioManager is
