@@ -163,9 +163,10 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
   const selectionRing = buildHQSelectionRing(emissive);
   group.add(selectionRing);
 
-  // HP bar — always visible on HQs.
+  // Selection-only HP bar; SimRenderer.applyInputVisuals shows it when
+  // the HQ is selected.
   const hpBar = buildHpBar(faction, 2.1);
-  hpBar.group.visible = true;
+  hpBar.group.visible = false;
   group.add(hpBar.group);
 
   const world = tileToWorld(tileX, tileY);

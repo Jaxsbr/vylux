@@ -191,14 +191,21 @@ export class SimRenderer {
     selectedHqFaction: Faction | null = null,
   ): void {
     for (const [id, vis] of this.unitMeshes) {
-      vis.selectionRing.visible = selectedUnitIds.has(id);
+      const selected = selectedUnitIds.has(id);
+      vis.selectionRing.visible = selected;
+      vis.hpBar.group.visible = selected;
     }
     for (const [id, vis] of this.structureMeshes) {
-      vis.selectionRing.visible = id === selectedStructureId;
+      const selected = id === selectedStructureId;
+      vis.selectionRing.visible = selected;
+      vis.hpBar.group.visible = selected;
     }
     for (const f of [0, 1] as const) {
       const v = this.hqMeshes[f];
-      if (v) v.selectionRing.visible = f === selectedHqFaction;
+      if (!v) continue;
+      const selected = f === selectedHqFaction;
+      v.selectionRing.visible = selected;
+      v.hpBar.group.visible = selected;
     }
   }
 

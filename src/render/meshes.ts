@@ -113,11 +113,10 @@ export function buildUnitMesh(
   switch (kind) {
     case 'worker': {
       const b = legacyBuildWorker(fid, tileX, tileY);
-      // The legacy worker keeps its hp bar hidden by default and pops it
-      // on damage; for a cleaner read against the deterministic sim we
-      // show it always. The hpBar.update(hp, max) call from sim-renderer
-      // keeps the fill correct.
-      b.hpBar.group.visible = true;
+      // HP bar starts hidden and is toggled on by SimRenderer.applyInputVisuals
+      // when the unit is selected — keeps the map readable when nothing
+      // is selected. The legacy mesh's damage-pop pathway is unused.
+      b.hpBar.group.visible = false;
       b.mesh.scale.set(UNIT_SCALE, UNIT_SCALE, UNIT_SCALE);
       // Phase C.1: charge bar + energy cue. Charge bar sits just below
       // the HP bar; energy cue floats higher and is hidden by default.
@@ -335,7 +334,9 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
   group.add(cap);
 
   const hpBar = buildHpBar(fid, WORK_POD_DIMS.bodyHeight + WORK_POD_DIMS.capHeight + 0.25);
-  hpBar.group.visible = true;
+  // Selection-only HP bar; SimRenderer.applyInputVisuals shows it when
+  // the structure is selected.
+  hpBar.group.visible = false;
   group.add(hpBar.group);
 
   const selectionRing = buildStructureSelectionRing(faction, 0.55, 0.68);
