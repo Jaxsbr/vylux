@@ -14,6 +14,7 @@ import {
   DAMAGE_PULSE_PEAK_DELTA,
 } from './event-pulse';
 import { buildGlowEdges } from '../glow-edge';
+import { buildSelectionRing } from '../entity-chrome';
 
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
   const { tileSize, worldExtent } = GRID_CONSTANTS;
@@ -157,29 +158,13 @@ function buildDefenderMesh(emissiveHex: number): DefenderMeshResult {
   return { group, accentMat };
 }
 
-function buildSelectionRing(emissiveHex: number): THREE.Mesh {
-  const ringGeo = new THREE.RingGeometry(0.42, 0.52, 32);
-  const ringMat = new THREE.MeshStandardMaterial({
-    color: 0x00e5ff,
-    emissive: emissiveHex,
-    emissiveIntensity: 1.5,
-    side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.01;
-  ring.name = 'defender-selection-ring';
-  ring.visible = false;
-  return ring;
-}
-
 export function buildDefender(faction: FactionId, tileX: number, tileY: number): DefenderBundle {
   const emissive = FACTION_EMISSIVE[faction];
   const group = new THREE.Group();
   group.name = `defender-${faction}`;
 
   const { group: defMesh, accentMat } = buildDefenderMesh(emissive);
-  const selectionRing = buildSelectionRing(emissive);
+  const selectionRing = buildSelectionRing(faction, 'unit', { innerRadius: 0.42, outerRadius: 0.52 });
 
   const hpBar = buildHpBar(faction, 0.75);
   hpBar.group.visible = false;

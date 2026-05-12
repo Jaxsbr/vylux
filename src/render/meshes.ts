@@ -14,6 +14,7 @@ import { buildHpBar, type HpBar } from './legacy/hp-bar';
 import type { FactionId } from './legacy/placement';
 import { GRID_CONSTANTS, tileToWorld } from './legacy/grid';
 import { buildGlowEdges } from './glow-edge';
+import { buildSelectionRing } from './entity-chrome';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
@@ -93,6 +94,11 @@ export interface WorkPodVisual {
 
 export interface NodeVisual {
   group: THREE.Group;
+  // Selection ring under the node, hidden by default. SimRenderer
+  // toggles .visible when the player's input controller selects this
+  // node. Faction-less (cyan body + cyan emissive) since nodes aren't
+  // owned by either side.
+  selectionRing: THREE.Mesh;
   // Phase 3.10.9: per-frame "remaining" label update. The renderer
   // calls this each tick with the sim node's current remaining value;
   // the sprite label updates its text + fades when the node is nearly
@@ -338,7 +344,7 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
   hpBar.group.visible = false;
   group.add(hpBar.group);
 
-  const selectionRing = buildStructureSelectionRing(faction, 0.55, 0.68);
+  const selectionRing = structureSelectionRing(faction, 0.55, 0.68);
   group.add(selectionRing);
 
   const scaffoldingRing = buildScaffoldingRing(faction, 0.6, 0.74);
@@ -410,8 +416,12 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
   const silhouette = buildNodeSilhouette(kind, colour);
   b.group.add(silhouette);
 
+  const selectionRing = buildSelectionRing(null, 'node', { emissive: colour });
+  b.group.add(selectionRing);
+
   return {
     group: b.group,
+    selectionRing,
     setRemaining(value: number, max: number): void {
       // Shade fill dims as the node empties so a nearly-depleted node
       // still reads as "dying" at a glance — but the range is kept
@@ -476,57 +486,27 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
   return group;
 }
 
-// Phase 3.10.3: shared selection ring for structures. Faction-coloured
-// flat ring sits just above the grid plane; SimRenderer toggles
-// .visible based on the input controller's current selection. Same
-// visual idiom as the unit + HQ rings so the player reads "this thing
-// is selected" consistently regardless of entity kind.
-function buildStructureSelectionRing(faction: Faction, innerR: number, outerR: number): THREE.Mesh {
-  const fid = factionToId(faction);
-  const emissive = PRODUCTION_FACTION_EMISSIVE[fid];
-  const geo = new THREE.RingGeometry(innerR, outerR, 32);
-  // Match the HQ + worker selection rings: solid cyan body with a
-  // faction emissive overlay. The cyan body keeps the on-screen
-  // luminance well above the bloom threshold for either faction,
-  // while emissive carries the "who selected this" tint.
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x00e5ff,
-    emissive,
-    emissiveIntensity: 1.5,
-    side: THREE.DoubleSide,
+// Thin Faction → FactionId bridge for structure selection rings.
+// The chrome module speaks FactionId; the sim layer speaks Faction.
+function structureSelectionRing(faction: Faction, innerR: number, outerR: number): THREE.Mesh {
+  return buildSelectionRing(factionToId(faction), 'structure', {
+    innerRadius: innerR,
+    outerRadius: outerR,
   });
-  const ring = new THREE.Mesh(geo, mat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.02;
-  ring.name = 'structure-selection-ring';
-  ring.visible = false;
-  return ring;
 }
 
-// Phase 3.10.7: scaffolding ring shown only while a structure is
-// under construction. Faction-coloured, dashed-look via a thin
-// ring with low opacity; pulses via the renderer's animation loop.
-// Distinct from the selection ring (dimmer, wider radius, always-on
-// during build).
+// Scaffolding ring shown only while a structure is under
+// construction. Wider than the selection ring so a player can
+// distinguish "this is being built" from "this is selected" when
+// both are visible at once. Uses the same bloom-friendly chrome
+// idiom so it glows for either faction.
 function buildScaffoldingRing(faction: Faction, innerR: number, outerR: number): THREE.Mesh {
-  const fid = factionToId(faction);
-  const color = PRODUCTION_FACTION_EMISSIVE[fid];
-  const geo = new THREE.RingGeometry(innerR, outerR, 48);
-  const mat = new THREE.MeshStandardMaterial({
-    color,
-    emissive: color,
-    emissiveIntensity: 0.8,
-    transparent: true,
-    opacity: 0.55,
-    side: THREE.DoubleSide,
-    depthWrite: false,
+  return buildSelectionRing(factionToId(faction), 'structure', {
+    innerRadius: innerR,
+    outerRadius: outerR,
+    yOffset: 0.015,
+    name: 'structure-scaffolding-ring',
   });
-  const ring = new THREE.Mesh(geo, mat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.015;
-  ring.name = 'structure-scaffolding-ring';
-  ring.visible = false;
-  return ring;
 }
 
 // Phase 3.0 production building. Visually a low boxy structure with
@@ -614,7 +594,7 @@ export function buildProductionMesh(faction: Faction, tileX: number, tileY: numb
   hpBar.group.visible = true;
   group.add(hpBar.group);
 
-  const selectionRing = buildStructureSelectionRing(faction, 0.55, 0.68);
+  const selectionRing = structureSelectionRing(faction, 0.55, 0.68);
   group.add(selectionRing);
 
   const scaffoldingRing = buildScaffoldingRing(faction, 0.62, 0.78);
@@ -707,7 +687,7 @@ export function buildSpireMesh(faction: Faction, tileX: number, tileY: number): 
   hpBar.group.visible = true;
   group.add(hpBar.group);
 
-  const selectionRing = buildStructureSelectionRing(faction, 0.50, 0.62);
+  const selectionRing = structureSelectionRing(faction, 0.50, 0.62);
   group.add(selectionRing);
 
   const scaffoldingRing = buildScaffoldingRing(faction, 0.55, 0.70);
@@ -855,7 +835,7 @@ export function buildPylonMesh(faction: Faction, tileX: number, tileY: number): 
   hpBar.group.visible = true;
   group.add(hpBar.group);
 
-  const selectionRing = buildStructureSelectionRing(faction, 0.42, 0.52);
+  const selectionRing = structureSelectionRing(faction, 0.42, 0.52);
   group.add(selectionRing);
 
   const scaffoldingRing = buildScaffoldingRing(faction, 0.46, 0.58);

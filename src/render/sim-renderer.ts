@@ -214,6 +214,7 @@ export class SimRenderer {
     selectedUnitIds: ReadonlySet<number>,
     selectedStructureId: number | null = null,
     selectedHqFaction: Faction | null = null,
+    selectedNodeId: number | null = null,
   ): void {
     for (const [id, vis] of this.unitMeshes) {
       const selected = selectedUnitIds.has(id);
@@ -231,6 +232,9 @@ export class SimRenderer {
       const selected = f === selectedHqFaction;
       v.selectionRing.visible = selected;
       v.hpBar.group.visible = selected;
+    }
+    for (const [id, vis] of this.nodeMeshes) {
+      vis.selectionRing.visible = id === selectedNodeId;
     }
   }
 

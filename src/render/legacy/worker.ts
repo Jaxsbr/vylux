@@ -10,6 +10,7 @@ import {
   DEATH_PULSE_DURATION,
 } from './event-pulse';
 import { buildGlowEdges } from '../glow-edge';
+import { buildSelectionRing } from '../entity-chrome';
 
 // Monotonically-increasing ID counter for worker identity in task system.
 let _nextWorkerId = 1;
@@ -206,30 +207,13 @@ function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
   return { group, fillRingMat };
 }
 
-function buildSelectionRing(emissiveHex: number): THREE.Mesh {
-  // Thin torus ring on the ground plane under the worker.
-  const ringGeo = new THREE.RingGeometry(0.32, 0.42, 32);
-  const ringMat = new THREE.MeshStandardMaterial({
-    color: 0x00e5ff,
-    emissive: emissiveHex,
-    emissiveIntensity: 1.5,
-    side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.01; // just above tile plane
-  ring.name = 'worker-selection-ring';
-  ring.visible = false;
-  return ring;
-}
-
 export function buildWorker(faction: FactionId, tileX: number, tileY: number): WorkerBundle {
   const emissive = FACTION_EMISSIVE[faction];
   const group = new THREE.Group();
   group.name = `worker-${faction}`;
 
   const { group: diamond, fillRingMat } = buildDiamondMesh(emissive);
-  const selectionRing = buildSelectionRing(emissive);
+  const selectionRing = buildSelectionRing(faction, 'unit');
 
   const hpBar = buildHpBar(faction, 0.7);
   hpBar.group.visible = false;
