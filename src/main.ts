@@ -504,12 +504,9 @@ async function bootstrap(): Promise<void> {
   // this build" — and that decision happens dozens of times per match,
   // so the resource bar is the most-read UI element in the game.
   //
-  // Layout: HQ HP card on the left, then Energy / Flux / Colour /
-  // Supply pills, each with the same coloured letter glyph as the
-  // action-bar cost glyphs (E gold, F green, C faction-tinted) so a
-  // player who reads a build cost can find the matching pool by colour
-  // alone. Numbers are big and readable; supply turns red when blocked
-  // (used >= cap).
+  // Layout: HQ HP card on the left, then Energy + Supply pills. The
+  // E glyph is gold (matches action-bar cost glyphs); Supply reads as
+  // "used/cap" and turns red when the player is blocked at the cap.
   //
   // Tick / winner / opponent stats / dropped steps / lockstep peer
   // state move to a separate ?debug=1 panel (top-right) — useful for
@@ -544,11 +541,7 @@ async function bootstrap(): Promise<void> {
   resourceBar.appendChild(hpCard.root);
   const energyCard = makeResourceCard('E', '0', RESOURCE_COLOR.energy, false, factionTint);
   resourceBar.appendChild(energyCard.root);
-  const fluxCard = makeResourceCard('F', '0', RESOURCE_COLOR.flux, false, factionTint);
-  resourceBar.appendChild(fluxCard.root);
-  const colourCard = makeResourceCard('C', '0', playerColourHex, false, factionTint);
-  resourceBar.appendChild(colourCard.root);
-  const supplyCard = makeResourceCard('S', '0/10', RESOURCE_COLOR.supply, false, factionTint);
+  const supplyCard = makeResourceCard('S', '0/5', RESOURCE_COLOR.supply, false, factionTint);
   resourceBar.appendChild(supplyCard.root);
 
   // Debug panel — opt-in via ?debug=1. Carries the dense diagnostic
@@ -618,14 +611,10 @@ async function bootstrap(): Promise<void> {
     const me = s.factions[viewFaction];
     hpCard.value.textContent = `${(me.hqHp / 65536).toFixed(0)}`;
     energyCard.value.textContent = `${(me.energy / 65536).toFixed(0)}`;
-    // Phase A: flux / colour / supply HUD slots retired with the
-    // resources + supply system. The card refs are still rendered as
-    // empty placeholders until the HUD layout is rebuilt.
-    fluxCard.value.textContent = '–';
-    colourCard.value.textContent = '–';
-    supplyCard.value.textContent = '–';
-    supplyCard.root.style.borderColor = '#234';
-    supplyCard.value.style.color = '#cde';
+    supplyCard.value.textContent = `${me.supplyUsed}/${me.supplyCap}`;
+    const blocked = me.supplyUsed >= me.supplyCap;
+    supplyCard.root.style.borderColor = blocked ? '#ff5577' : '#234';
+    supplyCard.value.style.color = blocked ? '#ff5577' : '#cde';
 
     // Debug panel. Only built if ?debug=1, but cheap to update — the
     // textContent assignment is a no-op when the panel is display:none
