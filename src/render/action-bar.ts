@@ -113,7 +113,13 @@ export class ActionBar {
     selectedHqFaction: Faction | null,
   ): void {
     const { hint, specs } = this.computeView(sim, selectedUnitIds, selectedStructureId, selectedHqFaction);
-    const key = hint + '|' + specs.map((s) => `${s.id}:${s.enabled ? '1' : '0'}:${s.disabledReason ?? ''}`).join('/');
+    // Refresh-skip key must include the label too — the in-progress
+    // research button paints its label as `RESEARCHING (Xs)` and the
+    // seconds tick down each frame. Without the label in the key,
+    // refresh() short-circuits and the counter freezes.
+    const key = hint + '|' + specs.map((s) =>
+      `${s.id}:${s.enabled ? '1' : '0'}:${s.disabledReason ?? ''}:${s.label}`
+    ).join('/');
     if (key === this.currentSpecKey) return;
     this.currentSpecKey = key;
     this.hint.textContent = hint;
