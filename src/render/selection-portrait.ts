@@ -1,8 +1,9 @@
 // Bottom-left selection HUD: portrait + name for the currently selected
 // entity. Pairs with ActionBar (bottom-right) — same refresh signature,
-// same selection inputs. The portrait is a stylised faction-tinted box
-// with the entity's initial; we don't have real portrait art yet and a
-// painted glyph reads cleaner against the Tron grid than an empty box.
+// same selection inputs. The portrait box hosts a tiny WebGL scene that
+// renders the actual in-game mesh for the selected entity (via
+// PortraitRenderer), so the player sees a 3D snapshot of what they
+// clicked rather than an abstract letter glyph.
 
 import type { Faction } from '../sim/types';
 import type { Sim } from '../sim/sim';
@@ -11,23 +12,27 @@ import { toFloat } from '../sim/fixed';
 import { factionConfigFor, STRUCTURE_STATS } from '../sim/units-config';
 import type { Worker } from '../sim/types';
 import { themeForFaction } from './factions/theme';
+import { PortraitRenderer, type PortraitEntity } from './portrait-renderer';
 
 interface PortraitView {
   name: string;
-  glyph: string;
+  entity: PortraitEntity;
   faction: Faction | null; // null → neutral (nodes have no owning faction)
   subText: string;         // empty string → no sub-text row
 }
 
-// Tron-grid neutral palette for unowned things (energy nodes).
-const NEUTRAL_PRIMARY = '#ffd166';
+const PORTRAIT_PX = 128;
+
+// Neutral glow tint for unowned things (energy nodes) — used on the
+// portrait box border so it visually mirrors the gold node colour.
 const NEUTRAL_GLOW = 'rgba(255,209,102,0.55)';
 
 export class SelectionPortrait {
   private readonly playerFaction: Faction;
   private readonly root: HTMLDivElement;
   private readonly portrait: HTMLDivElement;
-  private readonly glyphEl: HTMLDivElement;
+  private readonly portraitCanvas: HTMLCanvasElement;
+  private readonly portraitRenderer: PortraitRenderer;
   private readonly textColumn: HTMLDivElement;
   private readonly nameEl: HTMLDivElement;
   private readonly subTextEl: HTMLDivElement;
@@ -40,33 +45,32 @@ export class SelectionPortrait {
     this.root.style.cssText = [
       'position:fixed', 'left:18px', 'bottom:18px', 'z-index:8',
       'display:none',
-      'flex-direction:row', 'align-items:center', 'gap:12px',
+      'flex-direction:row', 'align-items:center', 'gap:14px',
       'background:rgba(7,9,12,0.78)',
-      'padding:10px 14px',
+      'padding:14px 18px',
       'border:1px solid rgba(0,229,255,0.18)',
       'border-radius:6px',
       'box-shadow:0 0 12px rgba(0,229,255,0.12)',
-      'min-height:74px',
+      `min-height:${PORTRAIT_PX + 20}px`,
       'font-family:ui-monospace,Menlo,monospace',
       'pointer-events:none',
     ].join(';');
 
     this.portrait = document.createElement('div');
     this.portrait.style.cssText = [
-      'width:54px', 'height:54px',
+      `width:${PORTRAIT_PX}px`, `height:${PORTRAIT_PX}px`,
       'display:flex', 'align-items:center', 'justify-content:center',
       'border:1px solid rgba(0,229,255,0.3)',
       'border-radius:4px',
       'background:rgba(13,17,22,0.92)',
+      'overflow:hidden',
     ].join(';');
     this.root.appendChild(this.portrait);
 
-    this.glyphEl = document.createElement('div');
-    this.glyphEl.style.cssText = [
-      'font-size:28px', 'font-weight:700',
-      'letter-spacing:0.06em',
-    ].join(';');
-    this.portrait.appendChild(this.glyphEl);
+    this.portraitCanvas = document.createElement('canvas');
+    this.portraitCanvas.style.cssText = 'display:block;';
+    this.portrait.appendChild(this.portraitCanvas);
+    this.portraitRenderer = new PortraitRenderer(this.portraitCanvas, PORTRAIT_PX);
 
     this.textColumn = document.createElement('div');
     this.textColumn.style.cssText = [
@@ -77,14 +81,14 @@ export class SelectionPortrait {
 
     this.nameEl = document.createElement('div');
     this.nameEl.style.cssText = [
-      'font-size:13px', 'letter-spacing:0.32em', 'font-weight:600',
+      'font-size:16px', 'letter-spacing:0.32em', 'font-weight:600',
       'color:rgba(216,232,240,0.92)',
     ].join(';');
     this.textColumn.appendChild(this.nameEl);
 
     this.subTextEl = document.createElement('div');
     this.subTextEl.style.cssText = [
-      'font-size:11px', 'letter-spacing:0.18em',
+      'font-size:12px', 'letter-spacing:0.18em',
       'color:rgba(154,170,180,0.85)',
       'display:none',
     ].join(';');
@@ -94,6 +98,7 @@ export class SelectionPortrait {
   }
 
   detach(): void {
+    this.portraitRenderer.dispose();
     this.root.remove();
   }
 
@@ -107,21 +112,22 @@ export class SelectionPortrait {
     const view = this.computeView(sim, selectedUnitIds, selectedStructureId, selectedHqFaction, selectedNodeId);
     const key = view === null
       ? ''
-      : `${view.faction}|${view.name}|${view.glyph}|${view.subText}`;
+      : `${view.faction}|${view.name}|${view.entity.kind}|${view.entity.faction}|${view.subText}`;
     if (key === this.currentKey) return;
+    const entityChanged = view === null
+      ? this.currentKey !== ''
+      : !this.currentKey.startsWith(`${view.faction}|${view.name}|${view.entity.kind}|${view.entity.faction}|`);
     this.currentKey = key;
 
     if (view === null) {
       this.root.style.display = 'none';
+      if (entityChanged) this.portraitRenderer.setEntity(null);
       return;
     }
-    const primary = view.faction === null ? NEUTRAL_PRIMARY : themeForFaction(view.faction).primary;
-    const glow    = view.faction === null ? NEUTRAL_GLOW    : themeForFaction(view.faction).glow;
+    const glow = view.faction === null ? NEUTRAL_GLOW : themeForFaction(view.faction).glow;
     this.root.style.display = 'flex';
     this.root.style.border = `1px solid ${glow}`;
     this.portrait.style.border = `1px solid ${glow}`;
-    this.glyphEl.textContent = view.glyph;
-    this.glyphEl.style.color = primary;
     this.nameEl.textContent = view.name;
     if (view.subText === '') {
       this.subTextEl.style.display = 'none';
@@ -130,6 +136,10 @@ export class SelectionPortrait {
       this.subTextEl.style.display = 'block';
       this.subTextEl.textContent = view.subText;
     }
+    // Only re-render the 3D portrait when the entity descriptor itself
+    // changes — sub-text updates (e.g. HARVESTING N/M each tick) don't
+    // need a GL pass.
+    if (entityChanged) this.portraitRenderer.setEntity(view.entity);
   }
 
   private computeView(
@@ -141,13 +151,23 @@ export class SelectionPortrait {
   ): PortraitView | null {
     // HQ selection (own or enemy — both are valid click targets).
     if (selectedHqFaction !== null) {
-      return { name: 'HQ', glyph: 'H', faction: selectedHqFaction, subText: '' };
+      return {
+        name: 'HQ',
+        entity: { kind: 'hq', faction: selectedHqFaction },
+        faction: selectedHqFaction,
+        subText: '',
+      };
     }
     // Structure selection — work pods are the only live structure today.
     if (selectedStructureId !== null) {
       const s = findStructure(sim.state, selectedStructureId);
       if (s) {
-        return { name: 'WORK  POD', glyph: 'P', faction: s.faction, subText: '' };
+        return {
+          name: 'WORK  POD',
+          entity: { kind: 'workPod', faction: s.faction },
+          faction: s.faction,
+          subText: '',
+        };
       }
     }
     // Node selection — neutral palette; sub-text carries the remaining
@@ -158,7 +178,7 @@ export class SelectionPortrait {
         const remaining = Math.max(0, Math.round(toFloat(n.remaining)));
         return {
           name: 'ENERGY  NODE',
-          glyph: 'E',
+          entity: { kind: 'energyNode', faction: null },
           faction: null,
           subText: `${remaining}  ENERGY`,
         };
@@ -181,7 +201,12 @@ export class SelectionPortrait {
         const subText = selectedUnitIds.size === 1
           ? workerActionText(sim, u)
           : '';
-        return { name, glyph: 'W', faction: u.faction, subText };
+        return {
+          name,
+          entity: { kind: 'worker', faction: u.faction },
+          faction: u.faction,
+          subText,
+        };
       }
     }
     // No selection — but only hide the HUD if the player hasn't selected
