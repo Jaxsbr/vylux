@@ -392,12 +392,16 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
   const colour = NODE_PALETTE[kind];
 
   // Tint the legacy hex-base rim per kind so the disc reads as the
-  // right resource even before the silhouette is in view.
+  // right resource even before the silhouette is in view. The rim
+  // itself stays dark (outlined-and-shaded idiom) — kind colour lives
+  // on its emissive shade + the bright edge lines.
   b.group.traverse((obj) => {
     if (obj.name === 'node-rim' && obj instanceof THREE.Mesh) {
       const m = obj.material as THREE.MeshStandardMaterial;
-      m.color.set(colour);
       m.emissive.set(colour);
+    } else if (obj.name === 'node-rim-edge' && obj instanceof THREE.LineSegments) {
+      const m = obj.material as THREE.LineBasicMaterial;
+      m.color.set(colour);
     }
   });
 
