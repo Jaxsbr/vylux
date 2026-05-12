@@ -1,8 +1,6 @@
 // Pure event-pulse curve — shared attack+decay shape for place/death/capture events.
 // No Three.js, no DOM. Time → [0,1] factor, tested in isolation.
-//
-// Same shape as worker-harvest-pulse but parameterised for different durations.
-// All four event pulses share this curve; callers supply their own duration/peak.
+// All event pulses share this curve; callers supply their own duration/peak.
 
 /** Duration constants for each event type, in seconds. */
 export const PLACEMENT_PULSE_DURATION = 0.2;  // 200ms scale-in

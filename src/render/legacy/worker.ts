@@ -4,19 +4,10 @@ import { GRID_CONSTANTS } from './grid';
 import { UNIT_STATS } from './units-config';
 import { buildHpBar, type HpBar } from './hp-bar';
 import {
-  harvestPulseIntensity,
-  PULSE_DURATION,
-  PULSE_PEAK_DELTA,
-} from './worker-harvest-pulse';
-import {
   placementPulseScale,
   PLACEMENT_PULSE_DURATION,
   PLACEMENT_PULSE_SCALE_START,
-  eventPulseIntensity,
   DEATH_PULSE_DURATION,
-  DEATH_PULSE_PEAK_DELTA,
-  DAMAGE_PULSE_DURATION,
-  DAMAGE_PULSE_PEAK_DELTA,
 } from './event-pulse';
 
 // Monotonically-increasing ID counter for worker identity in task system.
@@ -57,13 +48,12 @@ const WORKER_CONSTANTS = {
   // Stacked: lower half flipped to create the bottom point.
   // Total height ~ 0.44, sits at Y=0.22 so base is ~0 and apex is ~0.44.
   bodyY: 0.22,
-  // Body emissive near-zero: dark silhouette reads through; edges + accent carry faction.
+  // Body emissive near-zero: dark silhouette reads through; edges carry faction.
   bodyEmissiveIntensity: 0.05,
-  // Thin equatorial ring accent — bright bloom anchor in faction colour.
-  accentRingInner: 0.25,
-  accentRingOuter: 0.30,
-  accentRingY: 0.22,
-  accentEmissiveIntensity: 2.0,
+  // Harvest buffer fill ring — sits at the equator just above the body.
+  fillRingInner: 0.34,
+  fillRingOuter: 0.46,
+  fillRingY: 0.25,
 } as const;
 
 export type WorkerBundle = {
@@ -96,26 +86,6 @@ export type WorkerBundle = {
   takeDamage: (amount: number) => { died: boolean; damageDealt: number };
   /** Remove mesh from scene and dispose geometries/materials. */
   dispose: (scene: THREE.Scene) => void;
-  /**
-   * Signal that this worker just received a NODE_INCOME tick — triggers a
-   * brief emissive spike on the accent ring. Must be called once per tick.
-   */
-  triggerHarvestPulse: () => void;
-  /**
-   * Advance the harvest-pulse animation. Call every frame with the frame delta.
-   * No-op when the worker is not currently on a node or the pulse has decayed.
-   */
-  tickPulse: (dt: number) => void;
-  /**
-   * Read-only: seconds elapsed since last pulse trigger, or -1 when not pulsing.
-   * Exposed so e2e hooks can sample the animation state.
-   */
-  readonly pulseElapsed: number;
-  /**
-   * Read-only: current emissive intensity of the accent ring.
-   * Exposed for e2e assertions without importing Three.js.
-   */
-  readonly accentEmissiveIntensity: number;
   /**
    * Fire the placement scale-in pulse. Call once when the unit is first spawned
    * (not on initial scene load — only on trainUnit).
@@ -155,9 +125,6 @@ export type WorkerBundle = {
    * Read-only: current harvest fill progress (0–1).
    */
   readonly harvestFillProgress: number;
-  /** Fire the damage-taken emissive flash. Called by combat.ts on each hit. */
-  triggerDamagePulse: () => void;
-  tickDamagePulse: (dt: number) => void;
 };
 
 function clampTile(v: number): number {
@@ -166,7 +133,6 @@ function clampTile(v: number): number {
 
 type DiamondMeshResult = {
   group: THREE.Group;
-  accentMat: THREE.MeshStandardMaterial;
   fillRingMat: THREE.MeshStandardMaterial;
 };
 
@@ -221,34 +187,11 @@ function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
   lowerEdges.position.y = -WORKER_CONSTANTS.diamondHeight / 2;
   lowerEdges.name = 'worker-trim-lower';
 
-  // Equatorial accent ring — thin bright disc at the widest point; primary bloom source.
-  const accentGeo = new THREE.RingGeometry(
-    WORKER_CONSTANTS.accentRingInner,
-    WORKER_CONSTANTS.accentRingOuter,
-    16,
-  );
-  const accentMat = new THREE.MeshStandardMaterial({
-    color: emissiveHex,
-    emissive: emissiveHex,
-    emissiveIntensity: WORKER_CONSTANTS.accentEmissiveIntensity,
-    side: THREE.DoubleSide,
-  });
-  const accentRing = new THREE.Mesh(accentGeo, accentMat);
-  accentRing.rotation.x = -Math.PI / 2;
-  accentRing.position.y = WORKER_CONSTANTS.accentRingY;
-  accentRing.name = 'worker-accent-ring';
-  // Hidden by default — read as a coloured halo around the head, which
-  // clashed with the outlined diamond silhouette. Mesh kept in the
-  // graph (not deleted) so the damage-flash + harvest-pulse plumbing
-  // that mutates accentMat continues to compile; the mutations now
-  // have no visible effect.
-  accentRing.visible = false;
-
-  // Harvest buffer fill ring — floats above the accent ring.
-  // Grows in emissive intensity as harvest fills up.
+  // Harvest buffer fill ring — sits at the worker's equator and grows in
+  // opacity + emissive as the harvest buffer fills up.
   const fillRingGeo = new THREE.RingGeometry(
-    WORKER_CONSTANTS.accentRingOuter + 0.04,
-    WORKER_CONSTANTS.accentRingOuter + 0.16,
+    WORKER_CONSTANTS.fillRingInner,
+    WORKER_CONSTANTS.fillRingOuter,
     20,
   );
   const fillRingMat = new THREE.MeshStandardMaterial({
@@ -261,15 +204,13 @@ function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
   });
   const fillRing = new THREE.Mesh(fillRingGeo, fillRingMat);
   fillRing.rotation.x = -Math.PI / 2;
-  fillRing.position.y = WORKER_CONSTANTS.accentRingY + 0.03;
+  fillRing.position.y = WORKER_CONSTANTS.fillRingY;
   fillRing.name = 'worker-fill-ring';
 
-  group.add(upper, lower, upperEdges, lowerEdges, accentRing, fillRing);
-  // Center the diamond so its equator is at Y=0 relative to group origin.
-  // The group origin will be placed at the tile's world Y.
+  group.add(upper, lower, upperEdges, lowerEdges, fillRing);
   group.position.y = WORKER_CONSTANTS.bodyY;
 
-  return { group, accentMat, fillRingMat };
+  return { group, fillRingMat };
 }
 
 function buildSelectionRing(emissiveHex: number): THREE.Mesh {
@@ -294,7 +235,7 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   const group = new THREE.Group();
   group.name = `worker-${faction}`;
 
-  const { group: diamond, accentMat, fillRingMat } = buildDiamondMesh(emissive);
+  const { group: diamond, fillRingMat } = buildDiamondMesh(emissive);
   const selectionRing = buildSelectionRing(emissive);
 
   const hpBar = buildHpBar(faction, 0.7);
@@ -310,18 +251,12 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   let targetX = tileX;
   let targetY = tileY;
 
-  // Harvest pulse state — -1 means no active pulse.
-  let pulseElapsedInternal = -1;
-
   // Placement pulse state.
   let placementPulseElapsedInternal = -1;
 
   // Death pulse state.
   let deathPulseElapsedInternal = -1;
   let deathPulseActiveInternal = false;
-
-  // Damage pulse state.
-  let damagePulseElapsedInternal = -1;
 
   // Harvest fill progress (0–1).
   let harvestFillProgressInternal = 0;
@@ -341,8 +276,6 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
     hp: maxHp,
     maxHp,
     hpBar,
-    get pulseElapsed(): number { return pulseElapsedInternal; },
-    get accentEmissiveIntensity(): number { return accentMat.emissiveIntensity; },
     get placementPulseElapsed(): number { return placementPulseElapsedInternal; },
     get deathPulseActive(): boolean { return deathPulseActiveInternal; },
     get harvestFillProgress(): number { return harvestFillProgressInternal; },
@@ -432,29 +365,6 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
       group.position.set(w.x, w.y, w.z);
     },
 
-    triggerHarvestPulse(): void {
-      pulseElapsedInternal = 0;
-    },
-
-    tickPulse(dt: number): void {
-      if (pulseElapsedInternal < 0) {
-        // Not pulsing — ensure accent is at baseline in case it was pulsing before.
-        accentMat.emissiveIntensity = WORKER_CONSTANTS.accentEmissiveIntensity;
-        return;
-      }
-      pulseElapsedInternal += dt;
-      accentMat.emissiveIntensity = harvestPulseIntensity(
-        WORKER_CONSTANTS.accentEmissiveIntensity,
-        PULSE_PEAK_DELTA,
-        pulseElapsedInternal,
-        PULSE_DURATION,
-      );
-      if (pulseElapsedInternal >= PULSE_DURATION) {
-        pulseElapsedInternal = -1;
-        accentMat.emissiveIntensity = WORKER_CONSTANTS.accentEmissiveIntensity;
-      }
-    },
-
     triggerPlacementPulse(): void {
       placementPulseElapsedInternal = 0;
       // Set initial scale to scaleStart immediately.
@@ -481,37 +391,11 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
     tickDeathPulse(dt: number): boolean {
       if (!deathPulseActiveInternal) return false;
       deathPulseElapsedInternal += dt;
-      accentMat.emissiveIntensity = eventPulseIntensity(
-        WORKER_CONSTANTS.accentEmissiveIntensity,
-        DEATH_PULSE_PEAK_DELTA,
-        deathPulseElapsedInternal,
-        DEATH_PULSE_DURATION,
-      );
       if (deathPulseElapsedInternal >= DEATH_PULSE_DURATION) {
         deathPulseActiveInternal = false;
-        accentMat.emissiveIntensity = WORKER_CONSTANTS.accentEmissiveIntensity;
         return false;
       }
       return true;
-    },
-
-    triggerDamagePulse(): void {
-      damagePulseElapsedInternal = 0;
-    },
-
-    tickDamagePulse(dt: number): void {
-      if (damagePulseElapsedInternal < 0) return;
-      damagePulseElapsedInternal += dt;
-      accentMat.emissiveIntensity = eventPulseIntensity(
-        WORKER_CONSTANTS.accentEmissiveIntensity,
-        DAMAGE_PULSE_PEAK_DELTA,
-        damagePulseElapsedInternal,
-        DAMAGE_PULSE_DURATION,
-      );
-      if (damagePulseElapsedInternal >= DAMAGE_PULSE_DURATION) {
-        damagePulseElapsedInternal = -1;
-        accentMat.emissiveIntensity = WORKER_CONSTANTS.accentEmissiveIntensity;
-      }
     },
   };
 
