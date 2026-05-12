@@ -8,6 +8,8 @@ import type { Faction } from '../sim/types';
 import type { Sim } from '../sim/sim';
 import { findNode, findStructure, findUnit } from '../sim/state';
 import { toFloat } from '../sim/fixed';
+import { factionConfigFor, STRUCTURE_STATS } from '../sim/units-config';
+import type { Worker } from '../sim/types';
 import { themeForFaction } from './factions/theme';
 
 interface PortraitView {
@@ -173,7 +175,13 @@ export class SelectionPortrait {
         const name = selectedUnitIds.size > 1
           ? `${base}  ×${selectedUnitIds.size}`
           : base;
-        return { name, glyph: 'W', faction: u.faction, subText: '' };
+        // Current-action readout. Hidden under multi-select because the
+        // sub-text would be misleading (it'd describe one worker out of
+        // many); a future pass can summarise the group.
+        const subText = selectedUnitIds.size === 1
+          ? workerActionText(sim, u)
+          : '';
+        return { name, glyph: 'W', faction: u.faction, subText };
       }
     }
     // No selection — but only hide the HUD if the player hasn't selected
@@ -182,5 +190,36 @@ export class SelectionPortrait {
     // selections, so a falsy result here genuinely means "nothing".
     void this.playerFaction;
     return null;
+  }
+}
+
+// Format a worker's current sim phase as a short "what is this worker
+// doing right now" line for the portrait sub-text. The harvest /
+// charging / building counters mirror the same progress the player
+// would otherwise infer from the in-world charge bar + ambient
+// harvest pulse, but in a single readable readout.
+function workerActionText(sim: Sim, w: Worker): string {
+  switch (w.phase) {
+    case 'idle': return 'IDLE';
+    case 'movingToNode': return 'MOVING';
+    case 'movingToBuildSite': return 'MOVING';
+    case 'walkingToCharge': return 'MOVING';
+    case 'returning': return 'RETURNING';
+    case 'harvesting': {
+      const fid = sim.state.factions[w.faction].factionId;
+      const total = factionConfigFor(fid).harvestTicks;
+      const done = Math.max(0, Math.min(total, total - w.harvestTicksRemaining));
+      return `HARVESTING  ${done}/${total}`;
+    }
+    case 'charging': {
+      return `CHARGING  ${w.charge}/${w.maxCharge}`;
+    }
+    case 'building': {
+      const s = findStructure(sim.state, w.targetStructureId);
+      if (s === null || s.kind !== 'workPod') return 'BUILDING';
+      const total = STRUCTURE_STATS.workPod.buildTicks;
+      const done = Math.max(0, Math.min(total, total - s.buildTicksRemaining));
+      return `BUILDING  ${done}/${total}`;
+    }
   }
 }
