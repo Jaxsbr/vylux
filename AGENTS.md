@@ -2,11 +2,15 @@
 
 ## Purpose
 
-A Tron-inspired isometric real-time strategy game — **single-player PvE, wave-defense + roguelike-run shape** as of the 2026-05-07 pivot. Built on a deterministic simulation; that property is now valued for engineering reasons (save/load, replays-as-bug-reports, scripted scenarios, AI testing), not for esport-grade lockstep multiplayer.
+A Tron-inspired isometric real-time strategy game — single-player PvAI duel on a deterministic sim. The deterministic property is now valued for engineering reasons (save/load, replays-as-bug-reports, scripted scenarios, AI testing), not for esport-grade lockstep multiplayer.
 
-See `docs/product/PRD.md` for the product direction (lead with §0 — the pivot notice). This file describes how the code is laid out. For the current in-game catalog (units, structures, resources, tech, controls), see `docs/manual.md`.
+See [`docs/plan.md`](docs/plan.md) for the product direction and phase plan. This file describes how the code is laid out. For the current in-game catalog (units, structures, resources, tech, controls), see [`docs/manual.md`](docs/manual.md).
 
-> **2026-05-07 pivot** — Vylux moved from "competitive 1v1 RTS aimed at Steam release with esport hooks" to "single-player PvE wave-defense + roguelike runs." The deterministic sim, renderer, AI scaffolding, and full catalog all carry forward unchanged — the pivot is a *design* shift, not a code rewrite. The lockstep / WebRTC / observer multiplayer code under `src/net/` is **dormant** — preserved for optionality (see "Dormant code" below), but **not on the active surface**. Don't extend it without a fresh pivot conversation.
+The lockstep / WebRTC / observer multiplayer code under `src/net/` is **dormant** — preserved for optionality (see "Dormant code" below), but **not on the active surface**. Don't extend it without re-pitching.
+
+## Mindset
+
+**The game must be fun.** A good game loop matters more than feature count. When in doubt, strip down — three landed mechanics that work beat ten that don't. Don't extend the catalog ahead of the loop being fun on its current surface. The visual north star is [`docs/concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`](docs/concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png); the planning anchor is [`docs/plan.md`](docs/plan.md).
 
 ## Documentation contract
 
@@ -20,7 +24,7 @@ See `docs/product/PRD.md` for the product direction (lead with §0 — the pivot
 - the controls (mouse / keyboard / panel)
 - the launch map(s)
 
-The investigation-doc closing checklist for any sub-phase that touches the catalog must include "manual updated." If `docs/manual.md` disagrees with `src/sim/units-config.ts` or any other code source-of-truth, the code wins — patch the doc, don't paper over the divergence.
+Any change touching the catalog must update `docs/manual.md` in the same change set. If `docs/manual.md` disagrees with `src/sim/units-config.ts` or any other code source-of-truth, the code wins — patch the doc, don't paper over the divergence.
 
 ## Stack
 
@@ -59,7 +63,7 @@ Same gate the CI determinism workflow runs (`.github/workflows/determinism.yml`)
 └───────────────────┘                      └───────────────────┘
 ```
 
-**Load-bearing rule (PRD §3.3):** `src/render/` reads from `src/sim/`. It never writes back. The sim is the single source of truth; the renderer is a one-way consumer. Enforced by convention + module boundaries.
+**Load-bearing rule:** `src/render/` reads from `src/sim/`. It never writes back. The sim is the single source of truth; the renderer is a one-way consumer. Enforced by convention + module boundaries.
 
 ## Module layout
 

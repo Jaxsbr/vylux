@@ -34,7 +34,7 @@ import { GRID_CONSTANTS } from '../grid';
 import { toFloat } from '../sim/fixed';
 import type { Sim } from '../sim/sim';
 import type { Faction } from '../sim/types';
-import { HQ_VISION_RADIUS, STRUCTURE_STATS, UNIT_STATS } from '../sim/units-config';
+import { HQ_VISION_RADIUS, UNIT_STATS } from '../sim/units-config';
 
 interface VisionSource { x: number; y: number; radius: number; rSq: number; }
 
@@ -165,11 +165,6 @@ export class FogOverlay {
       if (!u.alive || u.faction !== this.playerFaction) continue;
       const r = toFloat(UNIT_STATS[u.kind].visionRadius);
       out.push({ x: toFloat(u.x), y: toFloat(u.y), radius: r, rSq: r * r });
-    }
-    for (const s of state.structures) {
-      if (!s.alive || s.faction !== this.playerFaction) continue;
-      const r = toFloat(STRUCTURE_STATS[s.kind].visionRadius);
-      out.push({ x: toFloat(s.x), y: toFloat(s.y), radius: r, rSq: r * r });
     }
     return out;
   }

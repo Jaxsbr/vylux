@@ -25,7 +25,9 @@
 import * as THREE from 'three';
 import { CommandKind, type Command } from '../sim/commands';
 import type { Sim } from '../sim/sim';
-import { findFirstOperationalProduction, findFirstOperationalUpgrade, findNode, findStructure, findUnit } from '../sim/state';
+import { findNode, findStructure, findUnit } from '../sim/state';
+import { isInChargeMode } from '../sim/step';
+import { ENERGY_COST_PER_TASK } from '../sim/units-config';
 import type { Faction, UnitKind } from '../sim/types';
 import { GRID_CONSTANTS } from '../grid';
 import { tileFloatToWorld } from './scene';
@@ -44,6 +46,10 @@ export interface InputFeedbackHooks {
   onMoveOrder?(tileX: number, tileY: number, faction: Faction): void;
   onAssignToNode?(tileX: number, tileY: number): void;
   onPlacement?(tileX: number, tileY: number): void;
+  // Phase C.1: fired when a player command is dropped because the
+  // worker is in charge mode (or at 0 charge). Renderer plays the
+  // floating-lightning cue on the named worker.
+  onEnergyBlocked?(workerId: number): void;
 }
 
 export interface InputControllerOptions {
@@ -90,8 +96,7 @@ export class InputController {
   // supply structures (Pylons). Phase 3.10.6: also captures the worker
   // IDs that will build it — snapshotted at enterPlace*Mode time so a
   // mid-placement selection change doesn't strand the build.
-  private pendingPlacement: 'production' | 'upgrade' | 'supply' | null = null;
-  private pendingPlacementWorkers: number[] = [];
+  private pendingPlacement: 'production' | 'upgrade' | 'supply' | 'workPod' | null = null;
   private readonly queue: Command[] = [];
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -145,124 +150,74 @@ export class InputController {
   // the button when no Forge is operational, so this method silently
   // no-ops in that case rather than queueing a doomed command.
   trainUnit(kind: UnitKind): void {
-    if (kind === 'worker') {
-      this.queue.push({
-        kind: CommandKind.TrainUnit,
-        faction: this.opts.playerFaction,
-        unitKind: kind,
-      });
-    } else {
-      const forge = findFirstOperationalProduction(this.opts.sim.state, this.opts.playerFaction);
-      if (forge === null) return;
-      this.queue.push({
-        kind: CommandKind.TrainAtStructure,
-        structureId: forge.id,
-        unitKind: kind,
-      });
-    }
-    // Phase 3.10.6: keep the HQ / structure selection so the player
-    // can queue another train without re-selecting. (Clearing was the
-    // pre-3.10 behavior that assumed a flat panel; with the
-    // selection-driven action bar it'd hide the very buttons the
-    // player just clicked.) Unit selection still clears so the ring
-    // doesn't linger on workers that just got told to train.
+    // Phase A: only worker training survives. The action bar surfaces
+    // only the TRAIN WORKER button when the HQ is selected, so this
+    // method is effectively HQ-only.
+    if (kind !== 'worker') return;
+    this.queue.push({
+      kind: CommandKind.TrainUnit,
+      faction: this.opts.playerFaction,
+      unitKind: 'worker',
+    });
     this.selectedUnitIds.clear();
   }
 
-  // Called by the buildables panel when BUILD FORGE is clicked. Enters
-  // placement mode: the next left-click on the canvas issues a
-  // BuildStructure command at the clicked tile.
-  enterPlaceForgeMode(): void {
-    this.pendingPlacement = 'production';
-    this.pendingPlacementWorkers = this.snapshotSelectedWorkers();
-    // Don't clear the unit selection — the player wants to see "I'm
-    // about to dispatch these workers." The selection rings stay on
-    // until the placement click resolves.
+  // Phase A: legacy structure placement-mode entries retired.
+  enterPlaceForgeMode(): void { /* retired in Phase A */ }
+  enterPlaceSpireMode(): void { /* retired in Phase A */ }
+  enterPlacePylonMode(): void { /* retired in Phase A */ }
+
+  // Phase C.1: enter placement mode for a work pod. The next left-click
+  // on the canvas issues a BuildStructureByWorker command at the
+  // clicked tile, paid for by the first selected worker. If no worker
+  // is selected the click is consumed but no command is queued (sim
+  // would silently reject anyway).
+  enterPlaceWorkPodMode(): void {
+    this.pendingPlacement = 'workPod';
     this.applyCursor('crosshair');
   }
 
-  // Phase 3.2: placement mode for the upgrade structure (Spire).
-  enterPlaceSpireMode(): void {
-    this.pendingPlacement = 'upgrade';
-    this.pendingPlacementWorkers = this.snapshotSelectedWorkers();
-    this.applyCursor('crosshair');
-  }
-
-  // Phase 3.6: placement mode for the supply structure (Pylon).
-  enterPlacePylonMode(): void {
-    this.pendingPlacement = 'supply';
-    this.pendingPlacementWorkers = this.snapshotSelectedWorkers();
-    this.applyCursor('crosshair');
-  }
-
-  // Phase 3.10.6: collect the IDs of currently-selected own-faction
-  // alive workers — these are the ones that will be dispatched on the
-  // placement click. The first becomes the BuildStructureByWorker
-  // owner; the rest queue AssignWorkerToBuild after the structure
-  // exists. Empty list means no worker available; the placement
-  // commit will silently no-op (sim rejects invalid workerId).
-  private snapshotSelectedWorkers(): number[] {
-    const out: number[] = [];
-    const state = this.opts.sim.state;
-    for (const id of this.selectedUnitIds) {
-      const u = findUnit(state, id);
-      if (!u || u.faction !== this.opts.playerFaction) continue;
-      if (u.kind !== 'worker') continue;
-      out.push(u.id);
-    }
-    return out;
+  // Phase C.1 research: emit a StartResearchAtPod command targeting the
+  // currently-selected friendly work pod. Silent no-op if no pod is
+  // selected (UI button should be hidden in that case).
+  researchAutoResume(): void {
+    const id = this.selectedStructureId;
+    if (id === null) return;
+    this.queue.push({
+      kind: CommandKind.StartResearchAtPod,
+      structureId: id,
+      researchKind: 'autoResume',
+    });
   }
 
   isPlacing(): boolean {
     return this.pendingPlacement !== null;
   }
 
-  // Phase 3.2: emit a ResearchTier2AtStructure command targeting the
-  // player's first operational, idle Spire. Silent no-op if no Spire
-  // is available — the panel button is disabled in that case so this
-  // shouldn't be reachable through the UI.
-  researchTier2(): void {
-    const spire = findFirstOperationalUpgrade(this.opts.sim.state, this.opts.playerFaction);
-    if (spire === null) return;
-    this.queue.push({
-      kind: CommandKind.ResearchTier2AtStructure,
-      structureId: spire.id,
-    });
-  }
-
-  // Phase 3.7: emit a ResearchTrailDurationAtStructure command at the
-  // player's first idle Spire. Same shape as researchTier2().
-  researchTrailDuration(): void {
-    const spire = findFirstOperationalUpgrade(this.opts.sim.state, this.opts.playerFaction);
-    if (spire === null) return;
-    this.queue.push({
-      kind: CommandKind.ResearchTrailDurationAtStructure,
-      structureId: spire.id,
-    });
-  }
-
-  // Phase 3.7: fan out an ActivateEnergyDump command per selected
-  // dumpable worker (alive, owned, not currently dumping, not on
-  // cooldown). The sim is the source of truth and silently rejects
-  // doomed commands, but filtering at the input layer keeps the input
-  // log + replay tidy. The faction-energy gate is left to the sim
-  // (some workers may be dumpable, others not — the AI tick may have
-  // mutated energy already, so sequential rejection is fine).
-  dumpSelectedWorkers(): void {
-    const state = this.opts.sim.state;
+  // Phase C.1: pick the lowest-ID friendly worker that's currently
+  // actionable (alive, owned, not in charge mode, has ≥ 1 charge).
+  // Used by the work-pod placement flow to decide which worker walks
+  // to the site. Returns null if no selected worker fits the bill.
+  private firstActionableWorker(): number | null {
+    let best: number | null = null;
     for (const id of this.selectedUnitIds) {
-      const u = findUnit(state, id);
-      if (!u) continue;
+      const u = findUnit(this.opts.sim.state, id);
+      if (!u || u.kind !== 'worker') continue;
       if (u.faction !== this.opts.playerFaction) continue;
-      if (u.kind !== 'worker') continue;
-      if (u.dumpTicksRemaining > 0) continue;
-      if (u.dumpCooldownTicks > 0) continue;
-      this.queue.push({
-        kind: CommandKind.ActivateEnergyDump,
-        workerId: u.id,
-      });
+      if (isInChargeMode(u)) continue;
+      if (u.charge < ENERGY_COST_PER_TASK) continue;
+      if (best === null || u.id < best) best = u.id;
     }
+    return best;
   }
+
+  // Phase A: research + energy-dump entry points are retired. The
+  // action bar no longer surfaces them; these stubs remain so the
+  // ActionBarDelegate interface keeps its compile-time shape until the
+  // wiring is fully removed in a later cleanup.
+  researchTier2(): void { /* retired in Phase A */ }
+  researchTrailDuration(): void { /* retired in Phase A */ }
+  dumpSelectedWorkers(): void { /* retired in Phase A */ }
 
   // Sim-driver pulls commands here each tick. Clears the queue.
   takeQueued(): Command[] {
@@ -292,34 +247,27 @@ export class InputController {
     // structure + assigns the worker), and any additional selected
     // workers queue AssignWorkerToBuild for parallel construction.
     if (this.pendingPlacement !== null) {
-      const tile = this.pickGroundTile(e);
-      if (tile !== null && this.pendingPlacementWorkers.length > 0) {
-        const [first, ...rest] = this.pendingPlacementWorkers;
-        this.queue.push({
-          kind: CommandKind.BuildStructureByWorker,
-          workerId: first,
-          structureKind: this.pendingPlacement,
-          x: tile.x,
-          y: tile.y,
-        });
-        // KNOWN GAP (followup, see investigation 04 §3.10 close):
-        // when N>1 workers are selected at placement-click time, only
-        // the first walks to the build site. The follow-up
-        // AssignWorkerToBuild commands need the structure id created
-        // by BuildStructureByWorker — that id isn't known until the
-        // sim has applied the build command. The sim's nextEntityId
-        // is monotonic + readable here, so a future fix can capture
-        // `state.nextEntityId` immediately before queueing the build
-        // and use it for the follow-up Assign commands. 3.10.7 only
-        // wires multi-worker via right-click on an in-progress
-        // structure (see handleRightClick), which covers the "I want
-        // more builders" path but not the "I clicked place with 4
-        // workers selected" intent.
-        void rest;
-        this.opts.feedback?.onPlacement?.(tile.x, tile.y);
+      // Phase C.1: only 'workPod' is a live placement kind. Pick the
+      // first selected worker that's actionable (not in charge mode +
+      // has charge >= 1); queue a BuildStructureByWorker command at
+      // the clicked tile.
+      if (this.pendingPlacement === 'workPod') {
+        const tile = this.pickGroundTile(e);
+        if (tile !== null) {
+          const builder = this.firstActionableWorker();
+          if (builder !== null) {
+            this.queue.push({
+              kind: CommandKind.BuildStructureByWorker,
+              workerId: builder,
+              structureKind: 'workPod',
+              x: tile.x,
+              y: tile.y,
+            });
+            this.opts.feedback?.onPlacement?.(tile.x, tile.y);
+          }
+        }
       }
       this.pendingPlacement = null;
-      this.pendingPlacementWorkers = [];
       this.refreshCursor(e);
       return;
     }
@@ -478,49 +426,21 @@ export class InputController {
     }
     if (this.selectedUnitIds.size === 0) return;
 
-    // Phase 3.10.7: right-click on an in-progress own-faction structure
-    // with worker(s) selected → dispatch additional builders. Sim
-    // already supports the multi-worker stacking; this is just the
-    // input wire. Operational structures fall through to the move-
-    // order path (right-clicking a Forge with workers selected just
-    // moves them past it — no special "repair" action yet).
+    // Phase A: structures retired; right-click is move-order only.
+    // Phase C.1: workers at 0 charge or in charge mode reject the move
+    // — fire the lightning cue on each rejected worker so the player
+    // sees why the command didn't take.
     const state = this.opts.sim.state;
-    const structureHit = this.pickOwnedStructure(e);
-    if (structureHit !== null) {
-      const s = findStructure(state, structureHit);
-      if (s && s.buildTicksRemaining > 0) {
-        let assigned = 0;
-        for (const id of this.selectedUnitIds) {
-          const u = findUnit(state, id);
-          if (!u || u.kind !== 'worker') continue;
-          if (u.faction !== this.opts.playerFaction) continue;
-          this.queue.push({
-            kind: CommandKind.AssignWorkerToBuild,
-            workerId: id,
-            structureId: s.id,
-          });
-          assigned++;
-        }
-        if (assigned > 0) {
-          // Visual confirmation at the structure's tile.
-          this.opts.feedback?.onAssignToNode?.(toFloat(s.x), toFloat(s.y));
-          return;
-        }
-        // No workers in selection (e.g. only raiders) — fall through
-        // to move-order so the click does *something* on the tile.
-      }
-    }
-
-    // Move-order for every selected unit at the clicked tile. Sim
-    // silently ignores defenders + dead units, so the input layer
-    // doesn't need to filter — but we do filter to avoid emitting
-    // dead-letter commands every right-click.
     const tile = this.pickGroundTile(e);
     if (tile === null) return;
     let queued = false;
     for (const id of this.selectedUnitIds) {
       const u = findUnit(state, id);
-      if (!u || u.kind === 'defender') continue;
+      if (!u) continue;
+      if (u.kind === 'worker' && (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK)) {
+        this.opts.feedback?.onEnergyBlocked?.(id);
+        continue;
+      }
       this.queue.push({
         kind: CommandKind.MoveUnit,
         unitId: id,
@@ -529,8 +449,6 @@ export class InputController {
       });
       queued = true;
     }
-    // Only ping when at least one move actually queued — prevents the
-    // ring from flashing when the selection is all defenders / dead.
     if (queued) this.opts.feedback?.onMoveOrder?.(tile.x, tile.y, this.opts.playerFaction);
   }
 
@@ -560,6 +478,12 @@ export class InputController {
       if (!u) continue;
       if (u.faction !== this.opts.playerFaction) continue;
       if (u.kind !== 'worker') continue;
+      // Phase C.1: fire the cue + skip the command for charge-mode /
+      // 0-charge workers so the player sees why nothing happened.
+      if (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK) {
+        this.opts.feedback?.onEnergyBlocked?.(u.id);
+        continue;
+      }
       this.queue.push({
         kind: CommandKind.AssignWorkerToNode,
         workerId: u.id,
@@ -611,11 +535,17 @@ export class InputController {
   }
 
   private pickOwnedStructure(e: PointerEvent): number | null {
+    // Phase C.1: raycast against the structure meshes registered by
+    // sim-renderer (work pods carry userData.structureId on the
+    // mesh group). Returns the picked structure id iff it's owned by
+    // the player faction; null otherwise so foreign / dead pods don't
+    // register.
     this.updatePointer(e);
     const targets: THREE.Object3D[] = [];
     for (const g of this.opts.structureMeshes.values()) {
       if (g.visible) targets.push(g);
     }
+    if (targets.length === 0) return null;
     const hits = this.raycaster.intersectObjects(targets, true);
     for (const h of hits) {
       let obj: THREE.Object3D | null = h.object;
@@ -623,7 +553,7 @@ export class InputController {
         const ud = obj.userData as { structureId?: number };
         if (typeof ud.structureId === 'number') {
           const s = findStructure(this.opts.sim.state, ud.structureId);
-          if (s && s.faction === this.opts.playerFaction) return s.id;
+          if (s && s.alive && s.faction === this.opts.playerFaction) return s.id;
           return null;
         }
         obj = obj.parent;

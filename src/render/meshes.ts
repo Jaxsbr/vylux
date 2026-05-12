@@ -9,8 +9,6 @@ import * as THREE from 'three';
 import type { Faction, ResourceKind, UnitKind } from '../sim/types';
 import { buildHQ as legacyBuildHQ } from './legacy/hq';
 import { buildWorker as legacyBuildWorker } from './legacy/worker';
-import { buildDefender as legacyBuildDefender } from './legacy/defender';
-import { buildRaider as legacyBuildRaider } from './legacy/raider';
 import { buildEnergyNode as legacyBuildEnergyNode } from './legacy/energy-node';
 import { buildHpBar, type HpBar } from './legacy/hp-bar';
 import type { FactionId } from './legacy/placement';
@@ -50,6 +48,15 @@ export interface UnitVisual {
   group: THREE.Group;
   hpBar: HpBar;
   selectionRing: THREE.Mesh;
+  // Phase C.1 — charge bar. Cyan fill under the HP bar, updated by the
+  // sim-renderer each tick from the sim worker's charge / maxCharge.
+  // Purely functional: it conveys the per-unit charge meter the player
+  // needs to read to make decisions about workers.
+  chargeBar: ChargeBar;
+  // Phase C.1 — "needs energy" lightning cue. Floats above the worker
+  // for ~1 s when the renderer detects a blocked command. trigger()
+  // resets the fade; tick() advances + auto-hides.
+  energyCue: EnergyCue;
   // Phase 3.9.6 animation API. The legacy mesh modules have these built
   // in already (placement scale-in + death emissive spike); 3.9.6 just
   // surfaces them through the wrapper interface. tickDeathPulse returns
@@ -60,6 +67,25 @@ export interface UnitVisual {
   tickPlacementPulse(dt: number): void;
   tickDeathPulse(dt: number): boolean;
   readonly deathPulseActive: boolean;
+}
+
+export interface ChargeBar {
+  group: THREE.Group;
+  update(value: number, max: number): void;
+}
+
+export interface EnergyCue {
+  group: THREE.Group;
+  trigger(): void;
+  tick(dt: number): void;
+}
+
+export interface WorkPodVisual {
+  group: THREE.Group;
+  hpBar: HpBar;
+  selectionRing: THREE.Mesh;
+  scaffoldingRing: THREE.Mesh;
+  setBuildProgress(ratio: number): void;
 }
 
 export interface NodeVisual {
@@ -93,29 +119,15 @@ export function buildUnitMesh(
       // keeps the fill correct.
       b.hpBar.group.visible = true;
       b.mesh.scale.set(UNIT_SCALE, UNIT_SCALE, UNIT_SCALE);
-      return wrapUnitVisual(b);
-    }
-    case 'defender': {
-      const b = legacyBuildDefender(fid, tileX, tileY);
-      b.hpBar.group.visible = true;
-      b.mesh.scale.set(UNIT_SCALE, UNIT_SCALE, UNIT_SCALE);
-      return wrapUnitVisual(b);
-    }
-    case 'raider': {
-      const b = legacyBuildRaider(fid, tileX, tileY);
-      b.hpBar.group.visible = true;
-      b.mesh.scale.set(UNIT_SCALE, UNIT_SCALE, UNIT_SCALE);
-      return wrapUnitVisual(b);
-    }
-    case 'vanguard': {
-      // Phase 3.2 placeholder: a scaled-up raider mesh. Faction-
-      // asymmetric tier-2 visuals arrive in 3.10. Vanguard reads as
-      // ~1.5× a raider — apply that on top of the unit-wide UNIT_SCALE.
-      const b = legacyBuildRaider(fid, tileX, tileY);
-      const s = UNIT_SCALE * 1.5;
-      b.mesh.scale.set(s, s, s);
-      b.hpBar.group.visible = true;
-      return wrapUnitVisual(b);
+      // Phase C.1: charge bar + energy cue. Charge bar sits just below
+      // the HP bar; energy cue floats higher and is hidden by default.
+      const chargeBar = buildChargeBar();
+      chargeBar.group.position.y = 0.42; // below the HP bar
+      b.mesh.add(chargeBar.group);
+      const energyCue = buildEnergyCue();
+      energyCue.group.position.y = 0.7;
+      b.mesh.add(energyCue.group);
+      return wrapUnitVisual(b, chargeBar, energyCue);
     }
   }
 }
@@ -134,16 +146,227 @@ interface LegacyUnitMesh {
   readonly deathPulseActive: boolean;
 }
 
-function wrapUnitVisual(b: LegacyUnitMesh): UnitVisual {
+function wrapUnitVisual(b: LegacyUnitMesh, chargeBar: ChargeBar, energyCue: EnergyCue): UnitVisual {
   return {
     group: b.mesh,
     hpBar: b.hpBar,
     selectionRing: b.selectionRing,
+    chargeBar,
+    energyCue,
     triggerPlacementPulse: () => b.triggerPlacementPulse(),
     triggerDeathPulse: () => b.triggerDeathPulse(),
     tickPlacementPulse: (dt) => b.tickPlacementPulse(dt),
     tickDeathPulse: (dt) => b.tickDeathPulse(dt),
     get deathPulseActive() { return b.deathPulseActive; },
+  };
+}
+
+// Phase C.1 — charge bar. Same dual-mesh idiom as the hp-bar: a dim
+// background panel + a bright cyan fill that scales width with the
+// charge ratio. Cyan distinguishes it from the green HP bar.
+const CHARGE_BAR_WIDTH = 0.35;
+const CHARGE_BAR_HEIGHT = 0.04;
+
+function buildChargeBar(): ChargeBar {
+  const group = new THREE.Group();
+  group.name = 'charge-bar';
+  const bgGeo = new THREE.PlaneGeometry(CHARGE_BAR_WIDTH, CHARGE_BAR_HEIGHT);
+  const bgMat = new THREE.MeshBasicMaterial({ color: 0x0a1418, transparent: true, opacity: 0.7 });
+  const bg = new THREE.Mesh(bgGeo, bgMat);
+  bg.renderOrder = 998;
+  // Face the camera (sprite-style billboarding for an orthographic iso
+  // is just leaving the plane facing +z and tilting slightly).
+  bg.rotation.x = -Math.PI / 6;
+  group.add(bg);
+
+  const fillGeo = new THREE.PlaneGeometry(CHARGE_BAR_WIDTH, CHARGE_BAR_HEIGHT);
+  const fillMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff });
+  const fill = new THREE.Mesh(fillGeo, fillMat);
+  fill.renderOrder = 999;
+  fill.rotation.x = -Math.PI / 6;
+  // Position the fill slightly in front of bg to avoid z-fighting.
+  fill.position.z = 0.001;
+  group.add(fill);
+
+  return {
+    group,
+    update(value: number, max: number): void {
+      const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
+      fill.scale.x = ratio === 0 ? 0.0001 : ratio;
+      // Anchor the fill at the left edge — same trick the HP bar uses.
+      fill.position.x = -CHARGE_BAR_WIDTH * (1 - ratio) / 2;
+    },
+  };
+}
+
+// Phase C.1 — "needs energy" lightning cue. A small bright sprite that
+// pops above the worker for ~1 s when the renderer detects a blocked
+// command on a charge-mode worker. Uses a canvas-drawn glyph rather
+// than a textured asset so we don't ship a new file. Visibility is
+// driven by the cue's lifetime counter; trigger() resets it.
+const CUE_LIFETIME_SECONDS = 1.0;
+
+function buildEnergyCue(): EnergyCue {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (ctx === null) throw new Error('buildEnergyCue: 2d context unavailable');
+  // Draw a bright lightning bolt.
+  ctx.fillStyle = '#ffe05a';
+  ctx.strokeStyle = '#fffec5';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(36, 6);
+  ctx.lineTo(20, 32);
+  ctx.lineTo(30, 32);
+  ctx.lineTo(20, 58);
+  ctx.lineTo(44, 28);
+  ctx.lineTo(34, 28);
+  ctx.lineTo(42, 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    opacity: 0,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(0.35, 0.35, 1);
+  sprite.renderOrder = 1000;
+
+  const group = new THREE.Group();
+  group.name = 'energy-cue';
+  group.add(sprite);
+  group.visible = false;
+
+  let elapsed = -1; // -1 = inactive
+
+  return {
+    group,
+    trigger(): void {
+      elapsed = 0;
+      group.visible = true;
+      material.opacity = 1;
+    },
+    tick(dt: number): void {
+      if (elapsed < 0) return;
+      elapsed += dt;
+      // Linear fade + slight float upward.
+      const ratio = Math.min(1, elapsed / CUE_LIFETIME_SECONDS);
+      material.opacity = 1 - ratio;
+      sprite.position.y = 0.2 * ratio;
+      if (elapsed >= CUE_LIFETIME_SECONDS) {
+        elapsed = -1;
+        group.visible = false;
+        material.opacity = 0;
+      }
+    },
+  };
+}
+
+// Phase C.1 — work pod mesh. Low, wide silhouette (distinct from HQ's
+// tall multi-tier spire); faction-tinted accent cap reads as the
+// "charge bay" at a glance. Selection + scaffolding rings reuse the
+// shared structure helpers so the structure-selection idiom stays
+// consistent across kinds.
+const WORK_POD_DIMS = {
+  bodyWidth: 0.85,
+  bodyHeight: 0.4,
+  capRadius: 0.32,
+  capHeight: 0.1,
+} as const;
+const WORK_POD_SCALE = 1.6;
+
+export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number): WorkPodVisual {
+  const fid = factionToId(faction);
+  const emissive = PRODUCTION_FACTION_EMISSIVE[fid];
+
+  const group = new THREE.Group();
+  group.name = `work-pod-${fid}`;
+
+  // Wide low body — reads as "a place workers go into".
+  const bodyGeo = new THREE.BoxGeometry(
+    WORK_POD_DIMS.bodyWidth,
+    WORK_POD_DIMS.bodyHeight,
+    WORK_POD_DIMS.bodyWidth,
+  );
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: PRODUCTION_BODY_COLOR,
+    emissive,
+    emissiveIntensity: 0.08,
+  });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = WORK_POD_DIMS.bodyHeight / 2;
+  body.name = 'work-pod-body';
+  group.add(body);
+
+  const edgesGeo = new THREE.EdgesGeometry(bodyGeo);
+  const edgesMat = new THREE.LineBasicMaterial({ color: emissive });
+  const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+  edges.position.y = WORK_POD_DIMS.bodyHeight / 2;
+  edges.name = 'work-pod-trim';
+  group.add(edges);
+
+  // Glowing cap on top — reads as the charge-bay indicator. Bright
+  // emissive so the pod stands out on the grid even before bloom is
+  // re-introduced.
+  const capGeo = new THREE.CylinderGeometry(
+    WORK_POD_DIMS.capRadius,
+    WORK_POD_DIMS.capRadius,
+    WORK_POD_DIMS.capHeight,
+    16,
+  );
+  const capMat = new THREE.MeshStandardMaterial({
+    color: emissive,
+    emissive,
+    emissiveIntensity: 1.5,
+  });
+  const cap = new THREE.Mesh(capGeo, capMat);
+  cap.position.y = WORK_POD_DIMS.bodyHeight + WORK_POD_DIMS.capHeight / 2;
+  cap.name = 'work-pod-cap';
+  group.add(cap);
+
+  const hpBar = buildHpBar(fid, WORK_POD_DIMS.bodyHeight + WORK_POD_DIMS.capHeight + 0.25);
+  hpBar.group.visible = true;
+  group.add(hpBar.group);
+
+  const selectionRing = buildStructureSelectionRing(faction, 0.55, 0.68);
+  group.add(selectionRing);
+
+  const scaffoldingRing = buildScaffoldingRing(faction, 0.6, 0.74);
+  group.add(scaffoldingRing);
+
+  const world = tileToWorld(tileX, tileY);
+  group.position.set(world.x, world.y, world.z);
+  group.scale.set(WORK_POD_SCALE, WORK_POD_SCALE, WORK_POD_SCALE);
+
+  return {
+    group,
+    hpBar,
+    selectionRing,
+    scaffoldingRing,
+    setBuildProgress(ratio: number): void {
+      const clamped = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
+      const yScale = 0.15 + 0.85 * clamped;
+      body.scale.y = yScale;
+      body.position.y = (WORK_POD_DIMS.bodyHeight / 2) * yScale;
+      edges.scale.y = yScale;
+      edges.position.y = (WORK_POD_DIMS.bodyHeight / 2) * yScale;
+      cap.position.y = WORK_POD_DIMS.bodyHeight * yScale + WORK_POD_DIMS.capHeight / 2;
+      cap.visible = clamped > 0.4;
+      bodyMat.opacity = 0.45 + 0.55 * clamped;
+      bodyMat.transparent = clamped < 1;
+      capMat.emissiveIntensity = 0.2 + 1.3 * clamped;
+      scaffoldingRing.visible = clamped < 1;
+    },
   };
 }
 
@@ -163,10 +386,7 @@ function wrapUnitVisual(b: LegacyUnitMesh): UnitVisual {
 // camera, displaying the current remaining amount. Updated per frame
 // from the sim's `remaining` value via NodeVisual.setRemaining().
 const NODE_PALETTE: Record<ResourceKind, number> = {
-  energy: 0xffd166, // gold — matches action-bar 'E' cost glyph
-  flux:   0xa3ff66, // green — matches action-bar 'F' cost glyph
-  blue:   0x00e5ff, // cyan — matches faction 0 + 'C' cost glyph
-  red:    0xff6a33, // red-orange — matches faction 1 + 'C' cost glyph
+  energy: 0xffd166, // gold
 };
 
 export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind = 'energy'): NodeVisual {
@@ -234,47 +454,6 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
       mesh.position.y = 0.45;
       group.add(mesh);
       labelHeight = 0.95;
-      break;
-    }
-    case 'flux': {
-      // Green crystal cluster — three small octahedra clustered
-      // together at slightly different heights. Reads as "rare,
-      // precious, hand-cut" against energy's clean spike.
-      for (const offset of [
-        { x: 0,    y: 0.50, z: 0,    s: 1.0 },
-        { x: 0.18, y: 0.38, z: 0.10, s: 0.7 },
-        { x: -0.16, y: 0.42, z: -0.08, s: 0.8 },
-      ]) {
-        const geo = new THREE.OctahedronGeometry(0.14, 0);
-        const mesh = new THREE.Mesh(geo, mat());
-        mesh.scale.set(offset.s, offset.s * 1.4, offset.s);
-        mesh.position.set(offset.x, offset.y, offset.z);
-        group.add(mesh);
-      }
-      labelHeight = 0.95;
-      break;
-    }
-    case 'blue': {
-      // Cyan diamond spire — tall narrow octahedron, stretched
-      // vertically. Same shape language as energy but colour-locked
-      // to faction 0 + scaled tall to read as "premium colour pool."
-      const geo = new THREE.OctahedronGeometry(0.16, 0);
-      const mesh = new THREE.Mesh(geo, mat());
-      mesh.scale.set(0.85, 3.0, 0.85);
-      mesh.position.y = 0.55;
-      group.add(mesh);
-      labelHeight = 1.20;
-      break;
-    }
-    case 'red': {
-      // Red-orange spike — wider-based cone, faction 1's colour pool.
-      // The cone shape (vs blue's diamond) reads as faction-asymmetric
-      // even before colour parses.
-      const geo = new THREE.ConeGeometry(0.2, 0.85, 6);
-      const mesh = new THREE.Mesh(geo, mat());
-      mesh.position.y = 0.50;
-      group.add(mesh);
-      labelHeight = 1.05;
       break;
     }
   }

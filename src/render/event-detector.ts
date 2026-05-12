@@ -65,19 +65,8 @@ export class GameEventDetector {
       // No break — still need to walk for HP snapshot below.
     }
 
-    // Build complete — friendly structure was building, now isn't.
-    for (const s of this.sim.state.structures) {
-      if (!s.alive) continue;
-      if (s.faction !== this.playerFaction) continue;
-      const wasBuilding = this.prevStructureBuilding.has(s.id);
-      const isBuilding = s.buildTicksRemaining > 0;
-      if (wasBuilding && !isBuilding) {
-        if (!buildFired) {
-          this.audio.buildComplete();
-          buildFired = true;
-        }
-      }
-    }
+    // Build complete — no structures in the Phase A surface; pass.
+    void buildFired;
 
     // Attack hit — any friendly unit's HP decreased since last tick.
     for (const u of this.sim.state.units) {
@@ -119,11 +108,6 @@ export class GameEventDetector {
       }
     }
     this.prevStructureBuilding.clear();
-    for (const s of this.sim.state.structures) {
-      if (s.alive && s.faction === this.playerFaction && s.buildTicksRemaining > 0) {
-        this.prevStructureBuilding.add(s.id);
-      }
-    }
     this.prevHqHp = toFloat(this.sim.state.factions[this.playerFaction].hqHp);
   }
 }

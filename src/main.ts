@@ -91,22 +91,8 @@ const SPEC: InitialMatchSpec = {
     // Mid-distance "second base" nodes on the diagonals.
     { x: 11, y: 20, energy: 200 },
     { x: 20, y: 11, energy: 200 },
-    // Phase 3.6: two Flux nodes at flank-symmetric positions so the
-    // Flux contest isn't always the same midpoint scrum. The two
-    // positions are equidistant between the HQs but on different
-    // diagonals — taking one commits to defending it instead of
-    // splitting attention across both.
-    { x: 9, y: 16, energy: 100, kind: 'flux' },
-    { x: 22, y: 16, energy: 100, kind: 'flux' },
-    // Faction 0 colour (blue). Forward + flank of HQ.
-    { x: 8, y: 8, energy: 100, kind: 'blue' },
-    { x: 2, y: 10, energy: 100, kind: 'blue' },
-    // Faction 1 colour (red). Mirror placement.
-    { x: 23, y: 23, energy: 100, kind: 'red' },
-    { x: 29, y: 21, energy: 100, kind: 'red' },
   ],
   initialEnergy: 200,
-  initialColor: 50,
   hqMaxHp: 250,
 };
 
@@ -380,6 +366,9 @@ async function bootstrap(): Promise<void> {
       onMoveOrder: (x, y, f) => feedback.spawnMovePing(x, y, f),
       onAssignToNode: (x, y) => feedback.spawnAssignPulse(x, y),
       onPlacement: (x, y) => feedback.spawnPlacementBurst(x, y),
+      // Phase C.1: blocked command on a charge-mode worker → trigger
+      // the lightning cue at the worker's position via sim-renderer.
+      onEnergyBlocked: (workerId) => renderer.triggerEnergyCue(workerId),
     },
   });
 
@@ -394,6 +383,12 @@ async function bootstrap(): Promise<void> {
     onResearchTier2Selected: () => { audio.click(); input!.researchTier2(); },
     onResearchTrailDurationSelected: () => { audio.click(); input!.researchTrailDuration(); },
     onDumpSelected: () => { audio.click(); input!.dumpSelectedWorkers(); },
+    // Phase C.1: enter placement mode for a work pod (worker-driven build).
+    onBuildWorkPodSelected: () => { audio.click(); input!.enterPlaceWorkPodMode(); },
+    // Phase C.1 research: queue the StartResearchAtPod command on the
+    // currently-selected pod (action-bar disables the button when not
+    // applicable, so this fires only when valid).
+    onResearchAutoResumeSelected: () => { audio.click(); input!.researchAutoResume(); },
   }, document.body);
 
   const role: 'pva' | 'host' | 'join' | 'observe' = (() => {
@@ -597,15 +592,14 @@ async function bootstrap(): Promise<void> {
     const me = s.factions[viewFaction];
     hpCard.value.textContent = `${(me.hqHp / 65536).toFixed(0)}`;
     energyCard.value.textContent = `${(me.energy / 65536).toFixed(0)}`;
-    fluxCard.value.textContent = `${(me.flux / 65536).toFixed(0)}`;
-    colourCard.value.textContent = `${(me.color / 65536).toFixed(0)}`;
-    supplyCard.value.textContent = `${me.supplyUsed}/${me.supplyCap}`;
-    // Supply pulses red when the player is at or near the cap so the
-    // "why can't I train?" question gets answered before the player
-    // reads the action-bar tooltip.
-    const supplyBlocked = me.supplyUsed >= me.supplyCap;
-    supplyCard.root.style.borderColor = supplyBlocked ? '#ff5577' : '#234';
-    supplyCard.value.style.color = supplyBlocked ? '#ff7799' : '#cde';
+    // Phase A: flux / colour / supply HUD slots retired with the
+    // resources + supply system. The card refs are still rendered as
+    // empty placeholders until the HUD layout is rebuilt.
+    fluxCard.value.textContent = '–';
+    colourCard.value.textContent = '–';
+    supplyCard.value.textContent = '–';
+    supplyCard.root.style.borderColor = '#234';
+    supplyCard.value.style.color = '#cde';
 
     // Debug panel. Only built if ?debug=1, but cheap to update — the
     // textContent assignment is a no-op when the panel is display:none
@@ -618,8 +612,7 @@ async function bootstrap(): Promise<void> {
       const f1Label = isObserver ? 'join' : (playerFaction === 0 ? 'opp' : 'you');
       const fmtFaction = (idx: 0 | 1, label: string): string => {
         const fx = s.factions[idx];
-        const t2 = fx.tier2Researched ? ' t2' : '';
-        return `${label}  hp ${(fx.hqHp / 65536).toFixed(0)}  e ${(fx.energy / 65536).toFixed(0)}  f ${(fx.flux / 65536).toFixed(0)}  c ${(fx.color / 65536).toFixed(0)}  s ${fx.supplyUsed}/${fx.supplyCap}${t2}`;
+        return `${label}  hp ${(fx.hqHp / 65536).toFixed(0)}  e ${(fx.energy / 65536).toFixed(0)}`;
       };
       const lines = [
         factionLabelLine,

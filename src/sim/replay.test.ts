@@ -1,4 +1,4 @@
-// Replay round-trip determinism for Phase 1.3.
+// Replay round-trip determinism.
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -24,7 +24,7 @@ const FAST_SPEC: InitialMatchSpec = {
 describe('Match — input log + replay round-trip', () => {
   it('Match.toReplay captures every frame', () => {
     const match = new Match(FAST_SPEC);
-    match.step([{ kind: CommandKind.SpawnUnit, unitKind: 'raider', faction: 0, x: 17, y: 11 }]);
+    match.step([{ kind: CommandKind.TrainUnit, faction: 0, unitKind: 'worker' }]);
     match.step([]);
     match.step([]);
     const replay = match.toReplay();
@@ -36,22 +36,23 @@ describe('Match — input log + replay round-trip', () => {
 
   it('replaying a recorded match reaches the same final hash', () => {
     const match = new Match(FAST_SPEC);
-    match.step([{ kind: CommandKind.SpawnUnit, unitKind: 'raider', faction: 0, x: 17, y: 11 }]);
+    // Resign on tick 0 → winner = 1 immediately.
+    match.step([{ kind: CommandKind.Resign, faction: 0 }]);
     while (match.winner === null && match.tick < 200) {
       match.step([]);
     }
-    expect(match.winner).toBe(0);
+    expect(match.winner).toBe(1);
 
     const replay = match.toReplay();
     const result = playReplay(replay);
     expect(result.finalHash).toBe(replay.finalHash);
-    expect(result.winner).toBe(0);
+    expect(result.winner).toBe(1);
     expect(result.tick).toBe(match.tick);
   });
 
   it('JSON serialise + parse round-trips a replay', () => {
     const match = new Match(FAST_SPEC);
-    match.step([{ kind: CommandKind.SpawnUnit, unitKind: 'raider', faction: 0, x: 17, y: 11 }]);
+    match.step([{ kind: CommandKind.Resign, faction: 0 }]);
     for (let i = 0; i < 30 && match.winner === null; i++) match.step([]);
 
     const json = serialiseReplay(match.toReplay());
@@ -62,22 +63,21 @@ describe('Match — input log + replay round-trip', () => {
 
   it('playReplay throws on final-hash mismatch (tamper detection)', () => {
     const match = new Match(FAST_SPEC);
-    match.step([{ kind: CommandKind.SpawnUnit, unitKind: 'raider', faction: 0, x: 17, y: 11 }]);
+    match.step([{ kind: CommandKind.Resign, faction: 0 }]);
     for (let i = 0; i < 10; i++) match.step([]);
 
     const replay = match.toReplay();
-    // Corrupt the recorded final hash.
     replay.finalHash = 'deadbeefdeadbeef';
     expect(() => playReplay(replay)).toThrow(/final-hash mismatch/);
   });
 
   it('playReplay throws on winner mismatch', () => {
     const match = new Match(FAST_SPEC);
-    match.step([{ kind: CommandKind.SpawnUnit, unitKind: 'raider', faction: 0, x: 17, y: 11 }]);
+    match.step([{ kind: CommandKind.Resign, faction: 0 }]);
     for (let i = 0; i < 50 && match.winner === null; i++) match.step([]);
 
     const replay = match.toReplay();
-    replay.finalWinner = 1; // wrong
+    replay.finalWinner = 0; // wrong (resigning faction was 0, so winner is 1)
     expect(() => playReplay(replay)).toThrow(/winner mismatch/);
   });
 

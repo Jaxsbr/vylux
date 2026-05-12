@@ -118,7 +118,7 @@ describe('LockstepChannel — protocol', () => {
     expect(left.tryConsumeFrame(0)).toBeNull(); // remote side hasn't sent yet
     expect(right.tryConsumeFrame(0)).toBeNull(); // right hasn't submitted its own
 
-    const cmd1: Command = { kind: CommandKind.TrainUnit, faction: 1, unitKind: 'raider' };
+    const cmd1: Command = { kind: CommandKind.TrainUnit, faction: 1, unitKind: 'worker' };
     right.submitLocalFrame(0, [cmd1]);
 
     const fromLeft = left.tryConsumeFrame(0);
