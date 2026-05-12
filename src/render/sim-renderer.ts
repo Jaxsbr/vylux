@@ -81,16 +81,13 @@ export class SimRenderer {
     this.spawnHqs();
   }
 
-  // Currently outlined group (gray hover tint applied to its edge
-  // LineSegments) + saved original colours so we can restore on unhover.
+  // Currently outlined group + the halo LineSegments duplicates we
+  // spawned to fake a bloom around its edges.
   private hoverGroup: THREE.Group | null = null;
   private readonly hoverHalos: HoverHaloRef[] = [];
 
-  // Mutate the hovered entity's edge LineSegments to a faint gray. Last
-  // hovered entity's edges are restored on every change so the tint
-  // tracks the cursor cleanly. Materials are per-instance (each tier /
-  // mesh constructs its own LineBasicMaterial), so this mutation is
-  // safe — it doesn't leak across entities.
+  // Toggle the hover glow. On a hover change we remove the previous
+  // entity's halo duplicates and spawn fresh ones around the new entity.
   setHover(hovered: { kind: 'unit' | 'structure' | 'hq' | 'node'; id?: number; faction?: Faction } | null): void {
     let group: THREE.Group | null = null;
     if (hovered !== null) {
@@ -102,7 +99,7 @@ export class SimRenderer {
       }
     }
     if (group === this.hoverGroup) return;
-    if (this.hoverGroup !== null) restoreOutlineColors(this.hoverGroup, this.hoverHalos);
+    if (this.hoverGroup !== null) removeHoverHalos(this.hoverHalos);
     this.hoverGroup = group;
     if (group !== null) applyHoverOutlineTint(group, this.hoverHalos);
   }
@@ -427,6 +424,8 @@ export class SimRenderer {
   }
 
   dispose(): void {
+    removeHoverHalos(this.hoverHalos);
+    this.hoverGroup = null;
     for (const v of this.unitMeshes.values()) this.entitiesGroup.remove(v.group);
     for (const v of this.nodeMeshes.values()) this.entitiesGroup.remove(v.group);
     for (const v of this.structureMeshes.values()) this.entitiesGroup.remove(v.group);
@@ -488,7 +487,7 @@ function applyHoverOutlineTint(group: THREE.Group, halos: HoverHaloRef[]): void 
   });
 }
 
-function restoreOutlineColors(_group: THREE.Group, halos: HoverHaloRef[]): void {
+function removeHoverHalos(halos: HoverHaloRef[]): void {
   for (const h of halos) {
     h.parent.remove(h.mesh);
     h.material.dispose();

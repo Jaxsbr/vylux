@@ -176,15 +176,27 @@ export class PortraitRenderer {
   dispose(): void {
     for (const g of this.cache.values()) {
       g.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments) {
           obj.geometry.dispose();
-          const m = obj.material;
-          if (Array.isArray(m)) m.forEach((x) => x.dispose());
-          else m.dispose();
+          disposeMaterial(obj.material);
+        } else if (obj instanceof THREE.Sprite) {
+          // Worker energy-cue sprite carries a CanvasTexture on its
+          // material's .map; the texture is per-worker so it has to
+          // be disposed alongside the material.
+          disposeMaterial(obj.material);
         }
       });
     }
     this.cache.clear();
     this.renderer.dispose();
+  }
+}
+
+function disposeMaterial(m: THREE.Material | THREE.Material[]): void {
+  const list = Array.isArray(m) ? m : [m];
+  for (const mat of list) {
+    const withMap = mat as { map?: THREE.Texture | null };
+    if (withMap.map) withMap.map.dispose();
+    mat.dispose();
   }
 }
