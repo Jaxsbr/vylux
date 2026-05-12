@@ -237,6 +237,12 @@ function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
   accentRing.rotation.x = -Math.PI / 2;
   accentRing.position.y = WORKER_CONSTANTS.accentRingY;
   accentRing.name = 'worker-accent-ring';
+  // Hidden by default — read as a coloured halo around the head, which
+  // clashed with the outlined diamond silhouette. Mesh kept in the
+  // graph (not deleted) so the damage-flash + harvest-pulse plumbing
+  // that mutates accentMat continues to compile; the mutations now
+  // have no visible effect.
+  accentRing.visible = false;
 
   // Harvest buffer fill ring — floats above the accent ring.
   // Grows in emissive intensity as harvest fills up.

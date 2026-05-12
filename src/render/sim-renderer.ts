@@ -29,6 +29,7 @@ import {
   type WorkPodVisual,
 } from './meshes';
 import { tileFloatToWorld } from './scene';
+import type { Exploration } from './exploration';
 
 interface PrevPosition {
   x: number;
@@ -45,6 +46,7 @@ export class SimRenderer {
   // the filter entirely (sees both factions' state).
   private readonly playerFaction: Faction;
   private readonly bypassVision: boolean;
+  private readonly exploration: Exploration | null;
 
   private readonly hqMeshes: [HqVisual | null, HqVisual | null] = [null, null];
   private readonly unitMeshes = new Map<number, UnitVisual>();
@@ -64,12 +66,42 @@ export class SimRenderer {
   // HQ raycast registry for the input controller.
   private readonly hqGroupView = new Map<Faction, THREE.Group>();
 
-  constructor(sim: Sim, entitiesGroup: THREE.Group, playerFaction: Faction, bypassVision = false) {
+  constructor(
+    sim: Sim,
+    entitiesGroup: THREE.Group,
+    playerFaction: Faction,
+    bypassVision = false,
+    exploration: Exploration | null = null,
+  ) {
     this.sim = sim;
     this.entitiesGroup = entitiesGroup;
     this.playerFaction = playerFaction;
     this.bypassVision = bypassVision;
+    this.exploration = exploration;
     this.spawnHqs();
+  }
+
+  // Currently outlined group + the halo LineSegments duplicates we
+  // spawned to fake a bloom around its edges.
+  private hoverGroup: THREE.Group | null = null;
+  private readonly hoverHalos: HoverHaloRef[] = [];
+
+  // Toggle the hover glow. On a hover change we remove the previous
+  // entity's halo duplicates and spawn fresh ones around the new entity.
+  setHover(hovered: { kind: 'unit' | 'structure' | 'hq' | 'node'; id?: number; faction?: Faction } | null): void {
+    let group: THREE.Group | null = null;
+    if (hovered !== null) {
+      switch (hovered.kind) {
+        case 'unit':      group = hovered.id !== undefined ? this.unitMeshes.get(hovered.id)?.group ?? null : null; break;
+        case 'structure': group = hovered.id !== undefined ? this.structureMeshes.get(hovered.id)?.group ?? null : null; break;
+        case 'node':      group = hovered.id !== undefined ? this.nodeMeshes.get(hovered.id)?.group ?? null : null; break;
+        case 'hq':        group = hovered.faction !== undefined ? this.hqMeshes[hovered.faction]?.group ?? null : null; break;
+      }
+    }
+    if (group === this.hoverGroup) return;
+    if (this.hoverGroup !== null) removeHoverHalos(this.hoverHalos);
+    this.hoverGroup = group;
+    if (group !== null) applyHoverOutlineTint(group, this.hoverHalos);
   }
 
   capturePrev(): void {
@@ -90,6 +122,7 @@ export class SimRenderer {
     this.lastAnimMs = nowMs;
 
     this.collectVisionSources();
+    this.exploration?.update();
     this.syncHqs();
     this.syncNodes();
     this.syncStructures();
@@ -142,6 +175,17 @@ export class SimRenderer {
     return false;
   }
 
+  // Persistent reveal: an enemy entity is shown if it sits on any tile
+  // the player has ever explored. Falls back to live vision when no
+  // Exploration tracker is wired (older test paths).
+  private isPositionExplored(x: Fixed, y: Fixed): boolean {
+    if (this.bypassVision) return true;
+    if (this.exploration) {
+      return this.exploration.isPositionExplored(toFloat(x), toFloat(y));
+    }
+    return this.isPositionVisible(x, y);
+  }
+
   // Read-only mesh registries used by the input controller for raycasting.
   get unitMeshMap(): ReadonlyMap<number, THREE.Group> {
     return this.unitGroupView;
@@ -170,14 +214,21 @@ export class SimRenderer {
     selectedHqFaction: Faction | null = null,
   ): void {
     for (const [id, vis] of this.unitMeshes) {
-      vis.selectionRing.visible = selectedUnitIds.has(id);
+      const selected = selectedUnitIds.has(id);
+      vis.selectionRing.visible = selected;
+      vis.hpBar.group.visible = selected;
     }
     for (const [id, vis] of this.structureMeshes) {
-      vis.selectionRing.visible = id === selectedStructureId;
+      const selected = id === selectedStructureId;
+      vis.selectionRing.visible = selected;
+      vis.hpBar.group.visible = selected;
     }
     for (const f of [0, 1] as const) {
       const v = this.hqMeshes[f];
-      if (v) v.selectionRing.visible = f === selectedHqFaction;
+      if (!v) continue;
+      const selected = f === selectedHqFaction;
+      v.selectionRing.visible = selected;
+      v.hpBar.group.visible = selected;
     }
   }
 
@@ -211,7 +262,7 @@ export class SimRenderer {
       // Phase 3.8: enemy HQ hidden until in the player's vision.
       // Friendly HQ always visible.
       const isOwn = f === this.playerFaction;
-      v.group.visible = isOwn || this.bypassVision || this.isPositionVisible(fs.hqX, fs.hqY);
+      v.group.visible = isOwn || this.bypassVision || this.isPositionExplored(fs.hqX, fs.hqY);
       const maxHp = fs.hqHp > 0 ? Math.max(toFloat(fs.hqHp), 0.0001) : 0;
       // Read max from spec — we don't have it on FactionState, so derive
       // from initial state by tracking max separately. Simpler: cap
@@ -286,7 +337,7 @@ export class SimRenderer {
       // until in current vision.
       const isOwn = s.faction === this.playerFaction;
       v.group.visible = s.alive
-        && (isOwn || this.bypassVision || this.isPositionVisible(s.x, s.y));
+        && (isOwn || this.bypassVision || this.isPositionExplored(s.x, s.y));
       if (!s.alive) continue;
       // Build progress ratio (0..1) drives the rising silhouette + dim
       // body / scaffolding fade.
@@ -321,7 +372,7 @@ export class SimRenderer {
       // below uses the fresh sim coords either way.
       const isOwn = u.faction === this.playerFaction;
       const visible = u.alive
-        && (isOwn || this.bypassVision || this.isPositionVisible(u.x, u.y));
+        && (isOwn || this.bypassVision || this.isPositionExplored(u.x, u.y));
 
       if (!u.alive) {
         // Phase 3.9.6: unit died this tick. Move the visual into the
@@ -373,6 +424,8 @@ export class SimRenderer {
   }
 
   dispose(): void {
+    removeHoverHalos(this.hoverHalos);
+    this.hoverGroup = null;
     for (const v of this.unitMeshes.values()) this.entitiesGroup.remove(v.group);
     for (const v of this.nodeMeshes.values()) this.entitiesGroup.remove(v.group);
     for (const v of this.structureMeshes.values()) this.entitiesGroup.remove(v.group);
@@ -386,3 +439,59 @@ export class SimRenderer {
     this.prevUnitPos.clear();
   }
 }
+
+// Hover-outline glow. We keep the entity's original edge colour
+// (siege red, swarm cyan, gold for resource nodes) and fake a bloom
+// by adding TWO halo duplicates of each LineSegments — slightly
+// scaled up, additive-blended, transparent. The original sharp line
+// stays at the entity's silhouette; the halos sit just outside it
+// like a soft outer light. Two layers give the gradient that a real
+// bloom pass would, without postprocessing.
+const HOVER_HALO_LAYERS: ReadonlyArray<{ scale: number; opacity: number }> = [
+  { scale: 1.08, opacity: 0.85 },
+  { scale: 1.18, opacity: 0.4 },
+];
+
+interface HoverHaloRef {
+  parent: THREE.Object3D;
+  mesh: THREE.LineSegments;
+  material: THREE.LineBasicMaterial;
+}
+
+function applyHoverOutlineTint(group: THREE.Group, halos: HoverHaloRef[]): void {
+  group.traverse((obj) => {
+    if (!(obj instanceof THREE.LineSegments)) return;
+    const sourceMat = obj.material as THREE.LineBasicMaterial;
+    const parent = obj.parent;
+    if (parent === null) return;
+    for (const layer of HOVER_HALO_LAYERS) {
+      const haloMat = new THREE.LineBasicMaterial({
+        color: sourceMat.color.clone(),
+        transparent: true,
+        opacity: layer.opacity,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const halo = new THREE.LineSegments(obj.geometry, haloMat);
+      halo.position.copy(obj.position);
+      halo.rotation.copy(obj.rotation);
+      halo.scale.copy(obj.scale).multiplyScalar(layer.scale);
+      halo.name = `${obj.name}-hover-halo`;
+      // Renderers depth-sort halo + source so the additive layer over
+      // the same pixels still contributes. depthWrite false keeps the
+      // halo from poisoning the buffer for things drawn after.
+      halo.renderOrder = obj.renderOrder + 1;
+      parent.add(halo);
+      halos.push({ parent, mesh: halo, material: haloMat });
+    }
+  });
+}
+
+function removeHoverHalos(halos: HoverHaloRef[]): void {
+  for (const h of halos) {
+    h.parent.remove(h.mesh);
+    h.material.dispose();
+  }
+  halos.length = 0;
+}
+

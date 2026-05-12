@@ -43,15 +43,18 @@ import type { Command } from './sim/commands';
 import { Match, serialiseReplay } from './sim/replay';
 import type { InitialMatchSpec } from './sim/state';
 import type { Faction } from './sim/types';
-import { createScene } from './render/scene';
+import { createScene, tileFloatToWorld } from './render/scene';
+import { toFloat } from './sim/fixed';
 import { SimRenderer } from './render/sim-renderer';
 import { startSimDriver, TICK_HZ } from './render/sim-driver';
 import { DesyncOverlay, MatchEndOverlay } from './render/player-input';
 import { ActionBar } from './render/action-bar';
+import { SelectionPortrait } from './render/selection-portrait';
 import { InputController } from './render/input-controller';
 import { CameraController } from './render/camera-controller';
 import { FeedbackOverlay } from './render/feedback';
 import { FogOverlay } from './render/fog-overlay';
+import { Exploration } from './render/exploration';
 import { AudioManager } from './audio/audio-manager';
 import { GameEventDetector } from './render/event-detector';
 import { MainMenu } from './render/menu/main-menu';
@@ -78,17 +81,21 @@ import { isValidRoomCode } from './net/signaling-protocol';
 const SPEC: InitialMatchSpec = {
   seed: 42,
   hqs: {
-    faction0: { x: 4, y: 4 },
-    faction1: { x: 27, y: 27 },
+    // Anti-diagonal layout: F0 (player) bottom-left, F1 (AI) top-right
+    // as the camera reads it. World +X is screen-right and world +Z is
+    // screen-down at this iso angle, so (4, 27) lands bottom-left.
+    faction0: { x: 4, y: 27 },
+    faction1: { x: 27, y: 4 },
   },
   nodes: [
-    // Faction 0 home patch (north-west corner).
-    { x: 7, y: 4, energy: 200 },
-    { x: 4, y: 7, energy: 200 },
-    // Faction 1 home patch (south-east corner).
-    { x: 24, y: 27, energy: 200 },
-    { x: 27, y: 24, energy: 200 },
-    // Mid-distance "second base" nodes on the diagonals.
+    // Faction 0 home patch (bottom-left corner).
+    { x: 7, y: 27, energy: 200 },
+    { x: 4, y: 24, energy: 200 },
+    // Faction 1 home patch (top-right corner).
+    { x: 24, y: 4, energy: 200 },
+    { x: 27, y: 7, energy: 200 },
+    // Mid-distance "second base" nodes on the HQ-to-HQ diagonal
+    // (x + y = 31).
     { x: 11, y: 20, energy: 200 },
     { x: 20, y: 11, energy: 200 },
   ],
@@ -329,7 +336,12 @@ async function bootstrap(): Promise<void> {
     factionIds: { faction0: factionId0, faction1: factionId1 },
   };
   const match = new Match(matchSpec);
-  const renderer = new SimRenderer(match.sim, scene.entitiesGroup, playerFaction, isObserver);
+  // Phase: persistent fog reveal — shared explored-tile bitmap consumed
+  // by both SimRenderer (enemy entity visibility) and FogOverlay (alpha
+  // baseline). Decouples "have we ever seen this tile?" from "is this
+  // tile in current vision?" so enemies stay visible on uncovered map.
+  const exploration = new Exploration(match.sim, playerFaction, isObserver);
+  const renderer = new SimRenderer(match.sim, scene.entitiesGroup, playerFaction, isObserver, exploration);
 
   // Phase 3.9.1: input-feedback overlay. Observer mode has nothing to
   // confirm so the overlay is omitted in that path; otherwise the
@@ -339,7 +351,7 @@ async function bootstrap(): Promise<void> {
   // Phase 3.9.4: fog of war overlay. Observer mode bypasses (sees the
   // whole map). Player + lockstep modes get the per-faction fog +
   // explored bitmap painted on top of the grid plane.
-  const fog = new FogOverlay(scene.entitiesGroup, match.sim, playerFaction, isObserver);
+  const fog = new FogOverlay(scene.entitiesGroup, match.sim, isObserver, exploration);
 
   // Phase 3.9.5: event detector. Observer mode runs a no-op detector
   // (no player faction to attribute events to). The AudioManager is
@@ -390,6 +402,11 @@ async function bootstrap(): Promise<void> {
     // applicable, so this fires only when valid).
     onResearchAutoResumeSelected: () => { audio.click(); input!.researchAutoResume(); },
   }, document.body);
+
+  // Bottom-left selection HUD — portrait + name for whatever the player
+  // currently has selected. Observer mode omits it for the same reason
+  // ActionBar is omitted (no friendly faction to anchor the readout to).
+  const portrait = isObserver ? null : new SelectionPortrait(playerFaction, document.body);
 
   const role: 'pva' | 'host' | 'join' | 'observe' = (() => {
     switch (mode.kind) {
@@ -469,6 +486,15 @@ async function bootstrap(): Promise<void> {
     cameraOffset: scene.cameraOffset,
     setHalfHeight: (hh) => scene.setHalfHeight(hh),
   });
+
+  // Centre the viewport on the player's HQ at match start. Observer mode
+  // has no player faction to anchor on, so it keeps the default centred-
+  // on-origin view.
+  if (!isObserver) {
+    const fs = match.sim.state.factions[playerFaction];
+    const hqWorld = tileFloatToWorld(toFloat(fs.hqX), toFloat(fs.hqY));
+    cameraController.centerOn(hqWorld.x, hqWorld.z);
+  }
 
   // Phase 3.10.9 — focused resource bar (top-centre).
   //
@@ -646,8 +672,11 @@ async function bootstrap(): Promise<void> {
     const selection = input?.getSelectedUnitIds() ?? EMPTY_SELECTION;
     const selStructure = input?.getSelectedStructureId() ?? null;
     const selHq = input?.getSelectedHqFaction() ?? null;
-    panel?.refresh(match.sim, selection, selStructure, selHq);
+    const selNode = input?.getSelectedNodeId() ?? null;
+    panel?.refresh(match.sim, selection, selStructure, selHq, selNode);
+    portrait?.refresh(match.sim, selection, selStructure, selHq, selNode);
     renderer.applyInputVisuals(selection, selStructure, selHq);
+    renderer.setHover(input?.getHoveredEntity() ?? null);
 
     if (s.winner !== null) matchEnd.show(playerFaction, s.winner);
   }

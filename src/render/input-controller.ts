@@ -40,6 +40,15 @@ import { themeForFaction } from './factions/theme';
 // default ballpark.
 const DRAG_THRESHOLD_PX = 5;
 
+// Lightweight descriptor for what the click ray would pick — drives
+// both the static-first selection on click and the hover-outline tint
+// applied by SimRenderer.
+export type HoveredEntity =
+  | { kind: 'unit'; id: number }
+  | { kind: 'structure'; id: number }
+  | { kind: 'hq'; faction: Faction }
+  | { kind: 'node'; id: number };
+
 export interface InputFeedbackHooks {
   // Phase 3.9.1: fired after the input controller commits the
   // corresponding sim command. Pure presentation — no sim impact.
@@ -89,6 +98,15 @@ export class InputController {
   // mixed structure-and-units selection.
   private selectedStructureId: number | null = null;
   private selectedHqFaction: Faction | null = null;
+  // Node selection is read-only — there are no node-actions today, but
+  // the selection drives the bottom-left portrait (remaining-energy
+  // readout). Mutual-exclusion mirrors the other slots: selecting a
+  // node clears everything else.
+  private selectedNodeId: number | null = null;
+
+  // Latest entity under the cursor — refreshed on pointermove (when not
+  // mid-drag). SimRenderer reads it to apply the gray hover outline.
+  private hoveredEntity: HoveredEntity | null = null;
   // When set, the next left-click places a structure of this kind at
   // the clicked tile. null = normal click flow (select / assign / drag).
   // Phase 3.0 introduced this for production buildings; Phase 3.2
@@ -98,7 +116,18 @@ export class InputController {
   // mid-placement selection change doesn't strand the build.
   private pendingPlacement: 'production' | 'upgrade' | 'supply' | 'workPod' | null = null;
   private readonly queue: Command[] = [];
-  private readonly raycaster = new THREE.Raycaster();
+  private readonly raycaster = (() => {
+    const r = new THREE.Raycaster();
+    // Tighten Line picking: default is 1 world-unit fat zone around any
+    // LineSegments. Workers, HQs, work pods, and nodes all carry
+    // EdgesGeometry trim, so the default turns each edge into a
+    // ~1-tile-thick clickable region — the player's clicks land on the
+    // wrong entity (a worker beside a pod intercepts pod clicks). A
+    // small threshold keeps line raycasts effectively disabled for our
+    // mesh-only selection.
+    r.params.Line = { threshold: 0.001 };
+    return r;
+  })();
   private readonly pointer = new THREE.Vector2();
   private readonly opts: InputControllerOptions;
 
@@ -292,41 +321,48 @@ export class InputController {
       }
     }
 
-    // Try unit hit first. A click on an owned unit either replaces or
-    // toggles selection (shift), with no drag.
-    const unitHit = this.pickOwnedUnit(e);
-    if (unitHit !== null) {
-      if (e.shiftKey) {
-        if (this.selectedUnitIds.has(unitHit)) this.selectedUnitIds.delete(unitHit);
-        else this.selectedUnitIds.add(unitHit);
-      } else {
-        this.selectedUnitIds.clear();
-        this.selectedUnitIds.add(unitHit);
+    // Static-first pick precedence (HQ > Structure > Node > Unit). The
+    // previous unit-first order made it impossible to click an energy
+    // node surrounded by workers, or a work pod with a worker on an
+    // adjacent tile — the worker's mesh intercepted the click ray.
+    // Static-first matches the standard RTS expectation that "fixed
+    // things are easier to click than moving things" and keeps the
+    // worker still clickable when it stands clear of other entities.
+    const pick = this.pickAtPriority(e);
+    if (pick !== null) {
+      switch (pick.kind) {
+        case 'hq':
+          this.selectedUnitIds.clear();
+          this.selectedStructureId = null;
+          this.selectedNodeId = null;
+          this.selectedHqFaction = pick.faction;
+          return;
+        case 'structure':
+          this.selectedUnitIds.clear();
+          this.selectedHqFaction = null;
+          this.selectedNodeId = null;
+          this.selectedStructureId = pick.id;
+          return;
+        case 'node':
+          this.selectedUnitIds.clear();
+          this.selectedStructureId = null;
+          this.selectedHqFaction = null;
+          this.selectedNodeId = pick.id;
+          return;
+        case 'unit': {
+          if (e.shiftKey) {
+            if (this.selectedUnitIds.has(pick.id)) this.selectedUnitIds.delete(pick.id);
+            else this.selectedUnitIds.add(pick.id);
+          } else {
+            this.selectedUnitIds.clear();
+            this.selectedUnitIds.add(pick.id);
+          }
+          this.selectedStructureId = null;
+          this.selectedHqFaction = null;
+          this.selectedNodeId = null;
+          return;
+        }
       }
-      // Selecting a unit clears any structure / HQ focus — see the
-      // mutual-exclusion rule at the field declarations.
-      this.selectedStructureId = null;
-      this.selectedHqFaction = null;
-      return;
-    }
-
-    // Phase 3.10.3: structure pick (own structures only). Single-
-    // select; clears unit + HQ slots.
-    const structureHit = this.pickOwnedStructure(e);
-    if (structureHit !== null) {
-      this.selectedUnitIds.clear();
-      this.selectedHqFaction = null;
-      this.selectedStructureId = structureHit;
-      return;
-    }
-
-    // Phase 3.10.3: HQ pick (own HQ only).
-    const hqHit = this.pickOwnedHq(e);
-    if (hqHit !== null) {
-      this.selectedUnitIds.clear();
-      this.selectedStructureId = null;
-      this.selectedHqFaction = hqHit;
-      return;
     }
 
     // Empty-space pointerdown: arm a potential drag-rect. We don't
@@ -352,8 +388,10 @@ export class InputController {
       // mid-drag — during a drag the cursor stays as it was at down so
       // the player isn't visually tracked through stale hover states.
       this.refreshCursor(e);
+      this.hoveredEntity = this.pickAtPriority(e);
       return;
     }
+    this.hoveredEntity = null;
     const dx = e.clientX - this.drag.startClientX;
     const dy = e.clientY - this.drag.startClientY;
     if (!this.drag.dragging) {
@@ -498,6 +536,36 @@ export class InputController {
     this.selectedUnitIds.clear();
     this.selectedStructureId = null;
     this.selectedHqFaction = null;
+    this.selectedNodeId = null;
+  }
+
+  // Resolve which entity sits under the click cursor, applying the
+  // static-first priority (HQ > Structure > Node > Unit) so a worker
+  // next to a node can't intercept the click intended for the node.
+  private pickAtPriority(e: PointerEvent): HoveredEntity | null {
+    const hq = this.pickOwnedHq(e);
+    if (hq !== null) return { kind: 'hq', faction: hq };
+    const structure = this.pickOwnedStructure(e);
+    if (structure !== null) return { kind: 'structure', id: structure };
+    const node = this.pickLiveNode(e);
+    if (node !== null) return { kind: 'node', id: node };
+    const unit = this.pickOwnedUnit(e);
+    if (unit !== null) return { kind: 'unit', id: unit };
+    return null;
+  }
+
+  // Selection-filtered hover state. Suppresses the outline on the
+  // currently-selected entity (the selection ring is the right visual
+  // cue there), so only "potentially selectable" targets get the tint.
+  getHoveredEntity(): HoveredEntity | null {
+    const h = this.hoveredEntity;
+    if (h === null) return null;
+    switch (h.kind) {
+      case 'unit':      return this.selectedUnitIds.has(h.id) ? null : h;
+      case 'structure': return h.id === this.selectedStructureId ? null : h;
+      case 'hq':        return h.faction === this.selectedHqFaction ? null : h;
+      case 'node':      return h.id === this.selectedNodeId ? null : h;
+    }
   }
 
   getSelectedStructureId(): number | null {
@@ -508,6 +576,10 @@ export class InputController {
     return this.selectedHqFaction;
   }
 
+  getSelectedNodeId(): number | null {
+    return this.selectedNodeId;
+  }
+
   // Phase 3.10.3: programmatic selection for test hooks. Production
   // input still goes through the pointer pickers — these methods exist
   // so e2e specs can drive the action bar without computing canvas
@@ -515,12 +587,14 @@ export class InputController {
   selectHqProgrammatic(faction: Faction): void {
     this.selectedUnitIds.clear();
     this.selectedStructureId = null;
+    this.selectedNodeId = null;
     this.selectedHqFaction = faction;
   }
 
   selectStructureProgrammatic(structureId: number): void {
     this.selectedUnitIds.clear();
     this.selectedHqFaction = null;
+    this.selectedNodeId = null;
     this.selectedStructureId = structureId;
   }
 
@@ -528,6 +602,7 @@ export class InputController {
     this.selectedUnitIds.clear();
     this.selectedStructureId = null;
     this.selectedHqFaction = null;
+    this.selectedNodeId = null;
     for (const u of this.opts.sim.state.units) {
       if (!u.alive || u.faction !== this.opts.playerFaction || u.kind !== 'worker') continue;
       this.selectedUnitIds.add(u.id);

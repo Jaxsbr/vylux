@@ -19,11 +19,16 @@ import { GRID_CONSTANTS, buildGrid, type GridBundle } from '../grid';
 // show on a fresh load with no zoom applied.
 export const DEFAULT_HALF_HEIGHT = (GRID_CONSTANTS.worldExtent / 2) + 6;
 
-// Zoom bounds. 0.5x = closer in, 2.0x = pulled-back. Picked to keep
-// individual unit meshes legible at the closest zoom and keep the whole
-// map visible at the farthest.
-export const ZOOM_MIN = 0.5;
+// Zoom bounds. Smaller scale = closer in. Picked to keep individual
+// unit meshes legible at the closest zoom and keep the whole map
+// visible at the farthest.
+export const ZOOM_MIN = 0.25;
 export const ZOOM_MAX = 2.0;
+
+// Initial zoom on match start. Defaults to ZOOM_MIN — the playtest
+// pattern is to crank zoom-in immediately, and starting there avoids
+// the "every match begins with a fistful of wheel scrolls" friction.
+export const DEFAULT_ZOOM_SCALE = ZOOM_MIN;
 
 // Camera offset from the look-at target — the iso angle. Held constant
 // so panning translates the camera-and-target together without rotating
@@ -58,7 +63,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
 
   // Orthographic isometric: pulled-back y-axis, gentle pitch.
   const aspect = canvas.clientWidth / canvas.clientHeight;
-  let currentHalfHeight = DEFAULT_HALF_HEIGHT;
+  let currentHalfHeight = DEFAULT_HALF_HEIGHT * DEFAULT_ZOOM_SCALE;
   const halfWidth = currentHalfHeight * aspect;
   const camera = new THREE.OrthographicCamera(
     -halfWidth, halfWidth,

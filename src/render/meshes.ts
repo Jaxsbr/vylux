@@ -113,11 +113,10 @@ export function buildUnitMesh(
   switch (kind) {
     case 'worker': {
       const b = legacyBuildWorker(fid, tileX, tileY);
-      // The legacy worker keeps its hp bar hidden by default and pops it
-      // on damage; for a cleaner read against the deterministic sim we
-      // show it always. The hpBar.update(hp, max) call from sim-renderer
-      // keeps the fill correct.
-      b.hpBar.group.visible = true;
+      // HP bar starts hidden and is toggled on by SimRenderer.applyInputVisuals
+      // when the unit is selected — keeps the map readable when nothing
+      // is selected. The legacy mesh's damage-pop pathway is unused.
+      b.hpBar.group.visible = false;
       b.mesh.scale.set(UNIT_SCALE, UNIT_SCALE, UNIT_SCALE);
       // Phase C.1: charge bar + energy cue. Charge bar sits just below
       // the HP bar; energy cue floats higher and is hidden by default.
@@ -335,7 +334,9 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
   group.add(cap);
 
   const hpBar = buildHpBar(fid, WORK_POD_DIMS.bodyHeight + WORK_POD_DIMS.capHeight + 0.25);
-  hpBar.group.visible = true;
+  // Selection-only HP bar; SimRenderer.applyInputVisuals shows it when
+  // the structure is selected.
+  hpBar.group.visible = false;
   group.add(hpBar.group);
 
   const selectionRing = buildStructureSelectionRing(faction, 0.55, 0.68);
@@ -382,9 +383,6 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
 // Blue   → cyan diamond spire (tall stretched octahedron).
 // Red    → red-orange spike (cone, wider base).
 //
-// Each node also carries a sprite-text label that always faces the
-// camera, displaying the current remaining amount. Updated per frame
-// from the sim's `remaining` value via NodeVisual.setRemaining().
 const NODE_PALETTE: Record<ResourceKind, number> = {
   energy: 0xffd166, // gold
 };
@@ -409,20 +407,15 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
   const silhouette = buildNodeSilhouette(kind, colour);
   b.group.add(silhouette);
 
-  // Always-on remaining-amount label. Stays anchored above the
-  // silhouette and faces camera via THREE.Sprite.
-  const label = buildNodeLabel(silhouette.userData.labelHeight as number);
-  b.group.add(label.sprite);
-
   return {
     group: b.group,
     setRemaining(value: number, max: number): void {
-      label.setText(`${Math.max(0, Math.round(value))}`);
-      // Fade the silhouette emissive intensity as the node empties so
-      // a nearly-depleted node reads as "this is dying" before the
-      // hex base alone does.
+      // Shade fill dims as the node empties so a nearly-depleted node
+      // still reads as "dying" at a glance — but the range is kept
+      // narrow to preserve the outlined-and-shaded look (a full-bright
+      // body would compete with the building emissive palette).
       const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
-      const intensity = 0.3 + 1.4 * ratio;
+      const intensity = 0.05 + 0.25 * ratio;
       silhouette.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           const m = child.material as THREE.MeshStandardMaterial;
@@ -437,78 +430,50 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
   const group = new THREE.Group();
   group.name = `node-silhouette-${kind}`;
 
-  const mat = (): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({
-    color: colour,
+  // Outlined-and-shaded style to match HQ + work pod: a dark body with
+  // low-emissive faction-coloured shade fill, wrapped in bright
+  // EdgesGeometry trim lines. The body holds the silhouette mass; the
+  // edges carry the resource's identity colour.
+  const bodyMat = (): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({
+    color: 0x0d1117,
     emissive: colour,
-    emissiveIntensity: 1.4,
+    emissiveIntensity: 0.18,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
   });
+  const edgeMat = (): THREE.LineBasicMaterial => new THREE.LineBasicMaterial({ color: colour });
 
-  let labelHeight = 0.5; // y above hex base where label sits
+  const addOutlined = (
+    geo: THREE.BufferGeometry,
+    y: number,
+    scale: THREE.Vector3 | null,
+    name: string,
+  ): THREE.Mesh => {
+    const mesh = new THREE.Mesh(geo, bodyMat());
+    mesh.position.y = y;
+    if (scale !== null) mesh.scale.copy(scale);
+    mesh.name = name;
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat());
+    edges.position.y = y;
+    if (scale !== null) edges.scale.copy(scale);
+    edges.name = `${name}-edge`;
+    group.add(mesh, edges);
+    return mesh;
+  };
+
   switch (kind) {
     case 'energy': {
-      // Gold pylon — tall slim octahedron pointing up. Reads as "the
-      // workhorse resource" — a clean angular spike.
+      // Gold pylon — tall slim octahedron pointing up; same geometry as
+      // the original solid silhouette but rendered in the outlined +
+      // shade-filled idiom shared with HQ and work pods.
       const geo = new THREE.OctahedronGeometry(0.18, 0);
-      const mesh = new THREE.Mesh(geo, mat());
-      mesh.scale.set(1, 2.2, 1);
-      mesh.position.y = 0.45;
-      group.add(mesh);
-      labelHeight = 0.95;
+      addOutlined(geo, 0.45, new THREE.Vector3(1, 2.2, 1), 'energy-spike');
       break;
     }
   }
 
-  group.userData.labelHeight = labelHeight;
   return group;
-}
-
-interface NodeLabel {
-  sprite: THREE.Sprite;
-  setText(text: string): void;
-}
-
-function buildNodeLabel(height: number): NodeLabel {
-  // Canvas-backed sprite. Width:height ratio fixed at 4:1; the canvas
-  // is small (128×32) so font rendering is sharp at most camera zooms
-  // without paying GPU memory for high-res text textures.
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 32;
-  const ctx = canvas.getContext('2d');
-  if (ctx === null) throw new Error('buildNodeLabel: 2d context unavailable');
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true,
-    depthWrite: false,
-    depthTest: false, // always render on top so labels don't disappear behind silhouettes
-  });
-  const sprite = new THREE.Sprite(material);
-  sprite.scale.set(0.85, 0.21, 1);
-  sprite.position.y = height + 0.15;
-  sprite.renderOrder = 999;
-
-  let lastText = '';
-  function setText(text: string): void {
-    if (text === lastText) return; // skip repaint if value didn't change
-    lastText = text;
-    ctx!.clearRect(0, 0, canvas.width, canvas.height);
-    ctx!.font = 'bold 22px ui-monospace, Menlo, monospace';
-    ctx!.textAlign = 'center';
-    ctx!.textBaseline = 'middle';
-    // Subtle outer glow for legibility against the dark grid.
-    ctx!.shadowColor = 'rgba(0,0,0,0.85)';
-    ctx!.shadowBlur = 6;
-    ctx!.fillStyle = '#cde';
-    ctx!.fillText(text, canvas.width / 2, canvas.height / 2);
-    texture.needsUpdate = true;
-  }
-  setText('—'); // placeholder until first sim sync
-  return { sprite, setText };
 }
 
 // Phase 3.10.3: shared selection ring for structures. Faction-coloured
