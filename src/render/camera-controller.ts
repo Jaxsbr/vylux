@@ -46,7 +46,7 @@ function screenToWorldDelta(sx: number, sy: number): { worldDx: number; worldDz:
 
 import * as THREE from 'three';
 import { GRID_CONSTANTS } from '../grid';
-import { DEFAULT_HALF_HEIGHT, ZOOM_MAX, ZOOM_MIN } from './scene';
+import { DEFAULT_HALF_HEIGHT, DEFAULT_ZOOM_SCALE, ZOOM_MAX, ZOOM_MIN } from './scene';
 
 // World-units-per-second of pan from a fully-held WASD/arrow key.
 // Tuned so a player can cross the (32-tile) map in ~3–4 seconds.
@@ -72,7 +72,7 @@ export interface CameraControllerOptions {
 export class CameraController {
   private readonly opts: CameraControllerOptions;
   private readonly target = new THREE.Vector3(0, 0, 0);
-  private zoomScale = 1;
+  private zoomScale = DEFAULT_ZOOM_SCALE;
   private readonly heldKeys = new Set<string>();
   private dragging = false;
   // Last-seen client coords during a middle-mouse drag.
@@ -96,6 +96,16 @@ export class CameraController {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
+    this.applyTransform();
+  }
+
+  // Snap the pan target to a world-space (x, z) position. Used at match
+// start to centre the player's HQ in the viewport; respects the same
+// pan limits as drag/keyboard panning.
+  centerOn(worldX: number, worldZ: number): void {
+    const limit = GRID_CONSTANTS.worldExtent * PAN_LIMIT_RATIO;
+    this.target.x = clamp(worldX, -limit, limit);
+    this.target.z = clamp(worldZ, -limit, limit);
     this.applyTransform();
   }
 

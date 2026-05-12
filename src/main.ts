@@ -43,7 +43,8 @@ import type { Command } from './sim/commands';
 import { Match, serialiseReplay } from './sim/replay';
 import type { InitialMatchSpec } from './sim/state';
 import type { Faction } from './sim/types';
-import { createScene } from './render/scene';
+import { createScene, tileFloatToWorld } from './render/scene';
+import { toFloat } from './sim/fixed';
 import { SimRenderer } from './render/sim-renderer';
 import { startSimDriver, TICK_HZ } from './render/sim-driver';
 import { DesyncOverlay, MatchEndOverlay } from './render/player-input';
@@ -475,6 +476,15 @@ async function bootstrap(): Promise<void> {
     cameraOffset: scene.cameraOffset,
     setHalfHeight: (hh) => scene.setHalfHeight(hh),
   });
+
+  // Centre the viewport on the player's HQ at match start. Observer mode
+  // has no player faction to anchor on, so it keeps the default centred-
+  // on-origin view.
+  if (!isObserver) {
+    const fs = match.sim.state.factions[playerFaction];
+    const hqWorld = tileFloatToWorld(toFloat(fs.hqX), toFloat(fs.hqY));
+    cameraController.centerOn(hqWorld.x, hqWorld.z);
+  }
 
   // Phase 3.10.9 — focused resource bar (top-centre).
   //
