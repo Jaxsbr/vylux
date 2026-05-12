@@ -13,6 +13,7 @@ import {
   DAMAGE_PULSE_DURATION,
   DAMAGE_PULSE_PEAK_DELTA,
 } from './event-pulse';
+import { buildGlowEdges } from '../glow-edge';
 
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
   const { tileSize, worldExtent } = GRID_CONSTANTS;
@@ -116,12 +117,8 @@ function buildDefenderMesh(emissiveHex: number): DefenderMeshResult {
   body.position.y = DEF_CONSTANTS.bodyY;
   body.name = 'defender-body';
 
-  const bodyEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(bodyGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const bodyEdges = buildGlowEdges(new THREE.EdgesGeometry(bodyGeo), emissiveHex, 'defender-body-trim');
   bodyEdges.position.y = DEF_CONSTANTS.bodyY;
-  bodyEdges.name = 'defender-body-trim';
 
   // Narrow cap on top — reinforces "armoured dome" read.
   const capGeo = new THREE.CylinderGeometry(
@@ -134,12 +131,8 @@ function buildDefenderMesh(emissiveHex: number): DefenderMeshResult {
   cap.position.y = DEF_CONSTANTS.capY + DEF_CONSTANTS.capHeight / 2;
   cap.name = 'defender-cap';
 
-  const capEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(capGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const capEdges = buildGlowEdges(new THREE.EdgesGeometry(capGeo), emissiveHex, 'defender-cap-trim');
   capEdges.position.y = DEF_CONSTANTS.capY + DEF_CONSTANTS.capHeight / 2;
-  capEdges.name = 'defender-cap-trim';
 
   // Accent strip around the body equator — thin bright ring; primary bloom source.
   const accentGeo = new THREE.CylinderGeometry(

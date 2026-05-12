@@ -9,6 +9,7 @@ import {
   PLACEMENT_PULSE_SCALE_START,
   DEATH_PULSE_DURATION,
 } from './event-pulse';
+import { buildGlowEdges } from '../glow-edge';
 
 // Monotonically-increasing ID counter for worker identity in task system.
 let _nextWorkerId = 1;
@@ -173,19 +174,11 @@ function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
   lower.name = 'worker-lower';
 
   // Edge trim on the combined shape — use upper cone edges for the silhouette.
-  const upperEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(upperGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const upperEdges = buildGlowEdges(new THREE.EdgesGeometry(upperGeo), emissiveHex, 'worker-trim-upper');
   upperEdges.position.y = WORKER_CONSTANTS.diamondHeight / 2;
-  upperEdges.name = 'worker-trim-upper';
 
-  const lowerEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(lowerGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const lowerEdges = buildGlowEdges(new THREE.EdgesGeometry(lowerGeo), emissiveHex, 'worker-trim-lower');
   lowerEdges.position.y = -WORKER_CONSTANTS.diamondHeight / 2;
-  lowerEdges.name = 'worker-trim-lower';
 
   // Harvest buffer fill ring — sits at the worker's equator and grows in
   // opacity + emissive as the harvest buffer fills up.

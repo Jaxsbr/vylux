@@ -13,6 +13,9 @@ import { buildEnergyNode as legacyBuildEnergyNode } from './legacy/energy-node';
 import { buildHpBar, type HpBar } from './legacy/hp-bar';
 import type { FactionId } from './legacy/placement';
 import { GRID_CONSTANTS, tileToWorld } from './legacy/grid';
+import { buildGlowEdges } from './glow-edge';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
 function factionToId(f: Faction): FactionId {
   return f === 0 ? 'blue' : 'red';
@@ -307,16 +310,12 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
   body.name = 'work-pod-body';
   group.add(body);
 
-  const edgesGeo = new THREE.EdgesGeometry(bodyGeo);
-  const edgesMat = new THREE.LineBasicMaterial({ color: emissive });
-  const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+  const edges = buildGlowEdges(new THREE.EdgesGeometry(bodyGeo), emissive, 'work-pod-trim');
   edges.position.y = WORK_POD_DIMS.bodyHeight / 2;
-  edges.name = 'work-pod-trim';
   group.add(edges);
 
   // Glowing cap on top — reads as the charge-bay indicator. Bright
-  // emissive so the pod stands out on the grid even before bloom is
-  // re-introduced.
+  // emissive so the cap is the work pod's primary bloom anchor.
   const capGeo = new THREE.CylinderGeometry(
     WORK_POD_DIMS.capRadius,
     WORK_POD_DIMS.capRadius,
@@ -326,7 +325,7 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
   const capMat = new THREE.MeshStandardMaterial({
     color: emissive,
     emissive,
-    emissiveIntensity: 1.5,
+    emissiveIntensity: 2.0,
   });
   const cap = new THREE.Mesh(capGeo, capMat);
   cap.position.y = WORK_POD_DIMS.bodyHeight + WORK_POD_DIMS.capHeight / 2;
@@ -365,7 +364,7 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
       cap.visible = clamped > 0.4;
       bodyMat.opacity = 0.45 + 0.55 * clamped;
       bodyMat.transparent = clamped < 1;
-      capMat.emissiveIntensity = 0.2 + 1.3 * clamped;
+      capMat.emissiveIntensity = 0.2 + 1.8 * clamped;
       scaffoldingRing.visible = clamped < 1;
     },
   };
@@ -399,8 +398,8 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
     if (obj.name === 'node-rim' && obj instanceof THREE.Mesh) {
       const m = obj.material as THREE.MeshStandardMaterial;
       m.emissive.set(colour);
-    } else if (obj.name === 'node-rim-edge' && obj instanceof THREE.LineSegments) {
-      const m = obj.material as THREE.LineBasicMaterial;
+    } else if (obj.name === 'node-rim-edge' && obj instanceof LineSegments2) {
+      const m = obj.material as LineMaterial;
       m.color.set(colour);
     }
   });
@@ -446,8 +445,6 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
   });
-  const edgeMat = (): THREE.LineBasicMaterial => new THREE.LineBasicMaterial({ color: colour });
-
   const addOutlined = (
     geo: THREE.BufferGeometry,
     y: number,
@@ -458,10 +455,9 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
     mesh.position.y = y;
     if (scale !== null) mesh.scale.copy(scale);
     mesh.name = name;
-    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat());
+    const edges = buildGlowEdges(new THREE.EdgesGeometry(geo), colour, `${name}-edge`);
     edges.position.y = y;
     if (scale !== null) edges.scale.copy(scale);
-    edges.name = `${name}-edge`;
     group.add(mesh, edges);
     return mesh;
   };
@@ -487,16 +483,17 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
 // is selected" consistently regardless of entity kind.
 function buildStructureSelectionRing(faction: Faction, innerR: number, outerR: number): THREE.Mesh {
   const fid = factionToId(faction);
-  const color = PRODUCTION_FACTION_EMISSIVE[fid];
+  const emissive = PRODUCTION_FACTION_EMISSIVE[fid];
   const geo = new THREE.RingGeometry(innerR, outerR, 32);
+  // Match the HQ + worker selection rings: solid cyan body with a
+  // faction emissive overlay. The cyan body keeps the on-screen
+  // luminance well above the bloom threshold for either faction,
+  // while emissive carries the "who selected this" tint.
   const mat = new THREE.MeshStandardMaterial({
-    color,
-    emissive: color,
-    emissiveIntensity: 1.6,
-    transparent: true,
-    opacity: 0.9,
+    color: 0x00e5ff,
+    emissive,
+    emissiveIntensity: 1.5,
     side: THREE.DoubleSide,
-    depthWrite: false,
   });
   const ring = new THREE.Mesh(geo, mat);
   ring.rotation.x = -Math.PI / 2;
@@ -609,11 +606,8 @@ export function buildProductionMesh(faction: Faction, tileX: number, tileY: numb
   body.name = 'production-body';
   group.add(body);
 
-  const edgesGeo = new THREE.EdgesGeometry(geo);
-  const edgesMat = new THREE.LineBasicMaterial({ color: emissive });
-  const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+  const edges = buildGlowEdges(new THREE.EdgesGeometry(geo), emissive, 'production-trim');
   edges.position.y = PRODUCTION_DIMENSIONS.centerY;
-  edges.name = 'production-trim';
   group.add(edges);
 
   const hpBar = buildHpBar(fid, PRODUCTION_DIMENSIONS.height + 0.4);
@@ -645,7 +639,7 @@ export function buildProductionMesh(faction: Faction, tileX: number, tileY: numb
       body.position.y = PRODUCTION_DIMENSIONS.centerY * yScale;
       edges.scale.y = yScale;
       edges.position.y = PRODUCTION_DIMENSIONS.centerY * yScale;
-      const trimMat = edges.material as THREE.LineBasicMaterial;
+      const trimMat = edges.material;
       trimMat.opacity = 0.35 + 0.65 * clamped;
       trimMat.transparent = clamped < 1;
       bodyMat.opacity = 0.45 + 0.55 * clamped;

@@ -6,6 +6,7 @@ import {
   CAPTURE_PULSE_PEAK_DELTA,
 } from './event-pulse';
 import { RESERVE_DEFAULT, tickNodeRegen, MIN_REGEN_THRESHOLD } from './worker-task';
+import { buildGlowEdges } from '../glow-edge';
 
 // Neutral rim: pale-cyan — reads as part of the Tron circuit palette while
 // staying clearly distinct from the faction cyan (#00e0ff) and red (#ff4a1a).
@@ -158,11 +159,9 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
   rim.position.y = NODE_CONSTANTS.rimY;
   rim.name = 'node-rim';
 
-  const rimEdgesGeo = new THREE.EdgesGeometry(rimGeo);
-  const rimEdgesMat = new THREE.LineBasicMaterial({ color: NEUTRAL_RIM });
-  const rimEdges = new THREE.LineSegments(rimEdgesGeo, rimEdgesMat);
+  const rimEdges = buildGlowEdges(new THREE.EdgesGeometry(rimGeo), NEUTRAL_RIM, 'node-rim-edge');
+  const rimEdgesMat = rimEdges.material;
   rimEdges.position.y = NODE_CONSTANTS.rimY;
-  rimEdges.name = 'node-rim-edge';
 
   // Harvest fill ring — a horizontal ring that fills up as the worker harvests.
   // Starts invisible; opacity is set by setHarvestFill().

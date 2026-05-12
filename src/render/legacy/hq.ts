@@ -4,6 +4,7 @@ import { tileToWorld } from './grid';
 import { HQ_MAX_HP } from './units-config';
 import { buildHpBar, type HpBar } from './hp-bar';
 import { eventPulseIntensity, DAMAGE_PULSE_DURATION, DAMAGE_PULSE_PEAK_DELTA } from './event-pulse';
+import { buildGlowEdges } from '../glow-edge';
 
 // Faction emissive hex values — match the palette used in placement.ts ghost emissive.
 const FACTION_EMISSIVE: Record<FactionId, number> = {
@@ -69,10 +70,8 @@ function buildTier(
   mesh.name = 'hq-tier';
 
   const edgesGeo = new THREE.EdgesGeometry(geo);
-  const edgesMat = new THREE.LineBasicMaterial({ color: emissiveHex });
-  const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+  const edges = buildGlowEdges(edgesGeo, emissiveHex, 'hq-trim');
   edges.position.y = centerY;
-  edges.name = 'hq-trim';
 
   group.add(mesh, edges);
   return group;

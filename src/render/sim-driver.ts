@@ -96,7 +96,7 @@ export function startSimDriver(
     const sinceLast = now - (nextTickTime - TICK_MS);
     const alpha = match.winner !== null ? 1 : Math.max(0, Math.min(1, sinceLast / TICK_MS));
     renderer.update(alpha);
-    scene.renderer.render(scene.scene, scene.camera);
+    scene.composer.render();
   }
 
   requestAnimationFrame(frame);

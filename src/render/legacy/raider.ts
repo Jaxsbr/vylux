@@ -13,6 +13,7 @@ import {
   DAMAGE_PULSE_DURATION,
   DAMAGE_PULSE_PEAK_DELTA,
 } from './event-pulse';
+import { buildGlowEdges } from '../glow-edge';
 
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
   const { tileSize, worldExtent } = GRID_CONSTANTS;
@@ -117,12 +118,8 @@ function buildRaiderMesh(emissiveHex: number): RaiderMeshResult {
   blade.position.y = RAIDER_CONSTANTS.bladeY;
   blade.name = 'raider-blade';
 
-  const bladeEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(bladeGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const bladeEdges = buildGlowEdges(new THREE.EdgesGeometry(bladeGeo), emissiveHex, 'raider-blade-trim');
   bladeEdges.position.y = RAIDER_CONSTANTS.bladeY;
-  bladeEdges.name = 'raider-blade-trim';
 
   // Upper spike — continues to a fine point.
   const spikeGeo = new THREE.CylinderGeometry(
@@ -135,12 +132,8 @@ function buildRaiderMesh(emissiveHex: number): RaiderMeshResult {
   spike.position.y = RAIDER_CONSTANTS.spikeY;
   spike.name = 'raider-spike';
 
-  const spikeEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(spikeGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const spikeEdges = buildGlowEdges(new THREE.EdgesGeometry(spikeGeo), emissiveHex, 'raider-spike-trim');
   spikeEdges.position.y = RAIDER_CONSTANTS.spikeY;
-  spikeEdges.name = 'raider-spike-trim';
 
   // Glowing spike-tip accent — small bright cap at the very point; primary bloom source.
   const tipGeo = new THREE.SphereGeometry(RAIDER_CONSTANTS.tipRadius, 6, 6);
