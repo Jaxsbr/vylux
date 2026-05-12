@@ -80,17 +80,21 @@ import { isValidRoomCode } from './net/signaling-protocol';
 const SPEC: InitialMatchSpec = {
   seed: 42,
   hqs: {
-    faction0: { x: 4, y: 4 },
-    faction1: { x: 27, y: 27 },
+    // Anti-diagonal layout: F0 (player) bottom-left, F1 (AI) top-right
+    // as the camera reads it. World +X is screen-right and world +Z is
+    // screen-down at this iso angle, so (4, 27) lands bottom-left.
+    faction0: { x: 4, y: 27 },
+    faction1: { x: 27, y: 4 },
   },
   nodes: [
-    // Faction 0 home patch (north-west corner).
-    { x: 7, y: 4, energy: 200 },
-    { x: 4, y: 7, energy: 200 },
-    // Faction 1 home patch (south-east corner).
-    { x: 24, y: 27, energy: 200 },
-    { x: 27, y: 24, energy: 200 },
-    // Mid-distance "second base" nodes on the diagonals.
+    // Faction 0 home patch (bottom-left corner).
+    { x: 7, y: 27, energy: 200 },
+    { x: 4, y: 24, energy: 200 },
+    // Faction 1 home patch (top-right corner).
+    { x: 24, y: 4, energy: 200 },
+    { x: 27, y: 7, energy: 200 },
+    // Mid-distance "second base" nodes on the HQ-to-HQ diagonal
+    // (x + y = 31).
     { x: 11, y: 20, energy: 200 },
     { x: 20, y: 11, energy: 200 },
   ],
