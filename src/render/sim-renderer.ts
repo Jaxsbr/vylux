@@ -21,20 +21,14 @@ import { HQ_VISION_RADIUS, STRUCTURE_STATS, UNIT_STATS } from '../sim/units-conf
 import {
   buildHqMesh,
   buildNodeMesh,
-  buildProductionMesh,
-  buildPylonMesh,
-  buildSpireMesh,
-  buildTrailSegmentMesh,
   buildUnitMesh,
+  buildWorkPodMesh,
   type HqVisual,
   type UnitVisual,
   type NodeVisual,
-  type ProductionVisual,
-  type SupplyVisual,
-  type UpgradeVisual,
+  type WorkPodVisual,
 } from './meshes';
 import { tileFloatToWorld } from './scene';
-import { TRAIL_SEGMENT_LIFETIME } from '../sim/units-config';
 
 interface PrevPosition {
   x: number;
@@ -55,11 +49,7 @@ export class SimRenderer {
   private readonly hqMeshes: [HqVisual | null, HqVisual | null] = [null, null];
   private readonly unitMeshes = new Map<number, UnitVisual>();
   private readonly nodeMeshes = new Map<number, NodeVisual>();
-  private readonly structureMeshes = new Map<number, ProductionVisual | UpgradeVisual | SupplyVisual>();
-  // Phase 3.7: per-trail group of segment meshes. Re-built each frame
-  // from the current sim segments (cheap — small counts; correct
-  // because segments enter / leave / age in lockstep with sim time).
-  private readonly trailGroups = new Map<number, THREE.Group>();
+  private readonly structureMeshes = new Map<number, WorkPodVisual>();
   private readonly prevUnitPos = new Map<number, PrevPosition>();
 
   // Phase 3.8: per-frame friendly vision-source cache. Refilled at the
@@ -70,10 +60,8 @@ export class SimRenderer {
   // Combined raycast-target views for the input controller.
   private readonly unitGroupView = new Map<number, THREE.Group>();
   private readonly nodeGroupView = new Map<number, THREE.Group>();
-  // Phase 3.10.3: structure + HQ raycast registries for the input
-  // controller. Same shape as the unit/node maps; populated lazily as
-  // sim-renderer creates the meshes.
   private readonly structureGroupView = new Map<number, THREE.Group>();
+  // HQ raycast registry for the input controller.
   private readonly hqGroupView = new Map<Faction, THREE.Group>();
 
   constructor(sim: Sim, entitiesGroup: THREE.Group, playerFaction: Faction, bypassVision = false) {
@@ -107,7 +95,6 @@ export class SimRenderer {
     this.syncStructures();
     this.syncUnits(alpha, dt);
     this.tickDyingUnits(dt);
-    this.syncTrails();
   }
 
   // Phase 3.9.6: track wall-clock time for animation tick deltas, and
@@ -133,12 +120,15 @@ export class SimRenderer {
         radiusSq: rangeSq(UNIT_STATS[u.kind].visionRadius),
       });
     }
+    // Phase C.1: operational work pods project vision too.
     for (const s of this.sim.state.structures) {
       if (!s.alive || s.faction !== this.playerFaction) continue;
+      if (s.kind !== 'workPod') continue;
+      if (s.buildTicksRemaining > 0) continue;
       this.visionSources.push({
         x: s.x,
         y: s.y,
-        radiusSq: rangeSq(STRUCTURE_STATS[s.kind].visionRadius),
+        radiusSq: rangeSq(STRUCTURE_STATS.workPod.visionRadius),
       });
     }
   }
@@ -189,6 +179,15 @@ export class SimRenderer {
       const v = this.hqMeshes[f];
       if (v) v.selectionRing.visible = f === selectedHqFaction;
     }
+  }
+
+  // Phase C.1: fire a "needs energy" lightning cue on a worker. Called
+  // by the input controller when it detects a blocked command on a
+  // charge-mode worker. No-op if the worker has no mesh yet (unlikely
+  // but harmless).
+  triggerEnergyCue(workerId: number): void {
+    const v = this.unitMeshes.get(workerId);
+    if (v) v.energyCue.trigger();
   }
 
   private spawnHqs(): void {
@@ -254,25 +253,28 @@ export class SimRenderer {
         // (cap = initial remaining; the label still shows current and
         // the silhouette fades correctly as it drains).
         if (v.group.visible) {
-          v.setRemaining(toFloat(n.remaining), toFloat(n.maxReserve));
+          // Energy nodes: max-reserve = initial remaining (no regen).
+          // We don't have a stored cap; derive it from the highest
+          // value seen so the silhouette fade stays sensible.
+          const seen = this.nodeMaxSeen.get(n.id);
+          const max = seen === undefined || toFloat(n.remaining) > seen
+            ? toFloat(n.remaining)
+            : seen;
+          this.nodeMaxSeen.set(n.id, max);
+          v.setRemaining(toFloat(n.remaining), Math.max(max, 0.0001));
         }
       }
     }
   }
 
+  private readonly nodeMaxSeen = new Map<number, number>();
+
   private syncStructures(): void {
     for (const s of this.sim.state.structures) {
       let v = this.structureMeshes.get(s.id);
       if (!v && s.alive) {
-        if (s.kind === 'production') {
-          v = buildProductionMesh(s.faction, toFloat(s.x), toFloat(s.y));
-        } else if (s.kind === 'upgrade') {
-          v = buildSpireMesh(s.faction, toFloat(s.x), toFloat(s.y));
-        } else if (s.kind === 'supply') {
-          v = buildPylonMesh(s.faction, toFloat(s.x), toFloat(s.y));
-        }
-        if (v !== undefined) {
-          // Phase 3.10.3: tag + register for raycast picking.
+        if (s.kind === 'workPod') {
+          v = buildWorkPodMesh(s.faction, toFloat(s.x), toFloat(s.y));
           v.group.userData.structureId = s.id;
           this.entitiesGroup.add(v.group);
           this.structureMeshes.set(s.id, v);
@@ -280,45 +282,18 @@ export class SimRenderer {
         }
       }
       if (!v) continue;
-      // Phase 3.8: friendly structures always visible; enemy structures
-      // hidden until in the player's current vision. Per-tick presence
-      // (no last-known-position memory in v1).
+      // Friendly structures always visible; enemy structures hidden
+      // until in current vision.
       const isOwn = s.faction === this.playerFaction;
-      const visible = s.alive
+      v.group.visible = s.alive
         && (isOwn || this.bypassVision || this.isPositionVisible(s.x, s.y));
-      v.group.visible = visible;
       if (!s.alive) continue;
-
-      const stats = STRUCTURE_STATS[s.kind];
-      const buildTotal = stats.buildTicks;
-      const buildRatio = buildTotal === 0 ? 1 : 1 - s.buildTicksRemaining / buildTotal;
-      v.setBuildProgress(buildRatio);
-      v.hpBar.update(toFloat(s.hp), toFloat(stats.maxHp));
-
-      // Phase 3.10.7: scaffolding pulse + slow rotation while in
-      // build phase. setBuildProgress already toggled visibility; we
-      // just animate the live ring on top of that.
-      if (v.scaffoldingRing.visible) {
-        const t = performance.now() / 1000;
-        const pulse = 0.5 + 0.5 * Math.sin(t * 2.6); // 0..1
-        const mat = v.scaffoldingRing.material as THREE.MeshStandardMaterial;
-        mat.emissiveIntensity = 0.4 + 1.4 * pulse;
-        mat.opacity = 0.35 + 0.45 * pulse;
-        v.scaffoldingRing.rotation.z = t * 0.6;
-      }
-
-      // Upgrade-only: pulse the finial while research is running.
-      if (s.kind === 'upgrade') {
-        const upgradeVis = v as UpgradeVisual;
-        // Pulse intensity tracks fraction-completed so the finial
-        // brightens through the research window. researchTicksRemaining
-        // counts down from TIER2_RESEARCH_TICKS to 0.
-        const total = 80; // TIER2_RESEARCH_TICKS — kept inline to avoid pulling sim constants here
-        const ratio = s.researchTicksRemaining > 0
-          ? 1 - s.researchTicksRemaining / total
-          : 0;
-        upgradeVis.setResearchProgress(ratio);
-      }
+      // Build progress ratio (0..1) drives the rising silhouette + dim
+      // body / scaffolding fade.
+      const total = STRUCTURE_STATS.workPod.buildTicks;
+      const ratio = total === 0 ? 1 : 1 - s.buildTicksRemaining / total;
+      v.setBuildProgress(ratio);
+      v.hpBar.update(toFloat(s.hp), toFloat(STRUCTURE_STATS.workPod.maxHp));
     }
   }
 
@@ -374,6 +349,13 @@ export class SimRenderer {
 
       const maxHp = UNIT_STATS[u.kind].maxHp;
       v.hpBar.update(toFloat(u.hp), toFloat(maxHp));
+      // Phase C.1: charge bar + energy cue. Bar tracks the worker's
+      // per-unit charge; cue ticks toward fade-out (trigger fires from
+      // outside this method when the input controller blocks a cmd).
+      if (u.kind === 'worker') {
+        v.chargeBar.update(u.charge, u.maxCharge);
+      }
+      v.energyCue.tick(dt);
     }
   }
 
@@ -390,82 +372,17 @@ export class SimRenderer {
     }
   }
 
-  // Phase 3.7: trail rendering. Per-trail Three.js group containing
-  // one small glowing tile per segment. Re-built each frame because:
-  // (a) segments are cheap (max ~40 per active trail × a few trails);
-  // (b) age determines opacity/intensity, which would otherwise need
-  // per-segment material tracking; (c) per-tick segment add + drop
-  // sequences are simpler to express by full rebuild than by diffing.
-  // If trail counts blow up, switch to InstancedMesh + per-instance
-  // material attributes.
-  private syncTrails(): void {
-    const sim = this.sim.state;
-    // Tear down dead trails first so we can short-circuit alive
-    // iteration. Iterate the renderer's map (not sim.trails) so dead
-    // trails not present in sim get cleaned up too.
-    for (const [trailId, group] of this.trailGroups) {
-      const t = sim.trails.find((x) => x.id === trailId);
-      if (!t || !t.alive) {
-        this.entitiesGroup.remove(group);
-        this.disposeGroup(group);
-        this.trailGroups.delete(trailId);
-      }
-    }
-    for (const t of sim.trails) {
-      if (!t.alive) continue;
-      let group = this.trailGroups.get(t.id);
-      if (!group) {
-        group = new THREE.Group();
-        group.name = `trail-${t.id}`;
-        this.entitiesGroup.add(group);
-        this.trailGroups.set(t.id, group);
-      }
-      // Rebuild segments. Cleanup first so material/geometry don't leak.
-      while (group.children.length > 0) {
-        const child = group.children[0];
-        group.remove(child);
-        if (child instanceof THREE.Mesh) {
-          (child.geometry as THREE.BufferGeometry).dispose();
-          (child.material as THREE.MeshStandardMaterial).dispose();
-        }
-      }
-      const lifetime = sim.factions[t.ownerFaction].trailDurationResearched
-        ? TRAIL_SEGMENT_LIFETIME * 2
-        : TRAIL_SEGMENT_LIFETIME;
-      for (const seg of t.segments) {
-        const fade = Math.max(0, 1 - seg.age / lifetime);
-        const visual = buildTrailSegmentMesh(t.ownerFaction, toFloat(seg.x), toFloat(seg.y));
-        visual.material.opacity = 0.2 + 0.8 * fade;
-        visual.material.emissiveIntensity = 0.4 + 1.4 * fade;
-        group.add(visual.mesh);
-      }
-    }
-  }
-
-  private disposeGroup(group: THREE.Group): void {
-    group.traverse((obj) => {
-      if (obj instanceof THREE.Mesh) {
-        (obj.geometry as THREE.BufferGeometry).dispose();
-        (obj.material as THREE.MeshStandardMaterial).dispose();
-      }
-    });
-  }
-
   dispose(): void {
     for (const v of this.unitMeshes.values()) this.entitiesGroup.remove(v.group);
     for (const v of this.nodeMeshes.values()) this.entitiesGroup.remove(v.group);
     for (const v of this.structureMeshes.values()) this.entitiesGroup.remove(v.group);
-    for (const g of this.trailGroups.values()) {
-      this.entitiesGroup.remove(g);
-      this.disposeGroup(g);
-    }
     for (const h of this.hqMeshes) if (h) this.entitiesGroup.remove(h.group);
     this.unitMeshes.clear();
     this.nodeMeshes.clear();
     this.structureMeshes.clear();
-    this.trailGroups.clear();
     this.unitGroupView.clear();
     this.nodeGroupView.clear();
+    this.structureGroupView.clear();
     this.prevUnitPos.clear();
   }
 }

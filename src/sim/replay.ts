@@ -169,14 +169,32 @@ import type { InitialMatchSpec } from './state';
 // regenerated.
 // Phase 3.11b bumps to v19 (2026-05-08). FactionState gains `factionId:
 // 'swarm' | 'siege'`; hashed as a u32 slot per faction (0=swarm,
-// 1=siege). Initial pick threads in via InitialMatchSpec.factionIds —
-// the replay format already serialises the full spec so the existing
-// header carries the choice automatically; only the bump is needed.
-// Per-faction stat overrides (worker speed + harvest interval at this
-// cut) read off `state.factions[f].factionId`, so a swarm-vs-siege
-// match would diverge from the same inputs played as siege-vs-swarm.
-// Golden fixtures regenerated.
-export const REPLAY_VERSION = 19;
+// 1=siege).
+// Phase A bumps to v20 (2026-05-10). Catalogue strip — combat units
+// (Defender / Raider / Vanguard), structures (Forge / Spire / Pylon),
+// research (Tier-2 / Trail+), the energy-dump ability + Trail entities,
+// the Flux + Colour resources, and the supply system are all out.
+// Phase C.1 bumps to v21 (2026-05-12). Worker carries per-unit charge
+// (`charge`, `maxCharge`, `chargeTicksAccrued`) + new task targets
+// (`targetStructureId`, `chargeTargetStructureId`). WorkerPhase adds
+// 'movingToBuildSite' | 'building' | 'walkingToCharge' | 'charging'.
+// SimState.structures re-enters the canonical shape (scoped to
+// WorkPod). FactionState gains `supplyCap` + `supplyUsed`. CommandKind
+// `BuildStructureByWorker = 11` is un-retired with the same shape it
+// had pre-Phase-A.
+// Phase C.1 follow-up bumps to v22 (2026-05-12). Faction-level research
+// slot — FactionState gains `researchingKind` + `researchTicksRemaining`
+// + `autoResumeResearched`. Worker gains `previousNodeId` (auto-resume
+// memory). New CommandKind.StartResearchAtPod = 14. Currently a single
+// research kind ('autoResume'): on completion, workers automatically
+// resume their last harvest after charging.
+// Phase C.1 follow-up bumps to v23 (2026-05-12). Charge-spot slot
+// allocation — Worker gains `chargeSlot` (hashed; 0 when not in
+// charge mode). Workers heading to the same pod / HQ pick distinct
+// hex / octagonal offsets so they don't stack on one point. Same
+// idiom as harvest-slot allocation at energy nodes. Golden fixtures
+// regenerated.
+export const REPLAY_VERSION = 23;
 
 export interface ReplayLog {
   version: number;

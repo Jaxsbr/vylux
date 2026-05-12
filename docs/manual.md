@@ -1,78 +1,70 @@
 # Vylux Manual
 
-> **Audience:** anyone — players, internal alpha testers, agents, future-Jaco — who needs to know **what is currently in the game**, not the design vision behind it. This is the catalog. The vision lives in [`product/PRD.md`](product/PRD.md); the engineering history lives in [`investigation/`](investigation/).
+> **Audience:** anyone — players, internal alpha testers, agents, future-Jaco — who needs to know **what is currently in the game**, not the design vision behind it. The vision lives in [`plan.md`](plan.md); the in-progress design intent and phase plan live there too.
 
-> **Currency:** this file MUST be updated as part of any sub-phase that adds, removes, or re-tunes a unit, structure, resource, tech, or victory condition. The investigation-doc closing checklist enforces this, and the contract is mirrored in `AGENTS.md`. If the numbers in this file disagree with `src/sim/units-config.ts`, **the config wins** — patch this doc.
+> **Currency:** this file MUST be updated as part of any change that adds, removes, or re-tunes a unit, structure, resource, tech, or victory condition. If the numbers in this file disagree with `src/sim/units-config.ts`, **the config wins** — patch this doc.
 
-> **Last sub-phase that touched these numbers:** 3.10.10d (harvest slot allocation + formation retention) followed by **3.10.10e**, which reverted the local-collision pass + velocity layer + lateral-bias fields from 3.10.10–3.10.10c. The structural fix is slot allocation (workers walk to different points around a node) + formation retention (multi-unit MoveUnit fans out into hex-ring slots around the click point); local collision response was producing visible glitches without earning its complexity. Movement is back to chebyshev step-toward-target — units pass through each other on the local axis between their slot destinations, the standard pass-through behaviour AoE / SC2 use when slot allocation is doing the heavy lifting.
-
-> **2026-05-07 pivot context, refined 2026-05-08.** Vylux is single-player **RTS PvAI + Rogue mob spawns**: the player picks a faction on the main menu, the AI plays the opposing faction, and Rogues (continuous neutral-hostile mob spawns) layer environmental pressure on both sides. The catalog below — units, structures, resources, tech, controls, current map — carries forward unchanged; the pivot is a *design* shift, not a code rewrite. Numbers and behaviours documented here are **what's currently in the game**. Sub-phases 3.11b / 3.13 / 3.14 will land the opposing-faction asymmetric roster, the Rogue spawn system, and the playtest gate. **3.11a (this sub-phase)** is presentation-only: faction picker on the main menu, themed HUD, themed end-of-match screen — the sim shape is unchanged. See PRD §0 for the pivot notice + 2026-05-08 refinement and `docs/investigation/04-phase-3-faction-and-map-depth.md` for what's coming.
-
-> **2026-05-08 — sub-phase 3.11a (faction identity & menu).** The main menu now shows a dual-tile faction picker — **SWARM** on the left, **SIEGE** on the right. The selected tile dominates (scale, glow, particles, voice line, START RUN button); the unselected tile dims. **A / D** or **← / →** toggles; **click** on a tile selects, **click again** (or **Space / Enter**) commits. The pick persists in `localStorage` (`vylux.faction`) — first visit defaults to Swarm. The chosen faction propagates through the in-game HUD (resource bar, action bar, HQ glow, drag-rect) and the end-of-match screen ("{FACTION} — VICTORY" / "{FACTION} — DEFEATED" with the faction's voice copy). `?menu=skip` still bypasses the picker and uses the persisted (or default) faction.
-
-> **2026-05-08 — sub-phase 3.11b first cut.** The faction-id strings retired their internal `'pulse' | 'forge'` codenames in favour of `'swarm' | 'siege'` (display names already matched). The sim now stores `factionId` on `FactionState` — hashed and round-tripped through replays — so `units-config.ts` can dispatch per-faction stat overrides off the shared `UNIT_STATS` baseline. **First asymmetric tweak (proof of plumbing, not the final tuning):** Swarm workers move slightly faster (`speed = 0.055` vs `0.05`-baseline) but harvest slightly slower per gain (`harvestTicks = 23` vs `20`); Siege workers move slightly slower (`0.045`) but harvest slightly faster (`17`). All other unit stats (HP / damage / range / costs / vision / train time) stay shared. The AI's opposing-faction macro, the Resign command, and the drop of the legacy 100-point threshold are still to land before 3.11b closes. **`REPLAY_VERSION` bumps 18 → 19.**
+> **Phase C.1 (2026-05-12) landed:** work pods + worker per-unit charge + the first research item (auto-resume). Workers now spend 1 charge per task (harvest cycle or build). At 0 charge a worker enters charge mode (walks to the nearest friendly work pod, falls back to HQ if no pod exists) and refuses player commands until fully recharged. Each operational work pod also raises the worker cap, and hosts the worker auto-resume research. AI actively grows its workforce — it trains workers up to the cap and builds work pods to raise the cap further.
 
 ---
 
 ## Resources
 
-Three resources, in the shape PRD §6.3 commits to.
-
 | Resource | Source | Used for | Notes |
 |---|---|---|---|
-| **Energy** | Energy nodes (most map nodes). Workers gather → return → deposit at HQ. | Workers, all structures, tier-1 + tier-2 combat units. | Plentiful, decentralised. Most nodes are Energy. |
-| **Flux** | Flux nodes (small set, contested). Same gather-and-deposit loop; deposits to a separate pool. | Tier-2 research at the Spire, tier-2 unit production at the Forge. | Phase 3.1 added Flux as a distinct resource. The launch SPEC currently has 1 Flux node at the map centre. |
-| **Colour** (Blue / Red) | Colour nodes — **faction-locked**: blue nodes only by faction 0 (cyan), red only by faction 1 (red-orange). | Every unit and every structure (small cost). Lockout-by-denial: pushed off your colour nodes → no production until you reclaim. | Phase 3.5. Colour nodes regenerate passively (~1 / sec) toward a 100-unit cap, so a denied faction recovers slowly. Energy + Flux nodes don't regen and still die at empty. |
+| **Energy** | Energy nodes scattered around the map. Workers gather → return → deposit at HQ. | Worker training, work pod construction. | The only live resource at this cut; **Matter** is the planned construction-material companion (Phase C.2 of `plan.md`). |
 
-**Worker model:** workers walk to a node, harvest for one *harvest interval* (Phase 3.11b: per-faction — Swarm 23 ticks ≈ 1.15 s, Siege 17 ticks ≈ 0.85 s), pick up `HARVEST_AMOUNT` clamped by `WORKER_CAPACITY`, walk back to HQ, deposit, and resume. Workers don't stand on a node and trickle. A worker assigned (manually or by auto-assign) to a foreign-colour node is silently dropped back to idle. **Phase 3.9.2:** newly-trained player-faction workers stand idle on spawn and after each deposit until the player issues a command — auto-assign was removed from the player path so the player keeps agency over where workers go (the AI still auto-assigns its own faction). PRD §6.3.
+### Worker harvest model
 
-### Supply (Phase 3.6)
+Workers walk to a node, harvest for one *harvest interval* (per-faction — Swarm 23 ticks ≈ 1.15 s, Siege 17 ticks ≈ 0.85 s), pick up `HARVEST_AMOUNT` clamped by `WORKER_CAPACITY`, walk back to HQ, deposit, and resume. Workers don't trickle. Newly-trained workers stand idle on spawn and after each deposit until the player issues a command — auto-assign is removed from the player path so the player keeps agency over where workers go (the AI still auto-assigns its own faction).
 
-Every alive unit consumes a `supplyCost` from its faction's `supplyCap`. The cap starts at 10 and grows by 8 per operational Pylon. Train commands (`TrainUnit` at HQ, `TrainAtStructure` at a Forge) silently reject when the unit's supply would push past the cap. `TrainAtStructure` reserves the supply at queue time, so a second train command can't double-book the slot mid-train. Killing a Pylon recomputes the cap (faction loses 8); existing units are never auto-killed for supply reasons, but new training is blocked until the cap recovers.
+### Worker charge (Phase C.1)
 
-### Energy dump + light trails (Phase 3.7)
+Every worker carries an internal `charge` meter (default max **10**, drains **1** per task at task-start). Movement is **free while charge > 0**; once charge hits 0, the worker enters **charge mode** and refuses every player command (move, harvest, build) until it has fully recharged.
 
-Workers can activate an **energy dump** — for 40 ticks (2 s) the worker moves at 2× speed and bleeds a deadly light-trail segment per tick. Costs 100 Energy upfront and triggers a 200-tick (10 s) cooldown after the dump ends. Any non-owner unit that overlaps a trail segment dies instantly (within ~0.4 tile). Same-faction units and structures are immune; the dumping worker walks through their own trail unharmed.
+**What counts as a task** (1 charge each, charged at start):
+- One harvest cycle — `movingToNode → harvesting → returning → deposit at HQ`. One full cycle = 1 charge.
+- One build action — `movingToBuildSite → building → operational`. 1 charge.
+- Aborted tasks (player redirects mid-cycle, node depletes, build cancelled): **still cost a full charge**. Drain is at start, no refund.
+- `MoveUnit` is free while charge > 0 (the worker has fuel to spare).
 
-Trail segments fade visually with age (opacity + emissive intensity) and expire after `TRAIL_SEGMENT_LIFETIME = 60` ticks (3 s). Researching **TRAIL+** at a Spire (40 Flux, 80 ticks) doubles the lifetime to 6 s for the faction's existing and future trails — the segment-age check looks up the flag at expiry-time, so an in-flight trail extends the moment the research completes.
+**Charge-spot picking:**
+- Always prefer the **nearest friendly operational work pod**, regardless of distance.
+- Fall back to the friendly **HQ** only if no operational pod exists.
 
-### Vision + scouting (Phase 3.8)
+**Recharge rates:**
+- At a work pod: `+1 charge per 20 ticks` (~10 s to refill a full 10/10 tank).
+- At HQ: `+1 charge per 40 ticks` (~20 s — half the pod rate).
 
-The renderer filters per faction. Friendly units, structures, and HQ are always visible; **enemy units, enemy structures, and the enemy HQ are hidden until they enter the player's current vision bubble** (no last-known-position memory in v1). Vision radii (in tiles): worker 4, defender 5, raider 5, vanguard 6, HQ 8, Forge / Spire 6, Pylon 5.
+**Renderer cues:**
+- Cyan charge bar under each worker's HP bar.
+- Floating lightning icon on a worker when the player tries to command it during charge mode. ~1 s fade.
 
-**Resource nodes are discovered persistently** — once a friendly unit / structure walks within vision of a node, the faction's `discoveredBy[node]` flag flips to true and stays true forever (no fog-of-war rediscovery). The node draws to the renderer afterward even outside current vision, and the player can right-click workers onto it. Nodes outside any friendly vision at match start are hidden until scouted; the AI's auto-route + worker-bias helpers also only consider discovered nodes. Each faction's home patch (within HQ vision) is auto-discovered at tick 0 so the player + AI can both bootstrap.
+### Vision + scouting
 
-There's no separate scout-mode command; right-click-moving a worker (or marching combat units) is enough to scout. Observer mode bypasses vision entirely (sees both factions' state). The sim itself stays canonical-and-full-state — vision is a presentation concern; lockstep determinism + replay round-trip are unaffected.
+The renderer filters per faction. Friendly units, the friendly HQ, and friendly work pods are always visible; enemy entities are hidden until they enter the player's current vision bubble (no last-known-position memory in v1). Vision radii (in tiles): worker 4, HQ 8, work pod 5.
+
+Resource nodes are discovered persistently — once a friendly unit / HQ / pod comes within vision of a node, the faction's `discoveredBy[node]` flag flips to true and stays true forever (no fog-of-war rediscovery). Each faction's home patch is auto-discovered at tick 0. Right-click-moving a worker is the canonical scouting action. Observer mode bypasses vision entirely (sees both factions' state).
 
 ---
 
 ## Units
 
-| Kind | Tier | HP | Speed | Range | Damage | Cooldown | Cost | Supply | Train time | Trained at |
-|---|---|---|---|---|---|---|---|---|---|---|
-| **Worker** | T1 (eco) | 40 | **0.055** (Swarm) / **0.045** (Siege) | — | 0 | — | 50 E + 5 C | 1 | instant | HQ |
-| **Defender** | T1 (frontline) | 120 | 0 (stationary) | 1.5 | 10 | 20 ticks (1.0 s) | 80 E + 10 C | 2 | 30 ticks (1.5 s) | Forge |
-| **Raider** | T1 (harass) | 50 | 0.08 | 1.0 | 15 | 15 ticks (0.75 s) | 120 E + 10 C | 2 | 40 ticks (2.0 s) | Forge |
-| **Vanguard** | T2 | 150 | 0.07 | 1.5 | 30 | 18 ticks (0.9 s) | 200 E + 30 F + 25 C | 4 | 80 ticks (4.0 s) | Forge (requires tier 2) |
+| Kind | HP | Speed | Train cost | Max charge | Train time | Trained at |
+|---|---|---|---|---|---|---|
+| **Worker (Swarm)** | 30 | 0.055 | 40 E | 10 | instant | HQ |
+| **Worker (Siege)** | 60 | 0.045 | 60 E | 10 | instant | HQ |
 
-`E` = Energy, `F` = Flux, `C` = own-faction colour (blue for faction 0, red for faction 1). `Supply` = supplyCost — consumed against the faction's `supplyCap` while the unit is alive (Phase 3.6).
+`E` = Energy. Speeds are tiles per sim tick (sim runs at 20 Hz; multiply by 20 for tiles/second).
 
-**Worker speed + harvest interval are faction-asymmetric (Phase 3.11b first cut).** Swarm workers move at `speed = 0.055` and harvest one gain every `23` ticks; Siege workers move at `speed = 0.045` and harvest one gain every `17` ticks. The trade-off is intentional: Swarm out-paces in re-deploy / scout, Siege out-paces at the harvest slot. All other unit stats remain shared across factions until later 3.11b passes diverge them.
-
-Speeds are **tiles per sim tick** (sim runs at 20 Hz; multiply by 20 for tiles/second).
+**Faction asymmetry (Phase C.1 first cut):**
+- **Swarm** workers are cheaper + softer + faster on the move, slower to harvest. Lean into volume.
+- **Siege** workers are costlier + tougher + slower on the move, faster to harvest. Lean into staying power.
+- Charge tank and recharge rates are identical across factions for this cut — divergence lands with the upgrade tree.
 
 ### Behaviour
 
-- **Worker** — gathers from any live node (Energy or Flux). Cannot fight. Dies easily; carrying is lost on death.
-- **Defender** — stationary garrison. Attacks any enemy unit that enters range.
-- **Raider** — mobile harasser. Marches toward the enemy HQ along straight axes. Attack-priority chain: enemy unit in range → enemy structure in range → enemy HQ in range → keep marching.
-- **Vanguard** — tier-2 raider. Same priority chain; bigger, slower, hits harder, longer range.
-
-### Counter triangle (PRD §6.5)
-
-Within tier 1: **frontline** (defender) counters **harass** (raider) counters **eco** (worker). Across tiers: vanguard stomps tier-1 in straight fights but commits an early-game window the opponent can punish.
-
-Faction-asymmetric rosters are deferred to sub-phase **3.4**. Current units are shared across both factions.
+- **Worker** — gathers from any live energy node, builds work pods, runs on its own internal charge meter. Cannot fight. Carrying is lost on death.
 
 ---
 
@@ -80,47 +72,45 @@ Faction-asymmetric rosters are deferred to sub-phase **3.4**. Current units are 
 
 | Structure | HP | Cost | Build time | Role |
 |---|---|---|---|---|
-| **HQ** | 250 (configurable per match) | — | — (placed at match start) | Trains workers. Losing the HQ ends the match. |
-| **Forge** (production) | 200 | 150 E + 30 C | 60 ticks (3.0 s) | Trains tier-1 combat units (defender, raider) and tier-2 (vanguard, post-research). Single training slot. |
-| **Spire** (upgrade) | 150 | 100 E + 25 C | 40 ticks (2.0 s) | Hosts tier-2 research. Single research slot. |
-| **Pylon** (supply) | 100 | 75 E + 15 C | 30 ticks (1.5 s) | Adds +8 to its faction's supply cap once operational. Killing one drops the cap (alive units are not retroactively killed). |
+| **HQ** | 250 (configurable per match) | — | — (placed at match start) | Trains workers. Losing it ends the match. Acts as a fallback charge spot at half the pod rate. Provides 5 worker cap. |
+| **Work Pod** | 100 | 60 E | 30 ticks (1.5 s) | Built by a worker. While operational: +5 worker cap, and acts as a primary charge spot (faster than HQ). Hosts (future) worker-upgrade research — slot reserved, no upgrades yet. |
 
-### Placement
+### Build flow (Work Pod)
 
-- HQ positions are set in the match SPEC.
-- Forge + Spire are placed by the player by clicking BUILD on the panel, then clicking a tile. Tile occupancy is not validated yet (3.10 will introduce real map data + collision). The AI places its Forge + Spire at deterministic offsets from its HQ.
+1. Select one or more workers.
+2. Click **BUILD WORK POD** on the action bar (hotkey **B**) — the cursor switches to crosshair.
+3. Left-click a tile to commit the placement. The lowest-ID actionable worker is dispatched: it pays 1 charge, the faction pays 60 Energy, the pod spawns with full `buildTicksRemaining`.
+4. The worker walks to the site (`movingToBuildSite`), arrives (`building`), and ticks the structure down (1 tick per sim tick while on site). At 0 ticks the pod becomes operational.
+5. Build aborted (worker redirected, worker killed): the pod stays under construction; another worker can be dispatched to finish it (in C.1 only one worker constructs at a time — multi-worker construction lands in a follow-up).
 
-### Combat
+### Capacity
 
-- All structures take damage from enemy units within attack range.
-- Raiders + vanguards attack enemy structures as a priority slot between unit-combat and HQ-fallback. Killing an enemy Forge denies further combat-unit production until they rebuild.
-- Defenders do not currently attack structures (only units). Faction-divergent defender behaviour arrives in 3.9.
+- HQ baseline: **5** worker cap.
+- Each operational work pod: **+5**.
+- `TrainUnit` is silently rejected when `supplyUsed >= supplyCap`. Both values are recomputed at end of each sim step.
 
 ---
 
 ## Tech
 
-Single research available currently:
+Research is hosted at any operational work pod — pick one, click **RESEARCH AUTO-RESUME**. Faction-level slot (not per-pod): once started, every other pod shows the in-progress state, and on completion every owned worker reads the flag.
 
-| Research | Cost | Time | Researched at | Effect |
-|---|---|---|---|---|
-| **Tier 2** | 50 F + 25 C | 80 ticks (4.0 s) | Spire | Unlocks Vanguard training at Forges. |
-| **Trail Duration** | 40 F | 80 ticks (4.0 s) | Spire | Doubles `TRAIL_SEGMENT_LIFETIME` for the faction's energy-dump trails. |
+| Research | Cost | Time | Effect |
+|---|---|---|---|
+| **Auto-Resume** | 80 E | 80 ticks (4 s) | Workers automatically resume their previous harvest task after charging. Without it, a worker that finished charging sits idle waiting for a new command. |
 
-The Spire's research slot is single-occupancy (Phase 3.7 added a `researchKind` discriminator so it can host either of the two researches above; only one runs at a time). Tech tree branches per faction arrive in 3.9. Faction-specific tech objectives (PRD §6.7 path 3) are stretch and may slip to Phase 4.
+**Rules:**
+- A faction can hold at most one mid-research at a time. Subsequent `StartResearchAtPod` commands are silently rejected.
+- Auto-resume only re-picks the last harvest target. Build tasks are one-shot — there's nothing to resume.
+- If the previous harvest node has been depleted (or otherwise died), the worker drops to idle instead.
+- The renderer surfaces the research as a button on the selected pod (`RESEARCH AUTO-RESUME` with cost + hotkey `R`), an in-progress label (`RESEARCHING (Xs)`), or a status label (`AUTO-RESUME ACTIVE`) once complete.
 
 ---
 
 ## Victory conditions
 
-Interim post-pivot set (3.10.8 cleanup):
-
-- **HQ destruction** — destroy the enemy HQ. The other faction wins. **Currently the only win/loss path.**
-- **Resign** — not implemented yet. Lands in 3.13 alongside the PvE win conditions.
-
-The previous Phase 1 placeholder set included a 100-point score threshold (kills + HQ damage). That path was esport-balance scaffolding and was **removed on 2026-05-07** as part of the PvE pivot — see PRD §0 + the 3.10.8 cleanup in the Phase 3 investigation doc. The HUD no longer displays a points line; `REPLAY_VERSION` bumped from 10 → 11 because `FactionState.points` was dropped from the canonical hash.
-
-The PvE win-condition set — **survive-N-waves + scenario objective + boss + resign** (PRD §6.7) — lands in sub-phase **3.13**. Until then HQ destruction is the only signal; matches against the existing scripted AI play out as a pure HQ-vs-HQ skirmish.
+- **HQ destruction** — destroy the enemy HQ. The other faction wins. (No combat units are currently in the active sim, so this path is unreachable through gameplay — it remains the canonical win condition that combat units will route to once Phase D reintroduces them.)
+- **Resign** — `CommandKind.Resign` (slot 13). The named faction concedes; the other faction wins. No-op if a winner is already set.
 
 ---
 
@@ -130,94 +120,52 @@ The PvE win-condition set — **survive-N-waves + scenario objective + boss + re
 
 - **Left-click** an owned unit → selects only that unit (replaces any prior selection).
 - **Shift + left-click** an owned unit → toggle that unit in or out of the current selection.
-- **Left-click + drag** on empty ground → drag-rectangle. On release, every owned unit inside the rect joins the selection (shift-drag adds to the existing selection instead of replacing).
-- With selected workers, **left-click** a node → all selected workers are assigned to harvest there. Selection *persists* — the workers stay highlighted so you can give a follow-up order. Node-pick takes priority over unit-pick when you have a selection, so clicking a node already being harvested by another worker assigns the current selection rather than re-selecting the busy worker.
-- **Right-click** on empty ground → MoveUnit for every selected unit:
-  - Workers cancel any harvest, walk to the tile, and stay parked there until you give them another order.
-  - Raiders / vanguards take the tile as a temporary override of their march toward the enemy HQ; on arrival they resume default behaviour.
-  - Defenders ignore the order (stationary).
-- **Right-click** on an in-progress own structure (with worker(s) selected) → assign those workers to help build it. Multi-worker construction stacks throughput.
-- **Right-click** during placement mode → cancels the placement (no move-order is issued).
-- **Left-click on empty ground** → clears the unit selection. Selection only clears here or via Esc; it persists across orders so a single batch of workers can be reassigned without re-picking them every time.
-- **Esc** → clears selection and cancels any pending placement.
-
-**Phase 3.9.1 visual feedback.** A faction-coloured ring pings at the right-click target on every move order; a green pulse confirms an assign-to-node click; a brief burst confirms structure placement. The cursor switches to a crosshair while in placement mode and to a pointer when hovering over an own unit or a node — so the player can see at a glance what a click will do.
-
-**Phase 3.9.3 visual scale.** All units render at ~1.8× their previous size; HQ at ~2.0×, Forge at ~1.9×, Spire and Pylon at ~1.4× — the catalog now reads at glance distance instead of as ant-sized silhouettes against the 32×32 grid. Sim is untouched (footprints are still 1 tile in the canonical state); the scale-up is renderer-only. AI Forge + Spire offsets pushed from (±2,±2) and (±1,0) to (±3,±3) and (±3,0) so the bigger meshes don't visually overlap the HQ.
-
-**Phase 3.9.4 fog visualization.** The Tron grid is *uncovered* by vision: a dark layer covers the whole map by default; visible tiles drop the layer to transparent so the brightened grid lines (intensity bumped from 0.4 → 1.2 in the same sub-phase) shine through. Explored-but-not-currently-visible tiles stay mid-darkened — you remember they're there, but they fade. Unexplored tiles stay heavily dimmed (~92% alpha) so the unknown reads as a void carved away from the lit map. Composited per-pixel CPU-side via `min()` of falloff contributions, so overlapping vision sources don't compound. Observer mode bypasses entirely. Pure renderer; the explored bitmap lives outside sim state, the cross-OS gate is unaffected.
-
-**Phase 3.9.5 audio.** Five Web-Audio-synthesized cues: UI button click, train complete (rising chime when a unit spawns), build complete (double tick when a structure goes operational), attack hit (noise burst when any friendly unit takes damage), HQ alert (pulsing low tone when the player HQ takes damage). Throttled to at most one of each type per tick, so combat doesn't spam. Mute toggle bound to **M** with a small status indicator top-right. No external audio assets — every sound is an oscillator + envelope. Renderer-side detection compares sim state across ticks; the deterministic sim is unaware.
-
-**Phase 3.9.6 unit animations.** Newly-trained units scale-in from 40% to full size on spawn (legacy "placement pulse" — already existed in mesh code, surfaced through the wrapper interface and triggered by sim-renderer when it sees a unit ID for the first time). Units that die get a brief emissive flash before the mesh disappears — the visual stays alive in a "dying" pool until the pulse decays, so the player can see the death even if it happens between two right-click moves. Renderer-only; sim is untouched.
-
-**Phase 3.9.7 main menu.** PvAI mode opens to a Tron-styled menu before the match begins — VYLUX title in glowing cyan, PLAY VS AI / MULTIPLAYER / OPTIONS buttons, faction picker placeholder. MULTIPLAYER + OPTIONS are stubs. **Post-2026-05-07 pivot:** MULTIPLAYER is now a relic — the dormant `?lockstep=host` URL flow still works for the dev loop, but multiplayer is not the product direction (see PRD §0). The button itself can stay or be hidden in a future menu pass. OPTIONS was waiting on a v4 binding-config UI commitment that's now been softened (PRD §3.7); whatever options screen lands will be PvE-scoped (volume, difficulty, perhaps a few rebind slots). `?menu=skip` URL param bypasses the menu (used by e2e tests + future deep-link share flows). Match-end overlay's RELOAD button returns to the menu naturally — no separate "back to menu" wire needed.
-
-**Phase 3.10 in-game action bar (context-sensitive).** Replaces the Phase 1 always-on flat buildables panel with an action bar driven by current selection: HQ → TRAIN WORKER; Worker(s) → BUILD FORGE / SPIRE / PYLON + DUMP; Forge → TRAIN DEFENDER / RAIDER / VANGUARD; Spire → RESEARCH TIER 2 / TRAIL+; Pylon → info hint; mixed/empty → guidance text. Each button shows its hotkey letter, faction-coloured cost glyphs (E yellow, F green, C cyan/red), and tooltip-based disabled reasons. HQ + structures are now click-selectable (new selection rings on each); the input controller carries `selectedStructureId` + `selectedHqFaction` slots alongside the unit selection. Workers build buildings (PRD §6.3 "workers gather, deposit, and repair" extended): the player must train a worker before placing a Forge.
-
-**Phase 3.10.4 worker spawn perimeter.** Newly-trained workers no longer appear on the HQ tile (selection collision + visual overlap with the bigger 3.9.3 HQ silhouette). They spawn on one of eight surrounding tiles via a deterministic round-robin (`FactionState.nextSpawnRotation` indexes a fixed offset table). Player explicit-tile spawns (TrainUnit with `x`/`y`) still honour the requested coords.
-
-**Phase 3.10.5 deposit perimeter.** Returning workers stop at the HQ perimeter (~2-tile radius from HQ center) instead of walking onto the HQ centre tile. Visual cleanliness — workers are no longer hidden inside the HQ silhouette while depositing.
-
-**Phase 3.10.6 worker-driven building.** New `BuildStructureByWorker` command (slot 11): the player selects a worker, picks BUILD FORGE / SPIRE / PYLON, then clicks a tile. The structure spawns at full `buildTicksRemaining` with `builtByWorker = true`; the assigned worker walks to the site and ticks construction down each tick while in range. Multiple workers stack contributions naturally (each contributes one tick per tick on site). Construction halts if the worker dies or is given a different command — the structure waits in build phase until another worker is dispatched. AI also uses the new path. Legacy `BuildStructure` (slot 4) retained for tests + back-compat — spawns structures with `builtByWorker = false` so they auto-tick the build phase.
-
-**Phase 3.10.7 multi-worker building + construction visual.** Right-click on an in-progress structure with worker(s) selected fans out `AssignWorkerToBuild` (slot 12) per worker — additional builders accelerate the construction. Structures under construction now show a visible "rising from the ground" animation: the body's y-scale grows from 15% to 100% as build progresses, with a faction-coloured pulsing scaffolding ring at the base that fades when construction completes. Spire's finial only appears past 50% build progress; Pylon's cap past 40% — so the silhouette evolves through the build rather than just fading in.
-
-**Phase 3.10.9 game-feel pass v2.** Four items, all renderer + light-touch sim:
-- **HUD redesigned.** The top-left text-dump moves to a `?debug=1`-gated panel; the player-facing HUD is a top-centre resource bar with five pills — HQ HP, Energy (gold E), Flux (green F), own-Colour (faction-tinted C), Supply (used/cap, turns red when blocked). Glyph colours match the action-bar cost glyphs so a player who reads "F 50" on a build button finds the same green F in the bar.
-- **Resource node visual identity.** Each kind gets a distinct top silhouette + emissive palette layered on the legacy hex base — Energy (gold pylon octahedron), Flux (green crystal cluster), Blue (cyan diamond spire, faction 0), Red (red-orange spike cone, faction 1). Always-on sprite label above each shows the current `remaining` value; emissive intensity fades as the node depletes.
-- **Worker collision** (3.10.9's iteration was reverted on 2026-05-08; the velocity-based rewrite that replaced it lands in 3.10.10 — see below). The widened `movingToNode → harvesting` transition (`HARVEST_AT_NODE_REACH_SQ ≈ 0.55²`) shipped under 3.10.9 and was kept across the revert: a worker arriving slightly off the node centre still picks up the harvest, and the wider arrival ring is what lets the new collision pass cluster workers naturally around a node instead of fighting for the exact tile.
-- **Iso-rotated camera pan.** The camera sits at `(+x, +y, +z)` looking at origin, so its right vector in world space is `(+x, -z)` and its ground-projected screen-down direction is `(+x, +z)` — both 45° off the world axes. Mouse drag and WASD/arrow keys now flow through `screenToWorldDelta` in `camera-controller.ts`, which rotates the screen-axis intent into world coords using that iso basis. Result: dragging right pans the map along the player's perceived horizontal (the bottom-left ↔ top-right diagonal in world coords); dragging down pans along the top-left ↔ bottom-right diagonal. (First-cut up/down direction was inverted; corrected on 2026-05-08.)
-
-**Phase 3.10.10 velocity-based steering + collision rewrite (reverted in 3.10.10e).** A four-cut arc — 3.10.10 (velocity layer + collision pass), 3.10.10b (sustained lateral bias), 3.10.10c (pair-opposite signs) — tried to make local-collision response feel right and never quite landed; the playtest read of every iteration was that the response was producing visible glitches more than it was preventing stacking. Sub-phase **3.10.10e** removed the whole machinery (per-unit `vx, vy`, `accel/maxSpeed`, friction pass, lateral-bias fields, `applyUnitCollisions`, `applyUnitFriction`); movement is back to the pre-3.10.10 chebyshev step-toward-target model where units pass through each other on the local axis. The investigation doc keeps the full record of the arc.
-
-**Phase 3.10.10d harvest slot allocation + formation retention (kept).** Local avoidance can't fix two units that *want to be at the same point* — that's a destination problem, not a collision problem. AoE / SC2 / WC3 all solve it the same way: don't send N units to one point, send them to N different points clustered around a target. Two passes:
-- **Harvest slot allocation.** Each resource node has 6 hex-arranged slot positions at radius `0.55` around its centre (`HARVEST_SLOT_OFFSETS`). When `AssignWorkerToNode` lands, the worker picks the lowest-index unused slot on the target node and stores it in a new `Worker.targetNodeSlot` field (hashed). The `movingToNode` phase walks to `node.center + slot_offset` and the harvest-arrival snap pins the worker exactly to the slot point — so multiple workers commanded to the same node cluster around it on a hex pattern, no two ever targeting the same point. Slot is reserved while `targetNodeId === node.id`; freed (back to `0`) on every code path that drops the assignment (death, BuildStructureByWorker, depleted-node early-out, etc). Surplus workers (slot 7+) wrap back to slot 0 — they pass through the slot-0 worker (no local collision) and harvest at the same hex point.
-- **Formation retention.** A multi-select right-click fans out one `MoveUnit` per selected unit, all to the same tile. Each command, on apply, picks the lowest-index unused formation slot (slot 0 = centre = exact click point; slots 1–6 = hex ring at radius `0.7`) by scanning every alive unit's existing `moveTarget` for matches. Commands process in order, so an N-unit cluster lands in slots `0..min(N-1, 6)` deterministically. Surplus units (slot 7+) wrap back to centre.
-
-`REPLAY_VERSION` ran `13 → 17` across the 3.10.10 arc, then `17 → 18` on the 3.10.10e revert (one shrink: each unit slot loses 5 i32/u32 fields — vx, vy, lateralBiasVx, lateralBiasVy, lateralBiasTicks; `targetNodeSlot` stays). Golden fixtures regenerated. Per-kind tunings as of 3.10.10e: worker `speed = 0.05`; raider `0.08`; vanguard `0.07`; defender `0` (stationary by construction). **3.11b made worker speed faction-asymmetric** (`0.055` Swarm / `0.045` Siege) and bumped `REPLAY_VERSION` to `19`; raider / vanguard / defender stay shared at this cut. Net effect: workers commanded to the same node walk to *different* hex points around it and harvest side-by-side — the same-destination deadlock is gone at its root. Multi-unit move orders spread out around the click point instead of stacking on it. Units pass through each other on the local axis between their slot destinations.
-
-### Action bar (Phase 3.10)
-
-Bottom of screen, **driven by current selection**:
-
-- Select your **HQ** (left-click) → **TRAIN WORKER**.
-- Select a **Worker** (or several) → **BUILD FORGE / SPIRE / PYLON**, **DUMP**. Workers are the builders — to place your first Forge, train a worker first, then click it.
-- Select a **Forge** → **TRAIN DEFENDER / RAIDER / VANGUARD**. Vanguard is shown but disabled until tier 2 is researched (hover for the reason).
-- Select a **Spire** → **RESEARCH TIER 2 / TRAIL+**.
-- Select a **Pylon** → info hint (no actions; Pylons just provide supply).
-- Mixed unit selection → no actions; right-click moves them.
-- Nothing selected → empty bar with a guidance hint.
-
-Each button shows its hotkey letter, faction-coloured cost glyphs (E energy / F flux / C colour), and a tooltip explaining why it's disabled.
+- **Left-click + drag** on empty ground → drag-rectangle. On release, every owned unit inside the rect joins the selection (shift-drag adds).
+- With selected workers, **left-click** a node → all selected workers are assigned to harvest there. Each accepted worker pays 1 charge; workers in charge mode silently flash the lightning cue.
+- **Right-click** on empty ground → MoveUnit for every selected unit. Workers in charge mode flash the lightning cue and stay put.
+- **Left-click on empty ground** → clears the unit selection.
+- **Left-click your HQ** → selects the HQ (TRAIN WORKER appears on the action bar with a `used/cap` indicator).
+- **Left-click a work pod** → selects the pod (info-only panel for now).
+- **Esc** → clears selection. Cancels any pending placement.
 
 ### Keyboard
 
-- **R** — download the current replay as JSON. Useful for bug reports.
+- **R** — download the current replay as JSON.
 - **W / A / S / D** or **arrow keys** — pan the camera (continuous while held).
-- **E** — activate energy dump on every selected dumpable worker (Phase 3.7).
 
-### Camera (Phase 3.4)
+### Camera
 
-- **Middle-mouse drag** — pan the camera. The world translates under the cursor (drag right = view shifts right).
+- **Middle-mouse drag** — pan the camera.
 - **Scroll wheel** — zoom in / out within 0.5×–2.0× of the default frustum height.
-- Edge-scroll is intentionally not implemented — most players hate it as a default. May revisit in playtest.
 
-The full keyboard suite (control groups, camera bookmarks, production hotkeys, idle-worker cycle, find-army cycle, queueing, smart-cast) was a v4 esport-pillar commitment. **Post-pivot (2026-05-07) it's softened to "comfortable mouse + hotkeys; rebindable bindings deferred"** — see PRD §3.7. The idle-worker hotkey is still planned (genuine quality-of-life); the rest only land if a PvE scenario design demands them.
+### Action bar (bottom of screen)
+
+- Select your **HQ** → **TRAIN WORKER** + a `used/cap` indicator. Greys out when at the cap or out of Energy.
+- Select a **Worker** (one or more) → **BUILD WORK POD**. Greys out if no selected worker is actionable (in charge mode / 0 charge) or if Energy can't cover the cost.
+- Select a **Work Pod** → **RESEARCH AUTO-RESUME** (or its in-progress / completed status) + a `+5 cap · charge bay` info hint.
+- Anything else / nothing → guidance hint.
+
+---
+
+## AI behaviour
+
+The AI ticks once every 10 sim ticks (0.5 s at 20 Hz) and does, in order:
+
+1. **Auto-assign idle workers** to the nearest discovered, live energy node. Skips workers in charge mode or at 0 charge.
+2. **Train workers** up to the current supply cap as long as Energy covers the cost.
+3. **Build a work pod** when at the supply cap AND no pod is mid-construction AND Energy covers the build cost AND it has an actionable worker AND it owns fewer than 5 pods. Tile is picked deterministically from a fixed offset table around the HQ.
+
+The AI does not yet research auto-resume on its own. That's a player decision for now; the AI's autonomous tech progression lands in a follow-up sub-phase.
 
 ---
 
 ## Current map
 
-Single hardcoded map, defined in `src/main.ts`. Phase 3.4 expanded the grid from 20×20 to 32×32 to make room for the catalog still landing in 3.5+ (faction-locked colour nodes, Pylons, more contested zones).
+Single hardcoded map, defined in `src/main.ts`.
 
 - **Grid:** 32×32 tiles.
 - **HQ positions:** faction 0 at (4, 4), faction 1 at (27, 27) — opposite corners.
-- **Energy nodes:** six. Two near each HQ ((7,4), (4,7), (24,27), (27,24)) and two mid-distance "second base" nodes on the diagonals ((11,20), (20,11)). Each starts with 200 energy.
-- **Flux nodes:** two at flank-symmetric positions ((9, 16), (22, 16)), 100 flux each. Equidistant between HQs but on different diagonals — committing to one means defending it instead of splitting attention. (Phase 3.6 split the lone central Flux into two flanks.)
-- **Colour nodes (Phase 3.5):** two blue near faction 0 ((8,8), (2,10)), two red near faction 1 ((23,23), (29,21)). Each starts with 100 reserve and regenerates ~1 / sec back toward 100. Faction-locked — only the matching faction can harvest.
-- **Starting pools:** 200 Energy + 50 Colour per faction. Pre-fund covers the opening worker batch; after that, the colour pool tracks harvest income.
-- **Vision:** fog of war active (Phase 3.8). See "Vision + scouting" above. Each faction's home patch is auto-discovered at tick 0; the contested midfield + the opponent's home patch require scouting to see.
-- **Terrain:** flat, no vision blockers, no impassable tiles. Sub-phase 3.10 introduces map data + terrain.
-
-Multiple hand-tuned launch maps are sub-phase **3.10**'s deliverable; PRD targets 4–6 by Phase 4 launch.
+- **Energy nodes:** six. Two near each HQ ((7, 4), (4, 7), (24, 27), (27, 24)) and two mid-distance "second base" nodes on the diagonals ((11, 20), (20, 11)). Each starts with 200 energy.
+- **Starting pools:** 200 Energy per faction. Workers spawn at full charge (10/10).
+- **Vision:** fog of war active. Each faction's home patch is auto-discovered at tick 0; the contested midfield + the opponent's home patch require scouting to see.
+- **Terrain:** flat, no vision blockers, no impassable tiles.

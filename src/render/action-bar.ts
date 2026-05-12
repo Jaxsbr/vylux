@@ -1,46 +1,21 @@
-// Phase 3.10 — Context-sensitive in-game action bar.
+// Phase A — Context-sensitive in-game action bar (stripped surface).
 //
-// Replaces the Phase 1 always-visible flat BuildablesPanel ("a wall of
-// cards of information") with a selection-driven action bar — the
-// standard RTS pattern. The actions you see are the ones the *thing
-// you have selected* can do.
-//
-//   HQ selected            → TRAIN WORKER
-//   Worker(s) selected     → BUILD FORGE / SPIRE / PYLON, DUMP
-//   Forge selected         → TRAIN DEFENDER / RAIDER / VANGUARD
-//   Spire selected         → RESEARCH TIER 2 / TRAIL+
-//   Pylon selected         → info-only ("+8 supply")
-//   Mixed unit kinds       → no actions (right-click moves them)
-//   Nothing selected       → empty hint
-//
-// Each button shows its hotkey letter, faction-coloured cost glyphs,
-// and a tooltip explaining why it's disabled (if it is). Buttons are
-// rebuilt per refresh — cheap (handful of DOM nodes) and avoids the
-// stale-state bugs the old panel accumulated.
+// Phase A retains the action bar shell + the TRAIN WORKER button when
+// the HQ is selected. All other actions (combat training, structure
+// building, research, energy dump) are out until they return via the
+// new tech tree (docs/plan.md Phase C+). The delegate interface keeps
+// its full shape for back-compat with the input controller; the now-
+// unused callbacks remain as no-op declarations until the input layer
+// drops them too.
 
 import type { Faction, UnitKind } from '../sim/types';
-import {
-  findFirstOperationalProduction,
-  findFirstOperationalUpgrade,
-  findFirstUpgradeAnyState,
-  findStructure,
-  findUnit,
-} from '../sim/state';
-import {
-  DUMP_ENERGY_COST,
-  STRUCTURE_STATS,
-  TIER2_COLOR_COST,
-  TIER2_FLUX_COST,
-  TRAIL_DURATION_FLUX_COST,
-  UNIT_STATS,
-} from '../sim/units-config';
-import { FACTION_COLOR } from '../sim/types';
 import type { Sim } from '../sim/sim';
 import { toFloat, type Fixed } from '../sim/fixed';
+import { RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, STRUCTURE_STATS, unitStatsFor } from '../sim/units-config';
+import { findStructure, findUnit } from '../sim/state';
+import { isInChargeMode } from '../sim/step';
 import { themeForFaction } from './factions/theme';
 
-// Display helper: Fixed costs (Q16.16) come in as integers like 3276800
-// for 50; the player wants to see "50". toFloat does the divide.
 const displayCost = (f: Fixed): number => Math.round(toFloat(f));
 
 export interface ActionBarDelegate {
@@ -51,23 +26,26 @@ export interface ActionBarDelegate {
   onResearchTier2Selected(): void;
   onResearchTrailDurationSelected(): void;
   onDumpSelected(): void;
+  // Phase C.1: enter placement mode for a work pod. The next left-click
+  // commits a BuildStructureByWorker command paid for by the first
+  // selected actionable worker.
+  onBuildWorkPodSelected(): void;
+  // Phase C.1 research: kick off auto-resume research at the currently
+  // selected work pod. The input controller turns the selection +
+  // delegate call into a StartResearchAtPod command for the sim.
+  onResearchAutoResumeSelected(): void;
 }
 
 interface ButtonSpec {
   id: string;
   label: string;
-  sublabel?: string;
   hotkey?: string;
   costEnergy?: number;
-  costFlux?: number;
-  costColor?: number;
   enabled: boolean;
   disabledReason?: string;
   onClick: () => void;
 }
 
-// Phase 3.11a — faction tints sourced from the shared theme module so
-// the action bar, the menu, and the end-screen agree on the palette.
 const FACTION_TINT: Record<Faction, string> = {
   0: themeForFaction(0).primary,
   1: themeForFaction(1).primary,
@@ -84,9 +62,6 @@ export class ActionBar {
   private readonly bar: HTMLDivElement;
   private readonly hint: HTMLDivElement;
   private readonly buttonContainer: HTMLDivElement;
-  // Lookup of button specs by id so refresh can compare-and-skip if
-  // nothing changed (small optimisation; pure DOM cost is tiny but
-  // avoiding rebuilds preserves :hover / :focus state).
   private currentSpecKey = '';
 
   constructor(faction: Faction, delegate: ActionBarDelegate, root: HTMLElement) {
@@ -137,380 +112,185 @@ export class ActionBar {
     selectedStructureId: number | null,
     selectedHqFaction: Faction | null,
   ): void {
-    const ctx = this.computeSelectionContext(sim, selectedUnitIds, selectedStructureId, selectedHqFaction);
-    const specs = this.computeSpecs(sim, ctx);
-    // Hint is part of the comparison key — without it, going from 1
-    // worker selected → 2 workers selected wouldn't refresh the hint
-    // ("WORKER" vs "2 WORKERS") because the button list is identical.
-    const key = ctx.kind + '|' + ctx.hint + '|' + specs.map((s) => `${s.id}:${s.enabled ? '1' : '0'}:${s.disabledReason ?? ''}`).join('/');
+    const { hint, specs } = this.computeView(sim, selectedUnitIds, selectedStructureId, selectedHqFaction);
+    const key = hint + '|' + specs.map((s) => `${s.id}:${s.enabled ? '1' : '0'}:${s.disabledReason ?? ''}`).join('/');
     if (key === this.currentSpecKey) return;
     this.currentSpecKey = key;
-
-    this.hint.textContent = ctx.hint;
+    this.hint.textContent = hint;
     this.renderButtons(specs);
   }
 
-  // ----- selection → context -------------------------------------------
-
-  private computeSelectionContext(
+  private computeView(
     sim: Sim,
     selectedUnitIds: ReadonlySet<number>,
     selectedStructureId: number | null,
     selectedHqFaction: Faction | null,
-  ): SelectionContext {
-    if (selectedHqFaction !== null) {
-      return { kind: 'hq', hint: 'HQ' };
+  ): { hint: string; specs: ButtonSpec[] } {
+    const fs = sim.state.factions[this.faction];
+
+    // 1. HQ selected → TRAIN WORKER + cap meter in the hint.
+    if (selectedHqFaction === this.faction) {
+      const factionId = fs.factionId;
+      const stats = unitStatsFor(factionId, 'worker');
+      const energyOk = fs.energy >= stats.trainCost;
+      const capOk = fs.supplyUsed < fs.supplyCap;
+      const enabled = energyOk && capOk;
+      let reason: string | undefined;
+      if (!capOk) reason = 'cap reached';
+      else if (!energyOk) reason = 'no energy';
+      return {
+        hint: `HQ  ·  ${fs.supplyUsed}/${fs.supplyCap}`,
+        specs: [{
+          id: 'train-worker',
+          label: 'TRAIN  WORKER',
+          hotkey: 'W',
+          costEnergy: displayCost(stats.trainCost),
+          enabled,
+          disabledReason: reason,
+          onClick: () => this.delegate.onTrainKindSelected('worker'),
+        }],
+      };
     }
+
+    // 2. Work pod selected → research action / status.
     if (selectedStructureId !== null) {
       const s = findStructure(sim.state, selectedStructureId);
-      if (s && s.alive && s.faction === this.faction) {
-        if (s.kind === 'production') return { kind: 'forge', structureId: s.id, hint: 'FORGE' };
-        if (s.kind === 'upgrade') return { kind: 'spire', structureId: s.id, hint: 'SPIRE' };
-        if (s.kind === 'supply') return { kind: 'pylon', structureId: s.id, hint: 'PYLON · +8 SUPPLY' };
+      if (s && s.faction === this.faction && s.kind === 'workPod') {
+        const op = s.buildTicksRemaining === 0;
+        if (!op) {
+          return { hint: 'WORK  POD  ·  BUILDING', specs: [] };
+        }
+        const specs: ButtonSpec[] = [];
+        // Auto-resume research: button when idle + not done; status
+        // when in progress; "active" label when complete.
+        if (fs.autoResumeResearched) {
+          // Researched — info only; another slot will land here once
+          // the second research item exists.
+        } else if (fs.researchingKind === 'autoResume') {
+          // Mid-research. Show a disabled button with the remaining
+          // seconds so the player can see progress without scraping
+          // sim state.
+          const secs = Math.ceil(fs.researchTicksRemaining / 20);
+          specs.push({
+            id: 'research-auto-resume',
+            label: `RESEARCHING  (${secs}s)`,
+            enabled: false,
+            disabledReason: 'in progress',
+            onClick: () => { /* no-op while mid-research */ },
+          });
+        } else {
+          const energyOk = fs.energy >= RESEARCH_AUTO_RESUME_COST;
+          const busy = fs.researchingKind !== null;
+          const enabled = energyOk && !busy;
+          let reason: string | undefined;
+          if (busy) reason = 'another research in progress';
+          else if (!energyOk) reason = 'no energy';
+          specs.push({
+            id: 'research-auto-resume',
+            label: 'RESEARCH  AUTO-RESUME',
+            hotkey: 'R',
+            costEnergy: displayCost(RESEARCH_AUTO_RESUME_COST),
+            enabled,
+            disabledReason: reason,
+            onClick: () => this.delegate.onResearchAutoResumeSelected(),
+          });
+        }
+        const hint = fs.autoResumeResearched
+          ? 'WORK  POD  ·  AUTO-RESUME  ACTIVE'
+          : `WORK  POD  ·  +5  CAP  ·  CHARGE  BAY`;
+        return { hint, specs };
       }
     }
-    if (selectedUnitIds.size > 0) {
-      let allWorkers = true;
-      let count = 0;
-      for (const id of selectedUnitIds) {
-        const u = findUnit(sim.state, id);
-        if (!u || u.faction !== this.faction) continue;
-        count++;
-        if (u.kind !== 'worker') allWorkers = false;
-      }
-      if (count === 0) {
-        return { kind: 'none', hint: 'SELECT  YOUR  HQ  OR  A  UNIT' };
-      }
-      if (allWorkers) {
-        return { kind: 'workers', workerCount: count, hint: count === 1 ? 'WORKER' : `${count} WORKERS` };
-      }
-      return { kind: 'mixed', hint: 'MIXED  SELECTION  ·  RIGHT-CLICK  TO  MOVE' };
+    // Reference the duration constant so the import isn't dead — surfaces
+    // when (later) the research bar tooltip wants to read it.
+    void RESEARCH_AUTO_RESUME_TICKS;
+
+    // 3. Worker(s) selected → BUILD WORK POD.
+    let workerSelected = false;
+    let workerActionable = false;
+    for (const id of selectedUnitIds) {
+      const u = findUnit(sim.state, id);
+      if (!u || u.kind !== 'worker') continue;
+      if (u.faction !== this.faction) continue;
+      workerSelected = true;
+      if (!isInChargeMode(u) && u.charge >= 1) workerActionable = true;
     }
-    return { kind: 'none', hint: 'SELECT  YOUR  HQ  OR  A  UNIT' };
-  }
-
-  // ----- context → buttons ---------------------------------------------
-
-  private computeSpecs(sim: Sim, ctx: SelectionContext): ButtonSpec[] {
-    const fs = sim.state.factions[this.faction];
-    const colorLabel = FACTION_COLOR[this.faction];
-    switch (ctx.kind) {
-      case 'hq':
-        return [this.workerTrainSpec(fs, colorLabel)];
-      case 'workers':
-        return [
-          this.buildForgeSpec(fs, colorLabel),
-          this.buildSpireSpec(sim, fs, colorLabel),
-          this.buildPylonSpec(fs, colorLabel),
-          this.dumpSpec(fs),
-        ];
-      case 'forge':
-        return [
-          this.combatTrainSpec(sim, fs, colorLabel, 'defender', 'D'),
-          this.combatTrainSpec(sim, fs, colorLabel, 'raider', 'R'),
-          this.combatTrainSpec(sim, fs, colorLabel, 'vanguard', 'V'),
-        ];
-      case 'spire':
-        return [
-          this.researchTier2Spec(sim, fs, colorLabel),
-          this.researchTrailSpec(sim, fs),
-        ];
-      case 'pylon':
-      case 'mixed':
-      case 'none':
-        return [];
+    if (workerSelected) {
+      const podStats = STRUCTURE_STATS.workPod;
+      const energyOk = fs.energy >= podStats.buildCost;
+      const enabled = energyOk && workerActionable;
+      let reason: string | undefined;
+      if (!workerActionable) reason = 'worker needs charge';
+      else if (!energyOk) reason = 'no energy';
+      return {
+        hint: 'WORKER',
+        specs: [{
+          id: 'build-work-pod',
+          label: 'BUILD  WORK  POD',
+          hotkey: 'B',
+          costEnergy: displayCost(podStats.buildCost),
+          enabled,
+          disabledReason: reason,
+          onClick: () => this.delegate.onBuildWorkPodSelected(),
+        }],
+      };
     }
-  }
 
-  private workerTrainSpec(fs: Sim['state']['factions'][number], colorLabel: 'blue' | 'red'): ButtonSpec {
-    const stats = UNIT_STATS.worker;
-    const energyOk = fs.energy >= stats.trainCost;
-    const colorOk = fs.color >= stats.trainColorCost;
-    const supplyOk = fs.supplyUsed + stats.supplyCost <= fs.supplyCap;
-    const enabled = energyOk && colorOk && supplyOk;
-    let reason: string | undefined;
-    if (!energyOk) reason = 'no energy';
-    else if (!colorOk) reason = `no ${colorLabel}`;
-    else if (!supplyOk) reason = 'supply blocked';
-    return {
-      id: 'train-worker',
-      label: 'TRAIN  WORKER',
-      hotkey: 'W',
-      costEnergy: displayCost(stats.trainCost),
-      costColor: displayCost(stats.trainColorCost),
-      enabled,
-      disabledReason: reason,
-      onClick: () => this.delegate.onTrainKindSelected('worker'),
-    };
+    return { hint: 'SELECT  YOUR  HQ  OR  A  WORKER', specs: [] };
   }
-
-  private combatTrainSpec(
-    sim: Sim,
-    fs: Sim['state']['factions'][number],
-    colorLabel: 'blue' | 'red',
-    kind: Exclude<UnitKind, 'worker'>,
-    hotkey: string,
-  ): ButtonSpec {
-    const stats = UNIT_STATS[kind];
-    const operationalForge = findFirstOperationalProduction(sim.state, this.faction);
-    const forgeBusy = operationalForge !== null && operationalForge.trainingKind !== null;
-    const energyOk = fs.energy >= stats.trainCost;
-    const fluxOk = fs.flux >= stats.trainFluxCost;
-    const colorOk = fs.color >= stats.trainColorCost;
-    const supplyOk = fs.supplyUsed + stats.supplyCost <= fs.supplyCap;
-    const tierOk = !stats.requiresTier2 || fs.tier2Researched;
-    const enabled = operationalForge !== null && !forgeBusy && energyOk && fluxOk && colorOk && supplyOk && tierOk;
-    let reason: string | undefined;
-    if (operationalForge === null) reason = 'no forge';
-    else if (forgeBusy) reason = 'forge busy';
-    else if (!tierOk) reason = 'tier 2 not researched';
-    else if (!energyOk) reason = 'no energy';
-    else if (!fluxOk) reason = 'no flux';
-    else if (!colorOk) reason = `no ${colorLabel}`;
-    else if (!supplyOk) reason = 'supply blocked';
-    return {
-      id: `train-${kind}`,
-      label: `TRAIN  ${kind.toUpperCase()}`,
-      hotkey,
-      costEnergy: displayCost(stats.trainCost),
-      costFlux: stats.trainFluxCost > 0 ? displayCost(stats.trainFluxCost) : undefined,
-      costColor: displayCost(stats.trainColorCost),
-      enabled,
-      disabledReason: reason,
-      onClick: () => this.delegate.onTrainKindSelected(kind),
-    };
-  }
-
-  private buildForgeSpec(fs: Sim['state']['factions'][number], colorLabel: 'blue' | 'red'): ButtonSpec {
-    const s = STRUCTURE_STATS.production;
-    const energyOk = fs.energy >= s.buildCost;
-    const colorOk = fs.color >= s.buildColorCost;
-    const enabled = energyOk && colorOk;
-    let reason: string | undefined;
-    if (!energyOk) reason = 'no energy';
-    else if (!colorOk) reason = `no ${colorLabel}`;
-    return {
-      id: 'build-forge',
-      label: 'BUILD  FORGE',
-      sublabel: 'click tile',
-      hotkey: 'F',
-      costEnergy: displayCost(s.buildCost),
-      costColor: displayCost(s.buildColorCost),
-      enabled,
-      disabledReason: reason,
-      onClick: () => this.delegate.onBuildForgeSelected(),
-    };
-  }
-
-  private buildSpireSpec(sim: Sim, fs: Sim['state']['factions'][number], colorLabel: 'blue' | 'red'): ButtonSpec {
-    const s = STRUCTURE_STATS.upgrade;
-    const energyOk = fs.energy >= s.buildCost;
-    const colorOk = fs.color >= s.buildColorCost;
-    const alreadyHave = findFirstUpgradeAnyState(sim.state, this.faction) !== null;
-    const enabled = energyOk && colorOk && !alreadyHave;
-    let reason: string | undefined;
-    if (alreadyHave) reason = 'have spire';
-    else if (!energyOk) reason = 'no energy';
-    else if (!colorOk) reason = `no ${colorLabel}`;
-    return {
-      id: 'build-spire',
-      label: 'BUILD  SPIRE',
-      sublabel: 'click tile',
-      hotkey: 'S',
-      costEnergy: displayCost(s.buildCost),
-      costColor: displayCost(s.buildColorCost),
-      enabled,
-      disabledReason: reason,
-      onClick: () => this.delegate.onBuildSpireSelected(),
-    };
-  }
-
-  private buildPylonSpec(fs: Sim['state']['factions'][number], colorLabel: 'blue' | 'red'): ButtonSpec {
-    const s = STRUCTURE_STATS.supply;
-    const energyOk = fs.energy >= s.buildCost;
-    const colorOk = fs.color >= s.buildColorCost;
-    const enabled = energyOk && colorOk;
-    let reason: string | undefined;
-    if (!energyOk) reason = 'no energy';
-    else if (!colorOk) reason = `no ${colorLabel}`;
-    return {
-      id: 'build-pylon',
-      label: 'BUILD  PYLON',
-      sublabel: '+8 supply',
-      hotkey: 'P',
-      costEnergy: displayCost(s.buildCost),
-      costColor: displayCost(s.buildColorCost),
-      enabled,
-      disabledReason: reason,
-      onClick: () => this.delegate.onBuildPylonSelected(),
-    };
-  }
-
-  private dumpSpec(fs: Sim['state']['factions'][number]): ButtonSpec {
-    const energyOk = fs.energy >= DUMP_ENERGY_COST;
-    return {
-      id: 'dump',
-      label: 'DUMP',
-      sublabel: 'leaves trail',
-      hotkey: 'E',
-      costEnergy: displayCost(DUMP_ENERGY_COST),
-      enabled: energyOk,
-      disabledReason: energyOk ? undefined : 'no energy',
-      onClick: () => this.delegate.onDumpSelected(),
-    };
-  }
-
-  private researchTier2Spec(sim: Sim, fs: Sim['state']['factions'][number], colorLabel: 'blue' | 'red'): ButtonSpec {
-    const idle = findFirstOperationalUpgrade(sim.state, this.faction);
-    const fluxOk = fs.flux >= TIER2_FLUX_COST;
-    const colorOk = fs.color >= TIER2_COLOR_COST;
-    const enabled = idle !== null && fluxOk && colorOk && !fs.tier2Researched;
-    let reason: string | undefined;
-    if (fs.tier2Researched) reason = 'done';
-    else if (idle === null) reason = 'spire busy';
-    else if (!fluxOk) reason = 'no flux';
-    else if (!colorOk) reason = `no ${colorLabel}`;
-    return {
-      id: 'research-tier2',
-      label: 'TIER  2',
-      sublabel: 'unlocks vanguard',
-      hotkey: 'T',
-      costFlux: displayCost(TIER2_FLUX_COST),
-      costColor: displayCost(TIER2_COLOR_COST),
-      enabled,
-      disabledReason: reason,
-      onClick: () => this.delegate.onResearchTier2Selected(),
-    };
-  }
-
-  private researchTrailSpec(sim: Sim, fs: Sim['state']['factions'][number]): ButtonSpec {
-    const idle = findFirstOperationalUpgrade(sim.state, this.faction);
-    const fluxOk = fs.flux >= TRAIL_DURATION_FLUX_COST;
-    const enabled = idle !== null && fluxOk && !fs.trailDurationResearched;
-    let reason: string | undefined;
-    if (fs.trailDurationResearched) reason = 'done';
-    else if (idle === null) reason = 'spire busy';
-    else if (!fluxOk) reason = 'no flux';
-    return {
-      id: 'research-trail',
-      label: 'TRAIL+',
-      sublabel: '2× trail life',
-      hotkey: 'L',
-      costFlux: displayCost(TRAIL_DURATION_FLUX_COST),
-      enabled,
-      disabledReason: reason,
-      onClick: () => this.delegate.onResearchTrailDurationSelected(),
-    };
-  }
-
-  // ----- DOM rendering -------------------------------------------------
 
   private renderButtons(specs: ButtonSpec[]): void {
     this.buttonContainer.innerHTML = '';
     if (specs.length === 0) {
-      // Empty state: keep the bar visible but slim. The hint text
-      // above already says what to do.
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = [
+        'font-size:10px', 'letter-spacing:0.32em',
+        'color:rgba(154,170,180,0.4)',
+      ].join(';');
+      placeholder.textContent = 'NO  ACTIONS';
+      this.buttonContainer.appendChild(placeholder);
       return;
     }
     for (const spec of specs) {
-      this.buttonContainer.appendChild(this.buildButton(spec));
+      this.buttonContainer.appendChild(this.makeButton(spec));
     }
   }
 
-  private buildButton(spec: ButtonSpec): HTMLButtonElement {
-    const tint = FACTION_TINT[this.faction];
-    const tintDim = FACTION_TINT_DIM[this.faction];
+  private makeButton(spec: ButtonSpec): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.disabled = !spec.enabled;
-    if (spec.disabledReason) btn.title = spec.disabledReason;
     btn.style.cssText = [
-      'position:relative',
-      'background:transparent',
-      `border:1px solid ${spec.enabled ? tint : 'rgba(154,170,180,0.25)'}`,
-      `color:${spec.enabled ? tint : 'rgba(154,170,180,0.55)'}`,
-      'padding:10px 14px 12px',
-      'min-width:104px', 'min-height:54px',
+      'background:rgba(13,17,22,0.92)',
+      `border:1px solid ${spec.enabled ? FACTION_TINT[this.faction] : FACTION_TINT_DIM[this.faction]}`,
+      'border-radius:4px',
+      'padding:8px 12px',
+      'min-width:120px', 'min-height:54px',
+      'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center', 'gap:4px',
+      'color:rgba(216,232,240,0.92)',
       'font-family:ui-monospace,Menlo,monospace',
-      'cursor:' + (spec.enabled ? 'pointer' : 'not-allowed'),
-      'opacity:' + (spec.enabled ? '1' : '0.7'),
-      'transition:background 0.15s, box-shadow 0.15s',
-      'box-shadow:' + (spec.enabled ? `0 0 6px ${tintDim}` : 'none'),
-      'display:flex', 'flex-direction:column', 'align-items:center',
-      'gap:4px',
+      `cursor:${spec.enabled ? 'pointer' : 'not-allowed'}`,
+      `opacity:${spec.enabled ? '1' : '0.5'}`,
     ].join(';');
-    if (spec.enabled) {
-      btn.addEventListener('mouseenter', () => {
-        btn.style.background = this.faction === 0
-          ? 'rgba(0,229,255,0.10)'
-          : 'rgba(255,106,51,0.10)';
-        btn.style.boxShadow = `0 0 16px ${tint}`;
-      });
-      btn.addEventListener('mouseleave', () => {
-        btn.style.background = 'transparent';
-        btn.style.boxShadow = `0 0 6px ${tintDim}`;
-      });
-    }
-    btn.addEventListener('click', () => {
-      if (!spec.enabled) return;
-      spec.onClick();
-    });
 
-    // Hotkey badge — top-right corner, small.
+    const labelRow = document.createElement('div');
+    labelRow.style.cssText = 'font-size:13px; letter-spacing:0.18em; font-weight:600;';
+    labelRow.textContent = spec.label;
+    btn.appendChild(labelRow);
+
     if (spec.hotkey) {
-      const hk = document.createElement('span');
-      hk.textContent = spec.hotkey;
-      hk.style.cssText = [
-        'position:absolute', 'top:3px', 'right:5px',
-        'font-size:9px', 'letter-spacing:0.1em',
-        `color:${spec.enabled ? tint : 'rgba(154,170,180,0.45)'}`,
-        'opacity:0.65',
-      ].join(';');
+      const hk = document.createElement('div');
+      hk.style.cssText = 'font-size:9px; letter-spacing:0.32em; color:rgba(154,170,180,0.6);';
+      hk.textContent = `[ ${spec.hotkey} ]`;
       btn.appendChild(hk);
     }
-
-    const label = document.createElement('div');
-    label.textContent = spec.label;
-    label.style.cssText = 'font-size:11px;letter-spacing:0.18em;font-weight:600';
-    btn.appendChild(label);
-
-    if (spec.sublabel) {
-      const sub = document.createElement('div');
-      sub.textContent = spec.sublabel;
-      sub.style.cssText = [
-        'font-size:9px', 'letter-spacing:0.12em',
-        'color:rgba(154,170,180,0.55)',
-      ].join(';');
-      btn.appendChild(sub);
+    if (spec.costEnergy !== undefined) {
+      const cost = document.createElement('div');
+      cost.style.cssText = 'font-size:11px; letter-spacing:0.16em; color:#ffd166;';
+      cost.textContent = `E ${spec.costEnergy}`;
+      btn.appendChild(cost);
     }
-
-    const costRow = document.createElement('div');
-    costRow.style.cssText = 'display:flex;gap:6px;margin-top:2px;font-size:10px;letter-spacing:0.06em';
-    if (spec.costEnergy !== undefined) costRow.appendChild(this.costGlyph('E', spec.costEnergy, '#ffd166'));
-    if (spec.costFlux !== undefined) costRow.appendChild(this.costGlyph('F', spec.costFlux, '#a3ff66'));
-    if (spec.costColor !== undefined) costRow.appendChild(this.costGlyph('C', spec.costColor, FACTION_TINT[this.faction]));
-    btn.appendChild(costRow);
-
+    if (!spec.enabled && spec.disabledReason) btn.title = spec.disabledReason;
+    btn.addEventListener('click', () => spec.onClick());
     return btn;
   }
-
-  private costGlyph(letter: string, value: number, color: string): HTMLSpanElement {
-    const wrap = document.createElement('span');
-    wrap.style.cssText = 'display:inline-flex;align-items:center;gap:2px';
-    const g = document.createElement('span');
-    g.textContent = letter;
-    g.style.cssText = `color:${color};font-weight:700;opacity:0.85`;
-    wrap.appendChild(g);
-    const v = document.createElement('span');
-    v.textContent = String(value);
-    v.style.cssText = 'opacity:0.85';
-    wrap.appendChild(v);
-    return wrap;
-  }
-}
-
-interface SelectionContext {
-  kind: 'hq' | 'workers' | 'forge' | 'spire' | 'pylon' | 'mixed' | 'none';
-  hint: string;
-  workerCount?: number;
-  structureId?: number;
 }
