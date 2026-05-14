@@ -85,13 +85,18 @@ export function buildGrid(): GridBundle {
   const tilesGroup = new THREE.Group();
   tilesGroup.name = 'grid-tiles';
 
+  // Grid tile plane sits a hair below the entity baseline so structure
+  // bottom edges (which sit at Y=0 in world space) don't z-fight with
+  // the tile mesh. Without this offset the bottom outlines on short
+  // structures (work pod, pylon) drop through the floor.
+  const TILE_MESH_Y = tileY - 0.01;
   for (let tY = 0; tY < gridSize; tY++) {
     for (let tX = 0; tX < gridSize; tX++) {
       const material = new THREE.MeshStandardMaterial({ color: tileColor });
       const mesh = new THREE.Mesh(tileGeometry, material);
       mesh.rotation.x = -Math.PI / 2;
       const { x, z } = tileToWorld(tX, tY);
-      mesh.position.set(x, tileY, z);
+      mesh.position.set(x, TILE_MESH_Y, z);
       mesh.userData = { tileX: tX, tileY: tY };
       tilesGroup.add(mesh);
       tileMeshes.push(mesh);
