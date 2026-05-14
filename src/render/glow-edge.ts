@@ -5,6 +5,13 @@
 // Materials are registered in a module-level Set so the scene resize
 // handler can keep their `resolution` uniform in sync — without it
 // LineMaterial renders at zero width.
+//
+// The Set is append-only: when entities are disposed, their materials
+// are dispose()'d but stay in this Set. Bounded leak — at the scale
+// of a vylux match (~hundreds of LineMaterials peak) this is well
+// under a megabyte and the resize iteration is microseconds. If an
+// entity-spawn rate ever grows by an order of magnitude, swap to a
+// WeakRef-based registry or have entity dispose paths call back here.
 
 import * as THREE from 'three';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';

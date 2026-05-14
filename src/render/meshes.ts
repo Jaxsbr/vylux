@@ -344,7 +344,7 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
   hpBar.group.visible = false;
   group.add(hpBar.group);
 
-  const selectionRing = structureSelectionRing(faction, 0.55, 0.68);
+  const selectionRing = buildStructureRing(faction, 0.55, 0.68);
   group.add(selectionRing);
 
   const scaffoldingRing = buildScaffoldingRing(faction, 0.6, 0.74);
@@ -488,7 +488,7 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
 
 // Thin Faction → FactionId bridge for structure selection rings.
 // The chrome module speaks FactionId; the sim layer speaks Faction.
-function structureSelectionRing(faction: Faction, innerR: number, outerR: number): THREE.Mesh {
+function buildStructureRing(faction: Faction, innerR: number, outerR: number): THREE.Mesh {
   return buildSelectionRing(factionToId(faction), 'structure', {
     innerRadius: innerR,
     outerRadius: outerR,
@@ -594,7 +594,7 @@ export function buildProductionMesh(faction: Faction, tileX: number, tileY: numb
   hpBar.group.visible = true;
   group.add(hpBar.group);
 
-  const selectionRing = structureSelectionRing(faction, 0.55, 0.68);
+  const selectionRing = buildStructureRing(faction, 0.55, 0.68);
   group.add(selectionRing);
 
   const scaffoldingRing = buildScaffoldingRing(faction, 0.62, 0.78);
@@ -687,7 +687,7 @@ export function buildSpireMesh(faction: Faction, tileX: number, tileY: number): 
   hpBar.group.visible = true;
   group.add(hpBar.group);
 
-  const selectionRing = structureSelectionRing(faction, 0.50, 0.62);
+  const selectionRing = buildStructureRing(faction, 0.50, 0.62);
   group.add(selectionRing);
 
   const scaffoldingRing = buildScaffoldingRing(faction, 0.55, 0.70);
@@ -835,7 +835,7 @@ export function buildPylonMesh(faction: Faction, tileX: number, tileY: number): 
   hpBar.group.visible = true;
   group.add(hpBar.group);
 
-  const selectionRing = structureSelectionRing(faction, 0.42, 0.52);
+  const selectionRing = buildStructureRing(faction, 0.42, 0.52);
   group.add(selectionRing);
 
   const scaffoldingRing = buildScaffoldingRing(faction, 0.46, 0.58);
