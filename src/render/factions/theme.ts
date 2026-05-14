@@ -54,12 +54,9 @@ export const VY_BG = '#04070a';
 export const VY_INK = '#dfe8ee';
 export const VY_PANEL = 'rgba(7,9,12,0.78)';
 
-// Resource info colours stay constant across factions for legibility —
-// a Siege player still reads green Flux as Flux. The handover calls
-// these out as invariants.
+// Resource info colours stay constant across factions for legibility.
 export const RESOURCE_COLOR = {
   energy: '#ffd34a',
-  flux:   '#66ff44',
   hp:     '#cfd8dc',
   supply: '#b6e8ff',
 } as const;

@@ -13,6 +13,8 @@ import {
   DAMAGE_PULSE_DURATION,
   DAMAGE_PULSE_PEAK_DELTA,
 } from './event-pulse';
+import { buildGlowEdges } from '../glow-edge';
+import { buildSelectionRing } from '../entity-chrome';
 
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
   const { tileSize, worldExtent } = GRID_CONSTANTS;
@@ -117,12 +119,8 @@ function buildRaiderMesh(emissiveHex: number): RaiderMeshResult {
   blade.position.y = RAIDER_CONSTANTS.bladeY;
   blade.name = 'raider-blade';
 
-  const bladeEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(bladeGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const bladeEdges = buildGlowEdges(new THREE.EdgesGeometry(bladeGeo), emissiveHex, 'raider-blade-trim');
   bladeEdges.position.y = RAIDER_CONSTANTS.bladeY;
-  bladeEdges.name = 'raider-blade-trim';
 
   // Upper spike — continues to a fine point.
   const spikeGeo = new THREE.CylinderGeometry(
@@ -135,12 +133,8 @@ function buildRaiderMesh(emissiveHex: number): RaiderMeshResult {
   spike.position.y = RAIDER_CONSTANTS.spikeY;
   spike.name = 'raider-spike';
 
-  const spikeEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(spikeGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const spikeEdges = buildGlowEdges(new THREE.EdgesGeometry(spikeGeo), emissiveHex, 'raider-spike-trim');
   spikeEdges.position.y = RAIDER_CONSTANTS.spikeY;
-  spikeEdges.name = 'raider-spike-trim';
 
   // Glowing spike-tip accent — small bright cap at the very point; primary bloom source.
   const tipGeo = new THREE.SphereGeometry(RAIDER_CONSTANTS.tipRadius, 6, 6);
@@ -157,29 +151,13 @@ function buildRaiderMesh(emissiveHex: number): RaiderMeshResult {
   return { group, tipMat };
 }
 
-function buildSelectionRing(emissiveHex: number): THREE.Mesh {
-  const ringGeo = new THREE.RingGeometry(0.25, 0.35, 32);
-  const ringMat = new THREE.MeshStandardMaterial({
-    color: 0x00e5ff,
-    emissive: emissiveHex,
-    emissiveIntensity: 1.5,
-    side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.01;
-  ring.name = 'raider-selection-ring';
-  ring.visible = false;
-  return ring;
-}
-
 export function buildRaider(faction: FactionId, tileX: number, tileY: number): RaiderBundle {
   const emissive = FACTION_EMISSIVE[faction];
   const group = new THREE.Group();
   group.name = `raider-${faction}`;
 
   const { group: raiderMesh, tipMat } = buildRaiderMesh(emissive);
-  const selectionRing = buildSelectionRing(emissive);
+  const selectionRing = buildSelectionRing(faction, 'unit', { innerRadius: 0.25, outerRadius: 0.35 });
 
   const hpBar = buildHpBar(faction, 1.2);
   hpBar.group.visible = false;

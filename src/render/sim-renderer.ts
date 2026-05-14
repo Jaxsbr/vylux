@@ -14,6 +14,8 @@
 // sim state — it's a one-way consumer (PRD §3.3).
 
 import * as THREE from 'three';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { distSq, rangeSq, toFloat, type Fixed } from '../sim/fixed';
 import type { Sim } from '../sim/sim';
 import type { Faction } from '../sim/types';
@@ -212,6 +214,7 @@ export class SimRenderer {
     selectedUnitIds: ReadonlySet<number>,
     selectedStructureId: number | null = null,
     selectedHqFaction: Faction | null = null,
+    selectedNodeId: number | null = null,
   ): void {
     for (const [id, vis] of this.unitMeshes) {
       const selected = selectedUnitIds.has(id);
@@ -229,6 +232,9 @@ export class SimRenderer {
       const selected = f === selectedHqFaction;
       v.selectionRing.visible = selected;
       v.hpBar.group.visible = selected;
+    }
+    for (const [id, vis] of this.nodeMeshes) {
+      vis.selectionRing.visible = id === selectedNodeId;
     }
   }
 
@@ -440,57 +446,29 @@ export class SimRenderer {
   }
 }
 
-// Hover-outline glow. We keep the entity's original edge colour
-// (siege red, swarm cyan, gold for resource nodes) and fake a bloom
-// by adding TWO halo duplicates of each LineSegments — slightly
-// scaled up, additive-blended, transparent. The original sharp line
-// stays at the entity's silhouette; the halos sit just outside it
-// like a soft outer light. Two layers give the gradient that a real
-// bloom pass would, without postprocessing.
-const HOVER_HALO_LAYERS: ReadonlyArray<{ scale: number; opacity: number }> = [
-  { scale: 1.08, opacity: 0.85 },
-  { scale: 1.18, opacity: 0.4 },
-];
+// Hover-outline glow. Bloom now does most of the lifting via
+// post-processing, so hover just bumps the linewidth of each glow
+// edge to thicken the bloom-bearing pixels and stashes the original
+// width for restoration on un-hover.
+const HOVER_LINEWIDTH_FACTOR = 1.8;
 
 interface HoverHaloRef {
-  parent: THREE.Object3D;
-  mesh: THREE.LineSegments;
-  material: THREE.LineBasicMaterial;
+  material: LineMaterial;
+  originalLinewidth: number;
 }
 
 function applyHoverOutlineTint(group: THREE.Group, halos: HoverHaloRef[]): void {
   group.traverse((obj) => {
-    if (!(obj instanceof THREE.LineSegments)) return;
-    const sourceMat = obj.material as THREE.LineBasicMaterial;
-    const parent = obj.parent;
-    if (parent === null) return;
-    for (const layer of HOVER_HALO_LAYERS) {
-      const haloMat = new THREE.LineBasicMaterial({
-        color: sourceMat.color.clone(),
-        transparent: true,
-        opacity: layer.opacity,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      });
-      const halo = new THREE.LineSegments(obj.geometry, haloMat);
-      halo.position.copy(obj.position);
-      halo.rotation.copy(obj.rotation);
-      halo.scale.copy(obj.scale).multiplyScalar(layer.scale);
-      halo.name = `${obj.name}-hover-halo`;
-      // Renderers depth-sort halo + source so the additive layer over
-      // the same pixels still contributes. depthWrite false keeps the
-      // halo from poisoning the buffer for things drawn after.
-      halo.renderOrder = obj.renderOrder + 1;
-      parent.add(halo);
-      halos.push({ parent, mesh: halo, material: haloMat });
-    }
+    if (!(obj instanceof LineSegments2)) return;
+    const material = obj.material as LineMaterial;
+    halos.push({ material, originalLinewidth: material.linewidth });
+    material.linewidth = material.linewidth * HOVER_LINEWIDTH_FACTOR;
   });
 }
 
 function removeHoverHalos(halos: HoverHaloRef[]): void {
   for (const h of halos) {
-    h.parent.remove(h.mesh);
-    h.material.dispose();
+    h.material.linewidth = h.originalLinewidth;
   }
   halos.length = 0;
 }

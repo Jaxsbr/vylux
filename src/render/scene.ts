@@ -7,6 +7,11 @@
 // renderer.
 
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { applyGlowEdgeResolution } from './glow-edge';
 import { GRID_CONSTANTS, buildGrid, type GridBundle } from '../grid';
 
 // Default ortho-camera halfHeight (vertical world-units visible).
@@ -41,6 +46,11 @@ export interface SceneBundle {
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
+  // Post-process composer running RenderPass → UnrealBloomPass →
+  // OutputPass. The driver calls composer.render() each frame instead
+  // of renderer.render() so bright emissive edges + accent caps pick
+  // up a fluorescent halo.
+  composer: EffectComposer;
   gridGroup: THREE.Group;
   grid: GridBundle;
   // Add/remove entity meshes via this group so they sit above the grid.
@@ -96,11 +106,37 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  // ACES tone mapping + linear output give bloom a cinematic falloff
+  // without crushing the existing dark UI palette. OutputPass below
+  // applies tone mapping + sRGB conversion after the bloom pass.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+
+  // Bloom pass tuned for fluorescent neon trim lines + accent caps
+  // without washing the dark grid. Threshold > 0 keeps the background
+  // and dim body fills out of the bloom buffer; strength + radius
+  // give the trim a soft halo that reads as a glowing tube edge.
+  const composer = new EffectComposer(renderer);
+  composer.setSize(canvas.clientWidth, canvas.clientHeight);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(canvas.clientWidth, canvas.clientHeight),
+    0.55, // strength
+    0.4,  // radius
+    0.5,  // threshold — only the brightest accents bloom; trim lines glow gently
+  );
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+
+  // Snap glow-edge materials to the actual canvas size now that the
+  // renderer is sized. The resize handler keeps them in sync after.
+  applyGlowEdgeResolution(canvas.clientWidth, canvas.clientHeight);
 
   return {
     scene,
     camera,
     renderer,
+    composer,
     gridGroup,
     grid,
     entitiesGroup,
@@ -114,6 +150,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
       camera.bottom = -currentHalfHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
+      composer.setSize(width, height);
+      bloomPass.resolution.set(width, height);
+      applyGlowEdgeResolution(width, height);
     },
     setHalfHeight(halfHeight) {
       currentHalfHeight = halfHeight;

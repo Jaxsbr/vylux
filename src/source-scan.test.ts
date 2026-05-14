@@ -113,3 +113,33 @@ describe('phase L93 — no bare catches / silent swallowing in src/**/*.ts', () 
     expect(violations).toEqual([]);
   });
 });
+
+// Guardrail: every selectable entity must source its selection ring
+// from `entity-chrome.ts`, never roll its own. A raw RingGeometry in
+// any render file other than entity-chrome.ts is treated as a drift
+// violation — the cyan-body + faction-emissive idiom needs to live in
+// exactly one place so new entities can't silently get a non-blooming
+// or off-palette ring (see commit history around the work-pod fix).
+describe('entity-chrome — selection ring idiom must not drift', () => {
+  const RING_GEOMETRY_RE = /new\s+THREE\.RingGeometry\s*\(/;
+  // Files allowed to construct RingGeometry directly. Keep this list
+  // tight — any new entry needs justification.
+  const ALLOWED_RING_FILES = new Set<string>([
+    './render/entity-chrome.ts',           // the canonical source
+    './render/legacy/energy-node.ts',      // harvest-fill ring (not a selection ring)
+    './render/legacy/worker.ts',           // harvest-fill ring (not a selection ring)
+    './render/feedback.ts',                // transient click-feedback pings
+  ]);
+
+  it('no entity builder rolls its own selection ring', () => {
+    const violations: string[] = [];
+    for (const [path, source] of SOURCE_ENTRIES) {
+      if (!path.startsWith('./render/')) continue;
+      if (ALLOWED_RING_FILES.has(path)) continue;
+      if (RING_GEOMETRY_RE.test(source)) {
+        violations.push(`${path}: uses new THREE.RingGeometry directly; route selection rings through entity-chrome.ts`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});

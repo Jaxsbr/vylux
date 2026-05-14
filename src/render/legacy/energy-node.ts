@@ -6,6 +6,7 @@ import {
   CAPTURE_PULSE_PEAK_DELTA,
 } from './event-pulse';
 import { RESERVE_DEFAULT, tickNodeRegen, MIN_REGEN_THRESHOLD } from './worker-task';
+import { buildGlowEdges } from '../glow-edge';
 
 // Neutral rim: pale-cyan — reads as part of the Tron circuit palette while
 // staying clearly distinct from the faction cyan (#00e0ff) and red (#ff4a1a).
@@ -101,10 +102,13 @@ const NODE_CONSTANTS = {
   rimHeight: 0.02,
   rimY: 0.09, // top of body + half rim height
   bodyEmissiveIntensity: 0.15,
-  rimEmissiveIntensity: 1.0,
+  // Rim fill stays dark; emissive carries a faint shade in the rim's
+  // current tint so the disc reads as outlined-and-shaded (same idiom
+  // as HQ + worker meshes). The bright identity sits on the edges.
+  rimEmissiveIntensity: 0.25,
   // Exhausted: body and rim are dimmed significantly.
   exhaustedBodyEmissive: 0.03,
-  exhaustedRimEmissive: 0.12,
+  exhaustedRimEmissive: 0.05,
   // Harvest fill ring — sits above the rim to show worker fill progress.
   fillRingInner: 0.12,
   fillRingOuter: 0.38,
@@ -134,7 +138,9 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
   body.position.y = NODE_CONSTANTS.centerY;
   body.name = 'node-body';
 
-  // Rim — thin disc atop the body, carries the faction/neutral glow.
+  // Rim — thin hex disc atop the body. Dark fill with a faint emissive
+  // shade; the bright tint lives on the EdgesGeometry below so the
+  // disc reads as outlined-and-shaded (matches HQ + worker).
   const rimGeo = new THREE.CylinderGeometry(
     NODE_CONSTANTS.rimRadius,
     NODE_CONSTANTS.rimRadius,
@@ -142,13 +148,20 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
     NODE_CONSTANTS.radialSegments,
   );
   const rimMat = new THREE.MeshStandardMaterial({
-    color: NEUTRAL_RIM,
+    color: BODY_COLOR,
     emissive: NEUTRAL_RIM,
     emissiveIntensity: NODE_CONSTANTS.rimEmissiveIntensity,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
   });
   const rim = new THREE.Mesh(rimGeo, rimMat);
   rim.position.y = NODE_CONSTANTS.rimY;
   rim.name = 'node-rim';
+
+  const rimEdges = buildGlowEdges(new THREE.EdgesGeometry(rimGeo), NEUTRAL_RIM, 'node-rim-edge');
+  const rimEdgesMat = rimEdges.material;
+  rimEdges.position.y = NODE_CONSTANTS.rimY;
 
   // Harvest fill ring — a horizontal ring that fills up as the worker harvests.
   // Starts invisible; opacity is set by setHarvestFill().
@@ -170,7 +183,7 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
   fillRing.position.y = NODE_CONSTANTS.fillRingY;
   fillRing.name = 'node-fill-ring';
 
-  group.add(body, rim, fillRing);
+  group.add(body, rim, rimEdges, fillRing);
 
   const world = tileToWorld(tileX, tileY);
   group.position.set(world.x, world.y, world.z);
@@ -186,9 +199,9 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
     if (_reserve <= 0) return; // exhausted — stays dead
     const rimColor =
       faction === 'blue' ? BLUE_RIM : faction === 'red' ? RED_RIM : NEUTRAL_RIM;
-    rimMat.color.set(rimColor);
     rimMat.emissive.set(rimColor);
     rimMat.emissiveIntensity = NODE_CONSTANTS.rimEmissiveIntensity;
+    rimEdgesMat.color.set(rimColor);
   };
 
   let capturePulseElapsedInternal = -1;
@@ -210,9 +223,9 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
         _reserve = 0;
         _harvestingFaction = null;
         _occupiedBy = null;
-        rimMat.color.set(EXHAUSTED_RIM);
         rimMat.emissive.set(EXHAUSTED_RIM);
         rimMat.emissiveIntensity = NODE_CONSTANTS.exhaustedRimEmissive;
+        rimEdgesMat.color.set(EXHAUSTED_RIM);
         bodyMat.emissiveIntensity = NODE_CONSTANTS.exhaustedBodyEmissive;
         fillMat.opacity = 0;
       }
@@ -228,17 +241,17 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
       if (_reserve <= 0) return; // exhausted — ignore
       if (faction === null) {
         // Worker left — fade back to neutral.
-        rimMat.color.set(NEUTRAL_RIM);
         rimMat.emissive.set(NEUTRAL_RIM);
         rimMat.emissiveIntensity = NODE_CONSTANTS.rimEmissiveIntensity;
+        rimEdgesMat.color.set(NEUTRAL_RIM);
         fillMat.color.set(NEUTRAL_RIM);
         fillMat.emissive.set(NEUTRAL_RIM);
         fillMat.opacity = 0;
       } else {
         const col = faction === 'blue' ? BLUE_RIM : RED_RIM;
-        rimMat.color.set(col);
         rimMat.emissive.set(col);
         rimMat.emissiveIntensity = NODE_CONSTANTS.rimEmissiveIntensity;
+        rimEdgesMat.color.set(col);
         fillMat.color.set(col);
         fillMat.emissive.set(col);
       }
@@ -257,9 +270,9 @@ export function buildEnergyNode(tileX: number, tileY: number): EnergyNodeBundle 
       _reserve = newReserve;
       // Snap visuals back to neutral when reserve crosses the re-eligible threshold.
       if (prevReserve < MIN_REGEN_THRESHOLD && _reserve >= MIN_REGEN_THRESHOLD) {
-        rimMat.color.set(NEUTRAL_RIM);
         rimMat.emissive.set(NEUTRAL_RIM);
         rimMat.emissiveIntensity = NODE_CONSTANTS.rimEmissiveIntensity;
+        rimEdgesMat.color.set(NEUTRAL_RIM);
         bodyMat.emissiveIntensity = NODE_CONSTANTS.bodyEmissiveIntensity;
       }
     },

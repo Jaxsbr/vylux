@@ -13,6 +13,8 @@ import {
   DAMAGE_PULSE_DURATION,
   DAMAGE_PULSE_PEAK_DELTA,
 } from './event-pulse';
+import { buildGlowEdges } from '../glow-edge';
+import { buildSelectionRing } from '../entity-chrome';
 
 function tileFloatToWorld(tx: number, ty: number): { x: number; y: number; z: number } {
   const { tileSize, worldExtent } = GRID_CONSTANTS;
@@ -116,12 +118,8 @@ function buildDefenderMesh(emissiveHex: number): DefenderMeshResult {
   body.position.y = DEF_CONSTANTS.bodyY;
   body.name = 'defender-body';
 
-  const bodyEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(bodyGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const bodyEdges = buildGlowEdges(new THREE.EdgesGeometry(bodyGeo), emissiveHex, 'defender-body-trim');
   bodyEdges.position.y = DEF_CONSTANTS.bodyY;
-  bodyEdges.name = 'defender-body-trim';
 
   // Narrow cap on top — reinforces "armoured dome" read.
   const capGeo = new THREE.CylinderGeometry(
@@ -134,12 +132,8 @@ function buildDefenderMesh(emissiveHex: number): DefenderMeshResult {
   cap.position.y = DEF_CONSTANTS.capY + DEF_CONSTANTS.capHeight / 2;
   cap.name = 'defender-cap';
 
-  const capEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(capGeo),
-    new THREE.LineBasicMaterial({ color: emissiveHex }),
-  );
+  const capEdges = buildGlowEdges(new THREE.EdgesGeometry(capGeo), emissiveHex, 'defender-cap-trim');
   capEdges.position.y = DEF_CONSTANTS.capY + DEF_CONSTANTS.capHeight / 2;
-  capEdges.name = 'defender-cap-trim';
 
   // Accent strip around the body equator — thin bright ring; primary bloom source.
   const accentGeo = new THREE.CylinderGeometry(
@@ -164,29 +158,13 @@ function buildDefenderMesh(emissiveHex: number): DefenderMeshResult {
   return { group, accentMat };
 }
 
-function buildSelectionRing(emissiveHex: number): THREE.Mesh {
-  const ringGeo = new THREE.RingGeometry(0.42, 0.52, 32);
-  const ringMat = new THREE.MeshStandardMaterial({
-    color: 0x00e5ff,
-    emissive: emissiveHex,
-    emissiveIntensity: 1.5,
-    side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.01;
-  ring.name = 'defender-selection-ring';
-  ring.visible = false;
-  return ring;
-}
-
 export function buildDefender(faction: FactionId, tileX: number, tileY: number): DefenderBundle {
   const emissive = FACTION_EMISSIVE[faction];
   const group = new THREE.Group();
   group.name = `defender-${faction}`;
 
   const { group: defMesh, accentMat } = buildDefenderMesh(emissive);
-  const selectionRing = buildSelectionRing(emissive);
+  const selectionRing = buildSelectionRing(faction, 'unit', { innerRadius: 0.42, outerRadius: 0.52 });
 
   const hpBar = buildHpBar(faction, 0.75);
   hpBar.group.visible = false;

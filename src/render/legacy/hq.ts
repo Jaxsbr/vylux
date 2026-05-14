@@ -4,6 +4,8 @@ import { tileToWorld } from './grid';
 import { HQ_MAX_HP } from './units-config';
 import { buildHpBar, type HpBar } from './hp-bar';
 import { eventPulseIntensity, DAMAGE_PULSE_DURATION, DAMAGE_PULSE_PEAK_DELTA } from './event-pulse';
+import { buildGlowEdges } from '../glow-edge';
+import { buildSelectionRing } from '../entity-chrome';
 
 // Faction emissive hex values — match the palette used in placement.ts ghost emissive.
 const FACTION_EMISSIVE: Record<FactionId, number> = {
@@ -69,10 +71,8 @@ function buildTier(
   mesh.name = 'hq-tier';
 
   const edgesGeo = new THREE.EdgesGeometry(geo);
-  const edgesMat = new THREE.LineBasicMaterial({ color: emissiveHex });
-  const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+  const edges = buildGlowEdges(edgesGeo, emissiveHex, 'hq-trim');
   edges.position.y = centerY;
-  edges.name = 'hq-trim';
 
   group.add(mesh, edges);
   return group;
@@ -122,22 +122,6 @@ export type HQBundle = {
   tickDamagePulse: (dt: number) => void;
 };
 
-function buildHQSelectionRing(emissiveHex: number): THREE.Mesh {
-  // Larger ring under the HQ — same cyan style as worker ring.
-  const ringGeo = new THREE.RingGeometry(0.48, 0.60, 32);
-  const ringMat = new THREE.MeshStandardMaterial({
-    color: 0x00e5ff,
-    emissive: emissiveHex,
-    emissiveIntensity: 1.5,
-    side: THREE.DoubleSide,
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.01;
-  ring.name = 'hq-selection-ring';
-  ring.visible = false;
-  return ring;
-}
 
 /**
  * Build a Tron-style HQ group at the given tile coordinate.
@@ -160,7 +144,7 @@ export function buildHQ(faction: FactionId, tileX: number, tileY: number): HQBun
   // Keep a reference to the accent cap material for damage pulse.
   const accentCapMat = accentCap.material as THREE.MeshStandardMaterial;
 
-  const selectionRing = buildHQSelectionRing(emissive);
+  const selectionRing = buildSelectionRing(faction, 'hq');
   group.add(selectionRing);
 
   // Selection-only HP bar; SimRenderer.applyInputVisuals shows it when
