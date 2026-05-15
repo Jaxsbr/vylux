@@ -20,7 +20,14 @@ export const GRID_CONSTANTS = {
   // here — the grid was already near-black, and adding more darkness
   // had no visible effect).
   dividerEmissive: 0x555555,
-  dividerEmissiveIntensity: 1.2,
+  // Two-tier grid: every cell gets a faint "minor" line; every Nth
+  // cell gets a brighter "major" line. The hierarchy gives the floor
+  // a sense of scale and a stronger Tron-grid read without thickening
+  // every line. gridSize (32) is divisible by 8, so majors land on
+  // 0/8/16/24/32 — the four edges plus the centerline-ish rhythm.
+  majorDividerStep: 8,
+  majorEmissiveIntensity: 1.2,
+  minorEmissiveIntensity: 0.25,
   tileColor: 0x0a0a0a,
   tileY: 0,
   dividerY: 0.02,
@@ -60,7 +67,8 @@ export type GridBundle = {
   group: THREE.Group;
   tileMeshes: THREE.Mesh[];
   tileColors: string[];
-  gridLineMaterial: THREE.MeshStandardMaterial;
+  majorGridLineMaterial: THREE.MeshStandardMaterial;
+  minorGridLineMaterial: THREE.MeshStandardMaterial;
 };
 
 export function buildGrid(): GridBundle {
@@ -70,7 +78,9 @@ export function buildGrid(): GridBundle {
     worldExtent,
     dividerWidth,
     dividerEmissive,
-    dividerEmissiveIntensity,
+    majorDividerStep,
+    majorEmissiveIntensity,
+    minorEmissiveIntensity,
     tileColor,
     tileY,
     dividerY,
@@ -104,10 +114,15 @@ export function buildGrid(): GridBundle {
     }
   }
 
-  const gridLineMaterial = new THREE.MeshStandardMaterial({
+  const majorGridLineMaterial = new THREE.MeshStandardMaterial({
     color: dividerEmissive,
     emissive: dividerEmissive,
-    emissiveIntensity: dividerEmissiveIntensity,
+    emissiveIntensity: majorEmissiveIntensity,
+  });
+  const minorGridLineMaterial = new THREE.MeshStandardMaterial({
+    color: dividerEmissive,
+    emissive: dividerEmissive,
+    emissiveIntensity: minorEmissiveIntensity,
   });
 
   const dividersGroup = new THREE.Group();
@@ -117,13 +132,14 @@ export function buildGrid(): GridBundle {
   const verticalGeometry = new THREE.PlaneGeometry(dividerWidth, worldExtent);
   for (let i = 0; i <= gridSize; i++) {
     const worldCoord = -worldExtent / 2 + i * tileSize;
+    const material = i % majorDividerStep === 0 ? majorGridLineMaterial : minorGridLineMaterial;
 
-    const horizontal = new THREE.Mesh(horizontalGeometry, gridLineMaterial);
+    const horizontal = new THREE.Mesh(horizontalGeometry, material);
     horizontal.rotation.x = -Math.PI / 2;
     horizontal.position.set(0, dividerY, worldCoord);
     dividersGroup.add(horizontal);
 
-    const vertical = new THREE.Mesh(verticalGeometry, gridLineMaterial);
+    const vertical = new THREE.Mesh(verticalGeometry, material);
     vertical.rotation.x = -Math.PI / 2;
     vertical.position.set(worldCoord, dividerY, 0);
     dividersGroup.add(vertical);
@@ -131,5 +147,5 @@ export function buildGrid(): GridBundle {
 
   group.add(tilesGroup, dividersGroup);
 
-  return { group, tileMeshes, tileColors, gridLineMaterial };
+  return { group, tileMeshes, tileColors, majorGridLineMaterial, minorGridLineMaterial };
 }

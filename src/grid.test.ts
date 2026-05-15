@@ -97,14 +97,17 @@ describe('buildGrid', () => {
     expect(materialIds.size).toBe(TILE_COUNT);
   });
 
-  it('gridLineMaterial is emissive grey and is shared across dividers', () => {
+  it('major + minor grid line materials are both emissive grey, minor is dimmer than major', () => {
     const grid = buildGrid();
-    expect(grid.gridLineMaterial.emissive.getHexString()).toBe('555555');
-    // Phase 3.9.4 bumped intensity from ~0.4 to 1.2 so the grid reads
-    // as actual neon under the new "uncover-by-vision" fog overlay.
-    // The lower bound stays at 0.1 to flag accidental zeroing; upper
-    // bound widened to 2.0 to leave room for tuning.
-    expect(grid.gridLineMaterial.emissiveIntensity).toBeGreaterThanOrEqual(0.1);
-    expect(grid.gridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(2.0);
+    expect(grid.majorGridLineMaterial.emissive.getHexString()).toBe('555555');
+    expect(grid.minorGridLineMaterial.emissive.getHexString()).toBe('555555');
+    // Phase 3.9.4 bumped major intensity from ~0.4 to 1.2 so the grid
+    // reads as neon under the fog overlay. The lower bound flags
+    // accidental zeroing; the upper bound leaves tuning room. Minor
+    // lines must be strictly dimmer than major so the hierarchy reads.
+    expect(grid.majorGridLineMaterial.emissiveIntensity).toBeGreaterThanOrEqual(0.1);
+    expect(grid.majorGridLineMaterial.emissiveIntensity).toBeLessThanOrEqual(2.0);
+    expect(grid.minorGridLineMaterial.emissiveIntensity).toBeGreaterThan(0);
+    expect(grid.minorGridLineMaterial.emissiveIntensity).toBeLessThan(grid.majorGridLineMaterial.emissiveIntensity);
   });
 });
