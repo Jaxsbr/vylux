@@ -3,13 +3,23 @@
 // Two states per tile:
 //
 //   explored        → α = 0       (no overlay; bright grid shines through)
-//   never explored  → α ≈ 0.92    (heavy-darken; the void)
+//   never explored  → α ≈ 0.85    (heavy-darken; the void)
 //
 // Exploration is permanent: any tile a friendly unit, HQ, or work pod
 // has ever had in vision stays uncovered. There is no third
 // "explored-but-not-currently-visible" state and no per-source falloff
 // — a band of dimmer light around fresh vision reads as inconsistency,
 // not flavour, when the explored set is permanent.
+//
+// Phase B tweaks. The fog used to paint solid black above the grid
+// dividers, hiding everything underneath. Two surgical changes:
+//   1. Faint teal tint (much darker than the floor) so unseen area
+//      still reads as part of the world rather than a stencil cut.
+//   2. The overlay sits *below* the grid dividers, so the Tron
+//      major-grid lines shine through the fog — that's the
+//      sub-tile pattern you see inside the unexplored area.
+// Reveal stays per-tile binary (each newly-explored tile snaps open),
+// which is the readable, Tron-style "tile peels back" feel.
 
 import * as THREE from 'three';
 import { GRID_CONSTANTS } from '../grid';
@@ -30,9 +40,20 @@ const CANVAS_OVERSAMPLE = 2;
 const EXPLORED_ALPHA = 0.0;
 
 // The void. Heavy darkening so the unexplored portion of the map is
-// almost completely obscured — the lit / explored portions carve the
-// known world out of the dark.
-const UNEXPLORED_ALPHA = 0.92;
+// almost completely obscured. Pulled back from 0.92 → 0.88 so the
+// major grid lines underneath bleed through and give the fog its
+// Tron-grid texture.
+const UNEXPLORED_ALPHA = 0.88;
+
+// Fog tint — very faint teal, well below the floor color so the fog
+// reads as near-black with a hint of the world's colour family
+// rather than a saturated wash. The fog mesh sits *below* the grid
+// dividers, so the bright major grid lines (drawn above) still cut
+// through this overlay and provide the sub-tile pattern inside the
+// unexplored region.
+const FOG_TINT_R = 2;
+const FOG_TINT_G = 6;
+const FOG_TINT_B = 9;
 
 export class FogOverlay {
   private readonly group: THREE.Group;
@@ -88,10 +109,10 @@ export class FogOverlay {
     // lines up with sim tile (tx, ty). Setting flipY=false here was
     // the v2 bug — the explored bitmap rendered mirrored along y.
 
-    // Material: solid black painted at varying alpha. NormalBlending
-    // gives output = dst * (1 - src.alpha), so:
-    //   - α = 0 → grid passes through unchanged
-    //   - α = 0.92 → grid dims to 8% (the void)
+    // Material: faint teal painted at varying alpha. NormalBlending
+    // gives output = dst * (1 - src.alpha) + src.rgb * src.alpha, so
+    // unexplored tiles end up as dark teal with a hint of the tile
+    // colour underneath.
     const mat = new THREE.MeshBasicMaterial({
       map: this.texture,
       transparent: true,
@@ -103,11 +124,12 @@ export class FogOverlay {
     );
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.rotation.x = -Math.PI / 2;
-    // Sit between the grid plane (y=0) and the entity meshes (y >= 0.1)
-    // so the fog covers the grid + grid lines but doesn't obscure
-    // entities — units in vision should always be readable, units
-    // outside vision are already hidden by SimRenderer.visible=false.
-    this.mesh.position.y = 0.05;
+    // Sit between the tile plane (y = 0 - 0.01 = -0.01) and the grid
+    // dividers (y = 0.02), so the fog darkens tile colours but the
+    // bright divider lines still render on top — that's the Tron-grid
+    // pattern visible inside the unexplored region. Entity meshes at
+    // y >= 0.1 also stay above the fog.
+    this.mesh.position.y = 0.005;
     this.mesh.renderOrder = 1;
     this.group.add(this.mesh);
 
@@ -147,9 +169,9 @@ export class FogOverlay {
         const a = inBounds && explored[ty * N + tx] === 1 ? exploredA : voidA;
 
         const pi = (py * W + px) * 4;
-        data[pi] = 0;
-        data[pi + 1] = 0;
-        data[pi + 2] = 0;
+        data[pi] = FOG_TINT_R;
+        data[pi + 1] = FOG_TINT_G;
+        data[pi + 2] = FOG_TINT_B;
         data[pi + 3] = a;
       }
     }
@@ -164,3 +186,4 @@ export class FogOverlay {
     this.texture.dispose();
   }
 }
+
