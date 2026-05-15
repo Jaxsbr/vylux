@@ -31,6 +31,15 @@ export const GRID_CONSTANTS = {
   tileColor: 0x0a0a0a,
   tileY: 0,
   dividerY: 0.02,
+  // Extended (out-of-play) grid: a much larger, much dimmer grid
+  // rendered just below the play grid so the play area sits inside a
+  // larger Tron world. Tile size matches the play grid so lines line
+  // up; intensities are pulled way back so the play area still reads
+  // as the foreground.
+  extendedGridMultiplier: 6,
+  extendedMajorIntensity: 0.18,
+  extendedMinorIntensity: 0.04,
+  extendedDividerY: 0.015,
 } as const;
 
 export const TILE_COUNT = GRID_CONSTANTS.gridSize * GRID_CONSTANTS.gridSize;
@@ -69,6 +78,8 @@ export type GridBundle = {
   tileColors: string[];
   majorGridLineMaterial: THREE.MeshStandardMaterial;
   minorGridLineMaterial: THREE.MeshStandardMaterial;
+  extendedMajorGridLineMaterial: THREE.MeshStandardMaterial;
+  extendedMinorGridLineMaterial: THREE.MeshStandardMaterial;
 };
 
 export function buildGrid(): GridBundle {
@@ -145,7 +156,64 @@ export function buildGrid(): GridBundle {
     dividersGroup.add(vertical);
   }
 
-  group.add(tilesGroup, dividersGroup);
+  // Extended (out-of-play) grid. Same line spacing so it reads as a
+  // continuation of the play surface; much dimmer so the play area
+  // stays foregrounded. Lines that would overlap the play grid get
+  // skipped — the brighter play-grid lines own that footprint.
+  const {
+    extendedGridMultiplier,
+    extendedMajorIntensity,
+    extendedMinorIntensity,
+    extendedDividerY,
+  } = GRID_CONSTANTS;
+  const extendedMajorGridLineMaterial = new THREE.MeshStandardMaterial({
+    color: dividerEmissive,
+    emissive: dividerEmissive,
+    emissiveIntensity: extendedMajorIntensity,
+  });
+  const extendedMinorGridLineMaterial = new THREE.MeshStandardMaterial({
+    color: dividerEmissive,
+    emissive: dividerEmissive,
+    emissiveIntensity: extendedMinorIntensity,
+  });
 
-  return { group, tileMeshes, tileColors, majorGridLineMaterial, minorGridLineMaterial };
+  const extendedExtent = worldExtent * extendedGridMultiplier;
+  const extendedSize = gridSize * extendedGridMultiplier;
+  const halfPlay = worldExtent / 2;
+
+  const extendedGroup = new THREE.Group();
+  extendedGroup.name = 'extended-grid';
+
+  const extHorizontalGeometry = new THREE.PlaneGeometry(extendedExtent, dividerWidth);
+  const extVerticalGeometry = new THREE.PlaneGeometry(dividerWidth, extendedExtent);
+  for (let i = 0; i <= extendedSize; i++) {
+    const worldCoord = -extendedExtent / 2 + i * tileSize;
+    // Skip the strip that overlaps the play grid — play-grid lines
+    // already render at that footprint, brighter.
+    if (worldCoord >= -halfPlay && worldCoord <= halfPlay) continue;
+    const useMajor = i % majorDividerStep === 0;
+    const material = useMajor ? extendedMajorGridLineMaterial : extendedMinorGridLineMaterial;
+
+    const horizontal = new THREE.Mesh(extHorizontalGeometry, material);
+    horizontal.rotation.x = -Math.PI / 2;
+    horizontal.position.set(0, extendedDividerY, worldCoord);
+    extendedGroup.add(horizontal);
+
+    const vertical = new THREE.Mesh(extVerticalGeometry, material);
+    vertical.rotation.x = -Math.PI / 2;
+    vertical.position.set(worldCoord, extendedDividerY, 0);
+    extendedGroup.add(vertical);
+  }
+
+  group.add(tilesGroup, dividersGroup, extendedGroup);
+
+  return {
+    group,
+    tileMeshes,
+    tileColors,
+    majorGridLineMaterial,
+    minorGridLineMaterial,
+    extendedMajorGridLineMaterial,
+    extendedMinorGridLineMaterial,
+  };
 }
