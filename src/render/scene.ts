@@ -139,7 +139,6 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
   dir.position.set(10, 20, 10);
   scene.add(dir);
 
-
   const grid = buildGrid();
   const gridGroup = grid.group;
   scene.add(gridGroup);

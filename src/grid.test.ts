@@ -110,4 +110,28 @@ describe('buildGrid', () => {
     expect(grid.minorGridLineMaterial.emissiveIntensity).toBeGreaterThan(0);
     expect(grid.minorGridLineMaterial.emissiveIntensity).toBeLessThan(grid.majorGridLineMaterial.emissiveIntensity);
   });
+
+  it('extended grid materials are transparent and dimmer than the play grid', () => {
+    const grid = buildGrid();
+    // transparent + depthWrite:false are load-bearing — the radial
+    // fade shader patch multiplies fragment alpha, so non-transparent
+    // materials would render the faded region as opaque black.
+    expect(grid.extendedMajorGridLineMaterial.transparent).toBe(true);
+    expect(grid.extendedMajorGridLineMaterial.depthWrite).toBe(false);
+    expect(grid.extendedMinorGridLineMaterial.transparent).toBe(true);
+    expect(grid.extendedMinorGridLineMaterial.depthWrite).toBe(false);
+    // The extended grid is meant to recede into the background; it
+    // must not match or exceed the play grid's emissive intensity or
+    // the foreground/background separation collapses.
+    expect(grid.extendedMajorGridLineMaterial.emissiveIntensity).toBeLessThan(
+      grid.majorGridLineMaterial.emissiveIntensity,
+    );
+    expect(grid.extendedMinorGridLineMaterial.emissiveIntensity).toBeLessThan(
+      grid.minorGridLineMaterial.emissiveIntensity,
+    );
+    // The radial fade is wired via onBeforeCompile; assert the
+    // callback is installed so a refactor that drops it gets caught.
+    expect(typeof grid.extendedMajorGridLineMaterial.onBeforeCompile).toBe('function');
+    expect(typeof grid.extendedMinorGridLineMaterial.onBeforeCompile).toBe('function');
+  });
 });

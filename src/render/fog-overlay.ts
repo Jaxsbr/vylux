@@ -186,4 +186,3 @@ export class FogOverlay {
     this.texture.dispose();
   }
 }
-

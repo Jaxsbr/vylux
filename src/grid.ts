@@ -87,6 +87,39 @@ export type GridBundle = {
   extendedMinorGridLineMaterial: THREE.MeshStandardMaterial;
 };
 
+// Patch a material so its fragment output alpha is multiplied by a
+// radial fade based on world XZ distance from origin. Inner radius =
+// full intensity; outer radius = fully invisible; smoothstep between.
+// Material must be `transparent: true` for the alpha fade to register.
+// Used to dissolve the out-of-play extended grid as it stretches away
+// from the play area instead of hard-cutting at the geometry edge.
+function applyRadialFade(mat: THREE.MeshStandardMaterial): void {
+  const uniforms = {
+    uFadeInner: { value: GRID_CONSTANTS.extendedFadeInner },
+    uFadeOuter: { value: GRID_CONSTANTS.extendedFadeOuter },
+  };
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uFadeInner = uniforms.uFadeInner;
+    shader.uniforms.uFadeOuter = uniforms.uFadeOuter;
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'varying vec2 vWorldXZ;\nvoid main() {')
+      .replace(
+        '#include <project_vertex>',
+        '#include <project_vertex>\nvWorldXZ = (modelMatrix * vec4(transformed, 1.0)).xz;',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'void main() {',
+        'varying vec2 vWorldXZ;\nuniform float uFadeInner;\nuniform float uFadeOuter;\nvoid main() {',
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        '#include <dithering_fragment>\nfloat d = length(vWorldXZ);\nfloat fade = 1.0 - smoothstep(uFadeInner, uFadeOuter, d);\ngl_FragColor.a *= fade;',
+      );
+  };
+  mat.needsUpdate = true;
+}
+
 export function buildGrid(): GridBundle {
   const {
     gridSize,
@@ -230,36 +263,4 @@ export function buildGrid(): GridBundle {
     extendedMajorGridLineMaterial,
     extendedMinorGridLineMaterial,
   };
-}
-
-// Patch a material so its fragment output is multiplied by a radial
-// fade based on world XZ distance from origin. Inner radius = full
-// intensity; outer radius = fully invisible; smoothstep between. Used
-// to dissolve the out-of-play extended grid as it stretches away from
-// the play area instead of hard-cutting at the geometry edge.
-function applyRadialFade(mat: THREE.MeshStandardMaterial): void {
-  const uniforms = {
-    uFadeInner: { value: GRID_CONSTANTS.extendedFadeInner },
-    uFadeOuter: { value: GRID_CONSTANTS.extendedFadeOuter },
-  };
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uFadeInner = uniforms.uFadeInner;
-    shader.uniforms.uFadeOuter = uniforms.uFadeOuter;
-    shader.vertexShader = shader.vertexShader
-      .replace('void main() {', 'varying vec2 vWorldXZ;\nvoid main() {')
-      .replace(
-        '#include <project_vertex>',
-        '#include <project_vertex>\nvWorldXZ = (modelMatrix * vec4(transformed, 1.0)).xz;',
-      );
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        'void main() {',
-        'varying vec2 vWorldXZ;\nuniform float uFadeInner;\nuniform float uFadeOuter;\nvoid main() {',
-      )
-      .replace(
-        '#include <dithering_fragment>',
-        '#include <dithering_fragment>\nfloat d = length(vWorldXZ);\nfloat fade = 1.0 - smoothstep(uFadeInner, uFadeOuter, d);\ngl_FragColor.a *= fade;',
-      );
-  };
-  mat.needsUpdate = true;
 }
