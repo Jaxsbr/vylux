@@ -20,10 +20,31 @@ export const GRID_CONSTANTS = {
   // here — the grid was already near-black, and adding more darkness
   // had no visible effect).
   dividerEmissive: 0x555555,
-  dividerEmissiveIntensity: 1.2,
+  // Two-tier grid: every cell gets a faint "minor" line; every Nth
+  // cell gets a brighter "major" line. The hierarchy gives the floor
+  // a sense of scale and a stronger Tron-grid read without thickening
+  // every line. gridSize (32) is divisible by 8, so majors land on
+  // 0/8/16/24/32 — the four edges plus the centerline-ish rhythm.
+  majorDividerStep: 8,
+  majorEmissiveIntensity: 1.2,
+  minorEmissiveIntensity: 0.25,
   tileColor: 0x0a0a0a,
   tileY: 0,
   dividerY: 0.02,
+  // Extended (out-of-play) grid: a much larger, much dimmer grid
+  // rendered just below the play grid so the play area sits inside a
+  // larger Tron world. Tile size matches the play grid so lines line
+  // up; intensities are pulled way back so the play area still reads
+  // as the foreground. A radial fade (applied via shader injection)
+  // dims the lines toward zero with distance from the world origin so
+  // the grid dissolves into the distance instead of cutting hard at
+  // its outer edge.
+  extendedGridMultiplier: 6,
+  extendedMajorIntensity: 0.18,
+  extendedMinorIntensity: 0.04,
+  extendedDividerY: 0.015,
+  extendedFadeInner: 16, // right at the play boundary (worldExtent/2)
+  extendedFadeOuter: 38, // tight falloff — lines gone within ~0.7× worldExtent past the play edge
 } as const;
 
 export const TILE_COUNT = GRID_CONSTANTS.gridSize * GRID_CONSTANTS.gridSize;
@@ -60,8 +81,44 @@ export type GridBundle = {
   group: THREE.Group;
   tileMeshes: THREE.Mesh[];
   tileColors: string[];
-  gridLineMaterial: THREE.MeshStandardMaterial;
+  majorGridLineMaterial: THREE.MeshStandardMaterial;
+  minorGridLineMaterial: THREE.MeshStandardMaterial;
+  extendedMajorGridLineMaterial: THREE.MeshStandardMaterial;
+  extendedMinorGridLineMaterial: THREE.MeshStandardMaterial;
 };
+
+// Patch a material so its fragment output alpha is multiplied by a
+// radial fade based on world XZ distance from origin. Inner radius =
+// full intensity; outer radius = fully invisible; smoothstep between.
+// Material must be `transparent: true` for the alpha fade to register.
+// Used to dissolve the out-of-play extended grid as it stretches away
+// from the play area instead of hard-cutting at the geometry edge.
+function applyRadialFade(mat: THREE.MeshStandardMaterial): void {
+  const uniforms = {
+    uFadeInner: { value: GRID_CONSTANTS.extendedFadeInner },
+    uFadeOuter: { value: GRID_CONSTANTS.extendedFadeOuter },
+  };
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uFadeInner = uniforms.uFadeInner;
+    shader.uniforms.uFadeOuter = uniforms.uFadeOuter;
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'varying vec2 vWorldXZ;\nvoid main() {')
+      .replace(
+        '#include <project_vertex>',
+        '#include <project_vertex>\nvWorldXZ = (modelMatrix * vec4(transformed, 1.0)).xz;',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'void main() {',
+        'varying vec2 vWorldXZ;\nuniform float uFadeInner;\nuniform float uFadeOuter;\nvoid main() {',
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        '#include <dithering_fragment>\nfloat d = length(vWorldXZ);\nfloat fade = 1.0 - smoothstep(uFadeInner, uFadeOuter, d);\ngl_FragColor.a *= fade;',
+      );
+  };
+  mat.needsUpdate = true;
+}
 
 export function buildGrid(): GridBundle {
   const {
@@ -70,7 +127,9 @@ export function buildGrid(): GridBundle {
     worldExtent,
     dividerWidth,
     dividerEmissive,
-    dividerEmissiveIntensity,
+    majorDividerStep,
+    majorEmissiveIntensity,
+    minorEmissiveIntensity,
     tileColor,
     tileY,
     dividerY,
@@ -104,10 +163,15 @@ export function buildGrid(): GridBundle {
     }
   }
 
-  const gridLineMaterial = new THREE.MeshStandardMaterial({
+  const majorGridLineMaterial = new THREE.MeshStandardMaterial({
     color: dividerEmissive,
     emissive: dividerEmissive,
-    emissiveIntensity: dividerEmissiveIntensity,
+    emissiveIntensity: majorEmissiveIntensity,
+  });
+  const minorGridLineMaterial = new THREE.MeshStandardMaterial({
+    color: dividerEmissive,
+    emissive: dividerEmissive,
+    emissiveIntensity: minorEmissiveIntensity,
   });
 
   const dividersGroup = new THREE.Group();
@@ -117,19 +181,86 @@ export function buildGrid(): GridBundle {
   const verticalGeometry = new THREE.PlaneGeometry(dividerWidth, worldExtent);
   for (let i = 0; i <= gridSize; i++) {
     const worldCoord = -worldExtent / 2 + i * tileSize;
+    const material = i % majorDividerStep === 0 ? majorGridLineMaterial : minorGridLineMaterial;
 
-    const horizontal = new THREE.Mesh(horizontalGeometry, gridLineMaterial);
+    const horizontal = new THREE.Mesh(horizontalGeometry, material);
     horizontal.rotation.x = -Math.PI / 2;
     horizontal.position.set(0, dividerY, worldCoord);
     dividersGroup.add(horizontal);
 
-    const vertical = new THREE.Mesh(verticalGeometry, gridLineMaterial);
+    const vertical = new THREE.Mesh(verticalGeometry, material);
     vertical.rotation.x = -Math.PI / 2;
     vertical.position.set(worldCoord, dividerY, 0);
     dividersGroup.add(vertical);
   }
 
-  group.add(tilesGroup, dividersGroup);
+  // Extended (out-of-play) grid. Same line spacing so it reads as a
+  // continuation of the play surface; much dimmer so the play area
+  // stays foregrounded. Lines that would overlap the play grid get
+  // skipped — the brighter play-grid lines own that footprint.
+  const {
+    extendedGridMultiplier,
+    extendedMajorIntensity,
+    extendedMinorIntensity,
+    extendedDividerY,
+  } = GRID_CONSTANTS;
+  // transparent + depthWrite:false so the radial-fade shader patch can
+  // dissolve these lines into whatever's behind them (sky gradient)
+  // instead of fading to black, which only reads against bright pixels.
+  const extendedMajorGridLineMaterial = new THREE.MeshStandardMaterial({
+    color: dividerEmissive,
+    emissive: dividerEmissive,
+    emissiveIntensity: extendedMajorIntensity,
+    transparent: true,
+    depthWrite: false,
+  });
+  const extendedMinorGridLineMaterial = new THREE.MeshStandardMaterial({
+    color: dividerEmissive,
+    emissive: dividerEmissive,
+    emissiveIntensity: extendedMinorIntensity,
+    transparent: true,
+    depthWrite: false,
+  });
+  applyRadialFade(extendedMajorGridLineMaterial);
+  applyRadialFade(extendedMinorGridLineMaterial);
 
-  return { group, tileMeshes, tileColors, gridLineMaterial };
+  const extendedExtent = worldExtent * extendedGridMultiplier;
+  const extendedSize = gridSize * extendedGridMultiplier;
+  const halfPlay = worldExtent / 2;
+
+  const extendedGroup = new THREE.Group();
+  extendedGroup.name = 'extended-grid';
+
+  const extHorizontalGeometry = new THREE.PlaneGeometry(extendedExtent, dividerWidth);
+  const extVerticalGeometry = new THREE.PlaneGeometry(dividerWidth, extendedExtent);
+  for (let i = 0; i <= extendedSize; i++) {
+    const worldCoord = -extendedExtent / 2 + i * tileSize;
+    // Skip the strip that overlaps the play grid — play-grid lines
+    // already render at that footprint, brighter.
+    if (worldCoord >= -halfPlay && worldCoord <= halfPlay) continue;
+    const useMajor = i % majorDividerStep === 0;
+    const material = useMajor ? extendedMajorGridLineMaterial : extendedMinorGridLineMaterial;
+
+    const horizontal = new THREE.Mesh(extHorizontalGeometry, material);
+    horizontal.rotation.x = -Math.PI / 2;
+    horizontal.position.set(0, extendedDividerY, worldCoord);
+    extendedGroup.add(horizontal);
+
+    const vertical = new THREE.Mesh(extVerticalGeometry, material);
+    vertical.rotation.x = -Math.PI / 2;
+    vertical.position.set(worldCoord, extendedDividerY, 0);
+    extendedGroup.add(vertical);
+  }
+
+  group.add(tilesGroup, dividersGroup, extendedGroup);
+
+  return {
+    group,
+    tileMeshes,
+    tileColors,
+    majorGridLineMaterial,
+    minorGridLineMaterial,
+    extendedMajorGridLineMaterial,
+    extendedMinorGridLineMaterial,
+  };
 }

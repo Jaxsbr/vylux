@@ -28,7 +28,10 @@ export const DEFAULT_HALF_HEIGHT = (GRID_CONSTANTS.worldExtent / 2) + 6;
 // unit meshes legible at the closest zoom and keep the whole map
 // visible at the farthest.
 export const ZOOM_MIN = 0.25;
-export const ZOOM_MAX = 2.0;
+// Tightened from 2.0 → 1.0 → 0.68 (≈ four wheel notches in from 1.0
+// at ZOOM_STEP=1.1) so the playable area always fills the frame at
+// the farthest zoom-out.
+export const ZOOM_MAX = 0.68;
 
 // Initial zoom on match start. Defaults to ZOOM_MIN — the playtest
 // pattern is to crank zoom-in immediately, and starting there avoids
@@ -64,12 +67,53 @@ export interface SceneBundle {
   // Apply a new ortho-camera halfHeight (controls zoom). Width is
   // recomputed from the current canvas aspect ratio.
   setHalfHeight(halfHeight: number): void;
+  // Shift the sky-gradient UVs based on the current camera target so
+  // the background parallaxes subtly with pan. Called per-frame by the
+  // sim-driver before composer.render().
+  updateBackgroundParallax(): void;
   dispose(): void;
 }
 
+// Screen-space sky gradient — dark navy-teal zenith → bright cyan
+// horizon band → dark teal ground. Painted onto a CanvasTexture that
+// the scene uses as its background. Made taller than the viewport so
+// UV offsets can scroll the gradient up/down for parallax as the
+// camera pans across the world.
+function buildSkyGradient(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 2;
+  c.height = 1024;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, 0, c.height);
+  g.addColorStop(0.00, '#06121a');
+  g.addColorStop(0.45, '#0a1d28');
+  g.addColorStop(0.58, '#13344a');
+  g.addColorStop(0.66, '#091820');
+  g.addColorStop(1.00, '#050d12');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, c.width, c.height);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  // Texture is taller than the visible window so offset.y can scroll
+  // it up/down without revealing edges. `repeat.y < 1` shows only the
+  // middle slab; offset.y centers it.
+  tex.repeat.set(1, 0.6);
+  tex.offset.set(0, 0.2);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// Strength of background parallax. Camera target is clamped to roughly
+// ±worldExtent * PAN_LIMIT_RATIO; multiplying by this factor maps that
+// pan range to a small UV shift on the sky texture. Tuned subtle — the
+// background should drift, not race.
+const PARALLAX_FACTOR = -0.0015;
+
 export function createScene(canvas: HTMLCanvasElement): SceneBundle {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x07090c);
+  const skyTex = buildSkyGradient();
+  scene.background = skyTex;
+  const skyBaseOffsetY = skyTex.offset.y;
 
   // Orthographic isometric: pulled-back y-axis, gentle pitch.
   const aspect = canvas.clientWidth / canvas.clientHeight;
@@ -153,6 +197,16 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
       composer.setSize(width, height);
       bloomPass.resolution.set(width, height);
       applyGlowEdgeResolution(width, height);
+    },
+    updateBackgroundParallax() {
+      // Camera position = target + cameraOffset, so camera.position
+      // minus the static offset gives the current pan target. Iso pan
+      // moves along both x and z; their sum is what reads as "deeper
+      // into / out of the scene" on screen, which is the axis the
+      // vertical gradient should drift along.
+      const targetX = camera.position.x - cameraOffset.x;
+      const targetZ = camera.position.z - cameraOffset.z;
+      skyTex.offset.y = skyBaseOffsetY + (targetX + targetZ) * PARALLAX_FACTOR;
     },
     setHalfHeight(halfHeight) {
       currentHalfHeight = halfHeight;
