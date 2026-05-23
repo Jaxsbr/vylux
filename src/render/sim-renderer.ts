@@ -422,6 +422,14 @@ export class SimRenderer {
         // remove it from unitMeshes so the next syncUnits doesn't
         // re-tick it as if alive.
         if (!this.dyingUnits.has(u.id)) {
+          // Phase C.4: clear the at-rest/work-state cues so the corpse plays
+          // its death pulse as a dark, grounded silhouette rather than a
+          // lifted, glowing, charge-ringed worker frozen mid-state. dt=1
+          // forces a full ease step so the move glow snaps to rest (the
+          // dying pool never ticks setMoveGlow again).
+          v.chargeRing.set(false, 0, dt);
+          v.setMoveGlow(0, 1);
+          v.setIdleBob(0);
           v.triggerDeathPulse();
           this.dyingUnits.set(u.id, v);
           this.unitMeshes.delete(u.id);
@@ -475,18 +483,20 @@ export class SimRenderer {
 
   // Phase C.4: build the work-state beam spec for a working worker, or null
   // when it's not in a beam-worthy phase (or its target has gone). Endpoints
-  // are Three.js world XZ; colour reads the work-state.
+  // are Three.js world XZ; colour reads the work-state. The target tile is
+  // vision-gated (isPositionExplored) so a visible enemy worker can't draw a
+  // beam into the fog and reveal an undiscovered node / pod / HQ.
   private workBeamSpec(u: Worker, fromX: number, fromZ: number): BeamSpec | null {
     switch (u.phase) {
       case 'harvesting': {
         const n = this.findAliveNode(u.targetNodeId);
-        if (n === null) return null;
+        if (n === null || !this.isPositionExplored(n.x, n.y)) return null;
         const w = tileFloatToWorld(toFloat(n.x), toFloat(n.y));
         return { key: u.id, fromX, fromZ, toX: w.x, toZ: w.z, color: HARVEST_BEAM_COLOR };
       }
       case 'building': {
         const s = this.findAliveStructure(u.targetStructureId);
-        if (s === null) return null;
+        if (s === null || !this.isPositionExplored(s.x, s.y)) return null;
         const w = tileFloatToWorld(toFloat(s.x), toFloat(s.y));
         return { key: u.id, fromX, fromZ, toX: w.x, toZ: w.z, color: FACTION_BEAM_COLOR[u.faction] };
       }
@@ -514,13 +524,15 @@ export class SimRenderer {
 
   // The charge spot a worker is plugged into: a pod structure, or the faction
   // HQ when chargeTargetStructureId is 0 (HQs aren't in the structures array).
+  // Vision-gated like the other beam targets — null when the spot is fogged.
   private chargeSpotWorld(u: Worker): { x: number; z: number } | null {
     if (u.chargeTargetStructureId !== 0) {
       const s = this.findAliveStructure(u.chargeTargetStructureId);
-      if (s === null) return null;
+      if (s === null || !this.isPositionExplored(s.x, s.y)) return null;
       return tileFloatToWorld(toFloat(s.x), toFloat(s.y));
     }
     const fs = this.sim.state.factions[u.faction];
+    if (!this.isPositionExplored(fs.hqX, fs.hqY)) return null;
     return tileFloatToWorld(toFloat(fs.hqX), toFloat(fs.hqY));
   }
 

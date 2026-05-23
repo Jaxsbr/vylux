@@ -155,6 +155,11 @@ export function buildHqMesh(faction: Faction, tileX: number, tileY: number): HqV
     tickLife(dt: number): void {
       if (accentMat === null) return;
       lifeClock += dt;
+      // Absolute-assign on top of the static accent base. NOTE: the legacy
+      // HQ damage pulse (hq.ts) writes this same material; it isn't wired
+      // through HqVisual today, but when combat returns (Phase D) this
+      // breathe and that pulse must compose (or one gate the other) rather
+      // than clobber per frame.
       accentMat.emissiveIntensity = accentBase + breathe(lifeClock);
     },
   };
@@ -228,16 +233,16 @@ function wrapUnitVisual(
 ): UnitVisual {
   const bodyRestY = body !== null ? body.position.y : 0;
   // Grab the shared body material (worker-upper + worker-lower use the same
-  // instance) so the move cue can ramp its emissive. Edges/fill are skipped.
+  // instance) so the move cue can ramp its emissive. Pinned to the named
+  // 'worker-upper' mesh rather than "first MeshStandardMaterial found" — the
+  // body group also holds the harvest fill-ring (a MeshStandardMaterial), so
+  // a name lookup can't silently retarget the glow if child order changes.
   let bodyMat: THREE.MeshStandardMaterial | null = null;
-  if (body !== null) {
-    body.traverse((o) => {
-      if (bodyMat === null && o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardMaterial) {
-        bodyMat = o.material;
-      }
-    });
+  const upper = body !== null ? body.getObjectByName('worker-upper') : null;
+  if (upper instanceof THREE.Mesh && upper.material instanceof THREE.MeshStandardMaterial) {
+    bodyMat = upper.material;
   }
-  const bodyGlowBase = bodyMat !== null ? (bodyMat as THREE.MeshStandardMaterial).emissiveIntensity : 0;
+  const bodyGlowBase = bodyMat !== null ? bodyMat.emissiveIntensity : 0;
   let glow = 0;
   return {
     group: b.mesh,
