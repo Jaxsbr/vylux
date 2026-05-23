@@ -89,7 +89,7 @@ Same gate the CI determinism workflow runs (`.github/workflows/determinism.yml`)
 | File              | Role |
 | ----------------- | ---- |
 | `scene.ts`        | Three.js scene + orthographic isometric camera + lights + WebGL renderer. Pure setup; no sim references. `tileFloatToWorld(tileX, tileY)` converts fractional sim tile coords to Three.js world coords. |
-| `meshes.ts`       | Per-entity mesh builders. Tron-style emissive geometry: HQ as edge-glowing cube, worker as cylinder, defender as box, raider as cone-on-base. Faction colours: cyan (faction 0), red-orange (faction 1). |
+| `meshes.ts`       | Per-entity mesh builders. Tron-style emissive geometry: HQ as edge-glowing tiered cube, worker as a hovering hex-courier (saucer hull + faction-bright core canopy; Phase C.5), work pod as a low box with a glowing charge-bay cap. Faction colours: cyan (faction 0), red-orange (faction 1). |
 | `sim-renderer.ts` | `SimRenderer` class. Reconciles `sim.state` ↔ Three.js meshes. `capturePrev()` snapshots positions before each sim tick; `update(alpha)` lerps between previous and current state for smooth render-rate motion. Dead units kept around with `mesh.visible = false`. |
 | `sim-driver.ts`   | Fixed-tick driver. `requestAnimationFrame` for both sim catch-up and rendering, capped at `MAX_STEPS_PER_FRAME=5` to prevent spiral-of-death after long pauses. Sim-frontend-agnostic — takes a `commandsForTick` callback. |
 | `player-input.ts` | `PlayerInput` + `MatchEndOverlay` (VICTORY/DEFEAT screen; Play Again reloads the page). |

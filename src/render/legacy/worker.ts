@@ -36,26 +36,45 @@ const BODY_COLOR = 0x0d1117;
 // Movement speed in tiles per second.
 export const WORKER_SPEED = 2;
 
-// Geometry constants for the diamond-prism worker mesh.
-// Shape: a low, wide octahedron-like diamond — narrow at top and bottom,
-// widest in the middle — scaled to fit comfortably on one tile.
+// Phase C.5 — worker silhouette: a hovering hex-courier / harvester drone.
+// Shape: a wide flat hexagonal hull (a saucer deck) with a bright core
+// canopy on top and an underbelly that tapers to a small thruster pad, so it
+// reads as a small craft floating above the grid. Hexagonal (6 segments, not
+// the old 4-sided rhombus) so it reads as a manufactured drone — and crucially
+// distinct from the 4-sided gold energy-node spike it used to echo. The dark
+// hull + faction-bright edges + glowing core carry the Tron read; the harvest
+// buffer shows as a halo ring at the hull's widest point. The mesh never
+// rotates to heading, so the silhouette is kept radially symmetric.
 const WORKER_CONSTANTS = {
-  // CylinderGeometry(radiusTop, radiusBottom, height, radialSegments) for each half.
-  // Two halves make the diamond: top half tapers to a point, bottom half to a point.
-  // Achieved with a single CylinderGeometry of 4 segments (rhombus cross-section).
-  diamondRadiusTop: 0.0,
-  diamondRadiusBottom: 0.28,
-  diamondHeight: 0.22,
-  diamondRadialSegments: 4,
-  // Stacked: lower half flipped to create the bottom point.
-  // Total height ~ 0.44, sits at Y=0.22 so base is ~0 and apex is ~0.44.
-  bodyY: 0.22,
-  // Body emissive near-zero: dark silhouette reads through; edges carry faction.
+  // Hexagonal cross-section for every hull piece — the "manufactured craft" read.
+  segments: 6,
+  // Upper hull deck — wide base, narrower flat top. CylinderGeometry(top, bottom, height, segs).
+  deckRadiusTop: 0.16,
+  deckRadiusBottom: 0.30,
+  deckHeight: 0.14,
+  // Lower underbelly — tapers from the equator down to a small thruster pad,
+  // giving the "this hovers" read (no flat footprint like the grounded buildings).
+  bellyRadiusTop: 0.30,
+  bellyRadiusBottom: 0.10,
+  bellyHeight: 0.16,
+  // Bright core canopy on the deck — the faction bloom anchor (the "energy
+  // cell"), bright like the work-pod cap / spire finial so the worker has a
+  // focal glow even at rest.
+  coreRadiusTop: 0.10,
+  coreRadiusBottom: 0.13,
+  coreHeight: 0.09,
+  coreEmissiveIntensity: 2.0,
+  // Body emissive near-zero: dark silhouette reads through; edges + core carry faction.
   bodyEmissiveIntensity: 0.05,
-  // Harvest buffer fill ring — sits at the equator just above the body.
-  fillRingInner: 0.34,
-  fillRingOuter: 0.46,
-  fillRingY: 0.25,
+  // Resting lift: the equator sits at local y=0; the underbelly reaches local
+  // y=-bellyHeight (-0.16). bodyY just clears that so the courier hovers a
+  // touch above the floor even at the bottom of the idle-hover cycle.
+  bodyY: 0.19,
+  // Harvest buffer fill ring — a halo at the hull's widest point (the equator,
+  // local y=0).
+  fillRingInner: 0.33,
+  fillRingOuter: 0.45,
+  fillRingY: 0.0,
 } as const;
 
 export type WorkerBundle = {
@@ -133,64 +152,73 @@ function clampTile(v: number): number {
   return Math.max(0, Math.min(GRID_CONSTANTS.gridSize - 1, Math.round(v)));
 }
 
-type DiamondMeshResult = {
+type WorkerMeshResult = {
   group: THREE.Group;
   fillRingMat: THREE.MeshStandardMaterial;
 };
 
-function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
+function buildCourierMesh(emissiveHex: number): WorkerMeshResult {
+  const C = WORKER_CONSTANTS;
   const group = new THREE.Group();
   // Named so the Phase C.4 idle hover can grab + bob just the body, leaving
   // the selection ring + chrome on the floor.
   group.name = 'worker-body';
 
-  // Upper half — top cone, wide base pointing down.
-  const upperGeo = new THREE.CylinderGeometry(
-    WORKER_CONSTANTS.diamondRadiusTop,
-    WORKER_CONSTANTS.diamondRadiusBottom,
-    WORKER_CONSTANTS.diamondHeight,
-    WORKER_CONSTANTS.diamondRadialSegments,
-  );
-  // Lower half — bottom cone, wide base at top (pointing down to a tip).
-  const lowerGeo = new THREE.CylinderGeometry(
-    WORKER_CONSTANTS.diamondRadiusBottom,
-    WORKER_CONSTANTS.diamondRadiusTop,
-    WORKER_CONSTANTS.diamondHeight,
-    WORKER_CONSTANTS.diamondRadialSegments,
-  );
-
-  // Body is near-black with whisper emissive — dark silhouette; edges + accent carry faction.
-  const mat = new THREE.MeshStandardMaterial({
+  // Shared dark hull material for the deck + underbelly. Near-black with a
+  // whisper of emissive — the dark silhouette reads through; the edges + the
+  // bright core carry the faction colour. meshes.ts pins the move-glow ramp to
+  // the named 'worker-upper' mesh's material, so deck + belly energise together
+  // while moving.
+  const hullMat = new THREE.MeshStandardMaterial({
     color: BODY_COLOR,
     emissive: emissiveHex,
-    emissiveIntensity: WORKER_CONSTANTS.bodyEmissiveIntensity,
+    emissiveIntensity: C.bodyEmissiveIntensity,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
   });
 
-  const upper = new THREE.Mesh(upperGeo, mat);
-  upper.position.y = WORKER_CONSTANTS.diamondHeight / 2;
-  upper.name = 'worker-upper';
-
-  const lower = new THREE.Mesh(lowerGeo, mat);
-  lower.position.y = -WORKER_CONSTANTS.diamondHeight / 2;
-  lower.name = 'worker-lower';
-
-  // Edge trim on the combined shape — use upper cone edges for the silhouette.
-  const upperEdges = buildGlowEdges(new THREE.EdgesGeometry(upperGeo), emissiveHex, 'worker-trim-upper');
-  upperEdges.position.y = WORKER_CONSTANTS.diamondHeight / 2;
-
-  const lowerEdges = buildGlowEdges(new THREE.EdgesGeometry(lowerGeo), emissiveHex, 'worker-trim-lower');
-  lowerEdges.position.y = -WORKER_CONSTANTS.diamondHeight / 2;
-
-  // Harvest buffer fill ring — sits at the worker's equator and grows in
-  // opacity + emissive as the harvest buffer fills up.
-  const fillRingGeo = new THREE.RingGeometry(
-    WORKER_CONSTANTS.fillRingInner,
-    WORKER_CONSTANTS.fillRingOuter,
-    20,
+  // Upper hull deck — wide base, narrower flat top. Sits above the equator
+  // (local y in [0, deckHeight]). Named 'worker-upper' for the move-glow grab.
+  const deckGeo = new THREE.CylinderGeometry(
+    C.deckRadiusTop, C.deckRadiusBottom, C.deckHeight, C.segments,
   );
+  const deck = new THREE.Mesh(deckGeo, hullMat);
+  deck.position.y = C.deckHeight / 2;
+  deck.name = 'worker-upper';
+
+  // Lower underbelly — tapers from the equator down to a small thruster pad
+  // (local y in [-bellyHeight, 0]).
+  const bellyGeo = new THREE.CylinderGeometry(
+    C.bellyRadiusTop, C.bellyRadiusBottom, C.bellyHeight, C.segments,
+  );
+  const belly = new THREE.Mesh(bellyGeo, hullMat);
+  belly.position.y = -C.bellyHeight / 2;
+  belly.name = 'worker-lower';
+
+  // Faction-bright edge trim on both hull pieces — defines the saucer
+  // silhouette and gives the bloom pass something to halo.
+  const deckEdges = buildGlowEdges(new THREE.EdgesGeometry(deckGeo), emissiveHex, 'worker-trim-upper');
+  deckEdges.position.y = C.deckHeight / 2;
+  const bellyEdges = buildGlowEdges(new THREE.EdgesGeometry(bellyGeo), emissiveHex, 'worker-trim-lower');
+  bellyEdges.position.y = -C.bellyHeight / 2;
+
+  // Bright core canopy on the deck — the "energy cell" focal glow.
+  const coreGeo = new THREE.CylinderGeometry(
+    C.coreRadiusTop, C.coreRadiusBottom, C.coreHeight, C.segments,
+  );
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: emissiveHex,
+    emissive: emissiveHex,
+    emissiveIntensity: C.coreEmissiveIntensity,
+  });
+  const core = new THREE.Mesh(coreGeo, coreMat);
+  core.position.y = C.deckHeight + C.coreHeight / 2;
+  core.name = 'worker-core';
+
+  // Harvest buffer fill ring — a horizontal halo at the hull's widest point
+  // that grows in opacity + emissive as the harvest buffer fills up.
+  const fillRingGeo = new THREE.RingGeometry(C.fillRingInner, C.fillRingOuter, 24);
   const fillRingMat = new THREE.MeshStandardMaterial({
     color: emissiveHex,
     emissive: emissiveHex,
@@ -201,11 +229,11 @@ function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
   });
   const fillRing = new THREE.Mesh(fillRingGeo, fillRingMat);
   fillRing.rotation.x = -Math.PI / 2;
-  fillRing.position.y = WORKER_CONSTANTS.fillRingY;
+  fillRing.position.y = C.fillRingY;
   fillRing.name = 'worker-fill-ring';
 
-  group.add(upper, lower, upperEdges, lowerEdges, fillRing);
-  group.position.y = WORKER_CONSTANTS.bodyY;
+  group.add(deck, belly, core, deckEdges, bellyEdges, fillRing);
+  group.position.y = C.bodyY;
 
   return { group, fillRingMat };
 }
@@ -215,12 +243,12 @@ export function buildWorker(faction: FactionId, tileX: number, tileY: number): W
   const group = new THREE.Group();
   group.name = `worker-${faction}`;
 
-  const { group: diamond, fillRingMat } = buildDiamondMesh(emissive);
+  const { group: body, fillRingMat } = buildCourierMesh(emissive);
   const selectionRing = buildSelectionRing(faction, 'unit');
 
   const hpBar = buildHpBar(faction, 0.7);
   hpBar.group.visible = false;
-  group.add(diamond, selectionRing, hpBar.group);
+  group.add(body, selectionRing, hpBar.group);
 
   const world = tileFloatToWorld(tileX, tileY);
   group.position.set(world.x, world.y, world.z);
