@@ -376,9 +376,13 @@ async function bootstrap(): Promise<void> {
     sim: match.sim,
     playerFaction,
     feedback: feedback === null ? undefined : {
-      onMoveOrder: (x, y, f) => feedback.spawnMovePing(x, y, f),
-      onAssignToNode: (x, y) => feedback.spawnAssignPulse(x, y),
+      // Phase C.3: each committed command fires its synth cue alongside
+      // the existing visual feedback. move = downward swish, harvest =
+      // upward chirp (opposite gestures), select = soft rising ping.
+      onMoveOrder: (x, y, f) => { audio.moveAssign(); feedback.spawnMovePing(x, y, f); },
+      onAssignToNode: (x, y) => { audio.harvestAssign(); feedback.spawnAssignPulse(x, y); },
       onPlacement: (x, y) => feedback.spawnPlacementBurst(x, y),
+      onSelect: () => audio.select(),
       // Phase C.1: blocked command on a charge-mode worker → trigger
       // the lightning cue at the worker's position via sim-renderer.
       onEnergyBlocked: (workerId) => renderer.triggerEnergyCue(workerId),
@@ -476,6 +480,12 @@ async function bootstrap(): Promise<void> {
 
   const driver = startSimDriver(match, renderer, scene, commandsCallback);
   haltDriver = () => driver.stop();
+
+  // Phase C.3: start the faction-tinted ambient drone on match begin.
+  // Fail-soft + lazy — if the AudioContext hasn't unlocked yet (no user
+  // gesture, e.g. ?menu=skip e2e), the bed silently waits for one. The
+  // PvAI menu's click/faction-switch cues unlock it before we get here.
+  audio.startAmbientBed(playerFaction);
 
   // Phase 3.4: camera pan/zoom. Active in every mode (including
   // observer) so the spectator can navigate the larger map. Pan keys +

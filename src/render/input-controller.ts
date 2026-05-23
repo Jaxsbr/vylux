@@ -55,6 +55,10 @@ export interface InputFeedbackHooks {
   onMoveOrder?(tileX: number, tileY: number, faction: Faction): void;
   onAssignToNode?(tileX: number, tileY: number): void;
   onPlacement?(tileX: number, tileY: number): void;
+  // Phase C.3: fired when the player selects an in-world entity (unit,
+  // HQ, work pod, or node). Drives the `select` audio cue. Pure
+  // presentation — selection state is renderer-side only.
+  onSelect?(): void;
   // Phase C.1: fired when a player command is dropped because the
   // worker is in charge mode (or at 0 charge). Renderer plays the
   // floating-lightning cue on the named worker.
@@ -330,6 +334,12 @@ export class InputController {
     // worker still clickable when it stands clear of other entities.
     const pick = this.pickAtPriority(e);
     if (pick !== null) {
+      // Phase C.3: fire the select cue once here rather than in each case
+      // arm — but suppress it for a shift+click that *removes* an
+      // already-selected unit, since a deselection shouldn't play the
+      // "selected" ping.
+      const deselect = pick.kind === 'unit' && e.shiftKey && this.selectedUnitIds.has(pick.id);
+      if (!deselect) this.opts.feedback?.onSelect?.();
       switch (pick.kind) {
         case 'hq':
           this.selectedUnitIds.clear();
@@ -431,6 +441,9 @@ export class InputController {
       const inRect = this.findOwnedUnitsInScreenRect(left, top, right, bottom);
       if (!drag.additive) this.selectedUnitIds.clear();
       for (const id of inRect) this.selectedUnitIds.add(id);
+      // Phase C.3: only a non-empty drag-rect counts as a selection cue;
+      // an empty sweep that clears the selection stays silent.
+      if (inRect.length > 0) this.opts.feedback?.onSelect?.();
       return;
     }
 
