@@ -1,6 +1,6 @@
 # Vylux — Plan
 
-> **Last updated:** 2026-05-10 — fresh start.
+> **Last updated:** 2026-05-23 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8.
 > **Visual north star:** [`concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`](concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png) — dense glowing Tron city, cyan/red grid lines pulsing through the world, lit vertical structures, purposeful silhouettes.
 > **Mindset:** the game must be fun. A good game loop matters more than feature count. Strip down to the minimum that's already fun, polish until it sings, *then* layer more on.
 
@@ -69,11 +69,79 @@ Live build looks like the concept image.
 
 ### Phase C — HQ + Worker Depth
 
-The opening 5 minutes are fun on their own, before any combat unit exists.
+The opening 5 minutes must be fun on their own, before any combat unit exists.
+Phase C runs as a series of focused sub-phases — each lands one slice end-to-end
+(sim + render + audio + tests + docs) before the next starts.
 
-Phase C runs as a series of focused sub-phases. Each lands one mechanic end-to-end (sim + render + tests + docs) before the next starts. Phase B (visual reset) was attempted and reverted — visuals appear here only when they serve to convey functionality.
+> **Status: not met (2026-05-23 review).** An uninstructed playthrough — HQ →
+> train worker → move → harvest → charge → build pod → research auto-resume —
+> confirmed the *mechanics* all work, but the *experience* is flat: the HUD reads
+> cheap, actions give no reward, and nothing tells the player what to do. The
+> sub-phases below are re-sequenced to close that gap first; the original
+> economy/research work is deferred to C.7–C.8. Phase B's "vibe pass" landed
+> earlier (sky / layered grid / fog); the remaining at-rest liveliness is folded
+> into C.4.
 
-#### Phase C.1 — Work pods + worker charge (active)
+#### Review 2026-05-23 — findings (the gap to close)
+
+Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
+
+**[CLARITY] HUD reads cheap; actions are easy to miss.**
+- Command actions are plain text (`TRAIN WORKER`, `BUILD WORK POD`,
+  `RESEARCH AUTO-RESUME`) — no icons, don't read as buttons, easy to miss.
+- Panels resize to fit their text (`min-width` grows) → jittery, cheap look.
+- The selection portrait is bland; worker status (IDLE / HARVESTING 5/10 /
+  CHARGING 5/10) is good information shown as flat text — a missed chance for
+  in-style visual conveyance.
+- Readouts (cap 3/5, charge 5/10, harvest 5/10) are functional but ugly and
+  inconsistent; there is no clean, persistent resource bar.
+
+**[FEEL] Actions give no reward; the world is dead.**
+- Game start is static — nothing pulses, no ambient sound, no sense of life.
+- Missing SFX: move-assign, harvest-assign, charge start/complete, research
+  start/complete. (Today only `click` / `trainComplete` / `buildComplete` /
+  `factionSwitch` exist in `audio-manager.ts`.)
+- Workers have no idle, move, or work-state animation — they sit lifeless.
+- Charging shows only a tiny, near-invisible progress bar — no sound, no VFX.
+- Research completion is invisible — no audio, no visual; the upgrade can't be
+  seen or felt the moment it lands.
+- Worker geometry is unreadable "dev art" — the worst silhouette in the game,
+  and it fills the portrait box too.
+
+**[ONBOARD] Nothing teaches the player how to play.**
+- Menu → game is an instant cut, no transition.
+- No goal or first-action prompt on entry; the player doesn't know what to do.
+- Right-click-to-move and left-click-to-harvest are found only by guessing.
+- The charge mechanic baffles (why stop? why not auto-resume? — that *is* the
+  auto-resume research, but nothing says so). Building a pod and researching are
+  done "out of boredom," with no sense of why.
+- No tutorial. Need a **Tutorial** entry on the main menu → a sandbox with
+  visual + textual cues for: move, action, build, capacity, research, harvest.
+
+**[OPEN] Worker training is instant — no queue, no wait.**
+- Decide in C.2: keep instant, or add a short train timer + production queue.
+  Recommendation — add a short timer + queue: it gives the command card a live
+  element and the player a beat of anticipation. It's a sim-level change (train
+  time), so it lands with the HUD work or as a small sim tweak beside it.
+
+#### Sub-phase sequence (re-sequenced 2026-05-23)
+
+| #   | Sub-phase                               | Closes        | State                |
+| --- | --------------------------------------- | ------------- | -------------------- |
+| C.1 | Work pods + worker charge + auto-resume | —             | ✅ landed 2026-05-12 |
+| C.2 | HUD overhaul — SC2 command-card model   | CLARITY, OPEN | **next**             |
+| C.3 | Game-feel: audio (synth ambient + SFX)  | FEEL          | —                    |
+| C.4 | Game-feel: motion & world life          | FEEL          | —                    |
+| C.5 | Worker silhouette redesign              | FEEL, CLARITY | —                    |
+| C.6 | Onboarding & tutorial sandbox           | ONBOARD       | —                    |
+| C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
+| C.8 | Research depth — worker + HQ trees      | (was C.2)     | deferred             |
+
+The original "C.2+" economy/research work (Matter, upgrade trees) is intentionally
+pushed behind the experience work — it is **C.7–C.8** now. Don't pull it forward:
+a richer economy layered on a flat-feeling loop doesn't move the fun needle.
+
+#### Phase C.1 — Work pods + worker charge ✅ (landed 2026-05-12)
 
 A "work pod" is a player-built structure that raises the worker cap, hosts (future) worker-upgrade research, and recharges workers. Workers carry their own energy charge and have to come back to a friendly pod (or HQ as a slower fallback) to refill.
 
@@ -121,14 +189,200 @@ Future research items land as additional `ResearchKind` values, additional rows 
 
 **Exit:** verify gate green (tsc + unit tests + e2e). A player can build a work pod, watch a worker recharge, and hit the worker cap.
 
-#### Phase C.2+ (later sub-phases — design open)
+#### Phase C.2 — HUD overhaul (SC2 command-card model) · [CLARITY, OPEN]
 
-- Worker upgrade research hosted at work pods. The energy-trail mechanic returns here as one upgrade-tree option.
-- Matter as a second resource (construction material). Cost system handles `{ energy?: number; matter?: number }`. Open question: is Energy purely a build-time cost or also an ongoing upkeep?
-- HQ research track (vision aura, storage cap, auto-defence beam, etc.).
-- Each research result must change something **visible** on the HQ or worker — research the player can't see is research that doesn't reinforce the loop.
+Replace the ad-hoc bottom-corner HUD with one StarCraft 2-style command HUD:
+icon-driven, fixed-footprint, readable. Copy SC2's *information architecture*,
+not its art — keep Vylux's charcoal + neon palette.
 
-**Phase C exit:** ≥3 internal sessions per faction-pick where the player spends 5 minutes building economy + researching, and reports the time as enjoyable.
+Target layout:
+
+```
+┌ E 80   M 120 ───────────── SUPPLY 3/5 ─┐
+│                                         │
+│             [ game world ]              │
+│                                         │
+├─────────┬──────────────────┬────────────┤
+│PORTRAIT │  COMMAND CARD    │  MINIMAP   │
+│ ╔═════╗ │  ┌──┐┌──┐┌──┐    │ ┌────────┐ │
+│ ║ WKR ║ │  │TR││  ││  │    │ │   ▙    │ │
+│ ╚═════╝ │  ├──┤├──┤├──┤    │ │      ▟ │ │
+│ WORKER  │  │  ││  ││  │    │ └────────┘ │
+│ HARVEST │  └──┘└──┘└──┘    │            │
+└─────────┴──────────────────┴────────────┘
+```
+
+- **Resource bar (top):** fixed-width fields, never resize-to-fit — Energy now,
+  **Matter reserved + greyed** (goes live in C.7), Supply n/m. Monospace, aligned.
+- **Portrait panel (bottom-left):** keep the existing WebGL mesh portrait
+  (`PortraitRenderer`) + name, but render status as **icon + bars**, not flat
+  text — HP bar, charge bar, and a current-action icon (idle / move / harvest /
+  charge / build). Keep the numeric count as a small badge. Fixed footprint.
+- **Command card (bottom-center):** a fixed **3-wide icon grid**. Each action
+  (Train Worker, Build Work Pod, Research Auto-Resume) becomes a square icon tile
+  with a hotkey corner + cost badge + disabled/dim state (the reasons already
+  exist in `action-bar.ts`). Empty slots render as dim grid cells so the grid
+  never resizes.
+- **Minimap (bottom-right):** consolidate the existing map work (#8/#9) into the
+  fixed grid cell.
+
+Deliverables:
+- Refactor `action-bar.ts` + `selection-portrait.ts` into a unified `CommandHud`
+  under `src/render/hud/` (CSS grid, fixed sizes — no `min-width` growth).
+- An icon set (inline SVG or canvas glyphs, Tron neon) for: train, build-pod,
+  research, and the worker action states.
+- Resource-bar component with fixed fields (Energy / Matter-reserved / Supply).
+- Resolve the **[OPEN]** training decision; if "timer + queue", add the train
+  timer to the sim (`units-config` train ticks, applied in `step.ts`) and a
+  production-queue strip to the HUD, and regenerate the golden fixtures.
+- **Reference shots (saved):** `docs/concepts/sc2-hud-reference-unit-selected.jpg`
+  (single unit selected — resource bar, portrait + stats, command card, minimap)
+  and `docs/concepts/sc2-hud-reference-build-action.jpg` (a build-placement
+  command context, our build-work-pod analogue). Source: interfaceingame.com
+  (SC2: Legacy of the Void). Copy the *information density + region roles*, not
+  SC2's exact corners — Vylux's placement (resources top-left, minimap
+  bottom-right) is the ASCII mock above; SC2 mirrors those two.
+- e2e: the command card shows the correct tiles per selection (HQ → train,
+  worker → build-pod, pod → research) and renders disabled states; `tsc` / unit
+  green; update `docs/manual.md` controls.
+
+Out of scope: animated juice (C.3 / C.4); live Matter values; minimap
+interactivity beyond what exists.
+
+**Exit:** the four regions (resources / portrait / command card / minimap) are
+present, fixed-footprint, and icon-driven; every C.1 action is reachable as an
+icon tile; verify gate green; manual controls updated.
+
+#### Phase C.3 — Game-feel: audio (synth ambient + action SFX) · [FEEL]
+
+Fill the silence. Stay fully synthesised — extend the Web Audio layer in
+`src/audio/audio-manager.ts`; **no external assets, no loader.**
+
+Deliverables:
+- **Ambient bed:** a low, slowly-pulsing Tron drone (oscillator + slow LFO),
+  faction-tinted via the reserved `FACTION_FREQ_BASE` (cyan vs red base pitch),
+  at a volume well under the SFX. Starts on match begin; respects the mute toggle.
+- **New cues:** `select` (distinct from `click`), `moveAssign`, `harvestAssign`,
+  `chargeStart` / `chargeComplete`, `researchStart` / `researchComplete` (a
+  rising "unlock" chime).
+- **Wire each cue at its fire site:** move / harvest assign next to the existing
+  `FeedbackOverlay` calls in the input controller; charge transitions and
+  research-complete detected renderer-side (the `event-detector` / phase-change
+  watch in `sim-renderer`) so the **sim stays untouched** and the determinism
+  gate is unaffected.
+- Tests: cues fail-soft without a user gesture (existing pattern); manually
+  verify the bed loops + ducks under SFX. Update the manual's audio note.
+
+Out of scope: real music / sampled SFX (deferred by decision — synth only).
+
+**Exit:** every player action fires a distinct cue; an ambient bed plays from
+match start; mute silences all of it; verify gate green.
+
+#### Phase C.4 — Game-feel: motion & world life · [FEEL]
+
+Make entities and the arena feel alive, and make every work-state visible.
+Renderer-only (`feedback.ts`, `sim-renderer.ts`, `meshes.ts`) — **sim untouched**,
+determinism safe.
+
+Deliverables:
+- **Worker idle:** a subtle bob / internal pulse so a standing worker reads alive.
+- **Worker move:** a faint motion trail / directional internal pulse ("energy in
+  motion", carried over from the Phase B plan).
+- **Work-state VFX:** harvesting → a beam / pulse between worker and node;
+  building → keep the existing build animation + a constructing shimmer; charging
+  → a clear charge VFX at the pod and a readable charge ring on the worker
+  (replaces the "tiny invisible bar"). These mirror the portrait status icons
+  from C.2.
+- **Research-complete VFX:** a pulse on the pod and on every affected worker the
+  instant the upgrade lands (pairs with C.3's `researchComplete` chime).
+- **World life:** ambient pulse along grid lines toward each HQ + the lit-backdrop
+  tiles from the Phase B plan, so the arena isn't static at rest. (Finishes the
+  at-rest liveliness the Phase B vibe pass began.)
+- Keep / upgrade the floating-lightning reject cue when a charge-locked worker is
+  commanded.
+- Tests: e2e smoke that the scene renders with no perf regression (respect the
+  `MAX_STEPS_PER_FRAME` budget); `tsc` / unit green.
+
+Out of scope: any new sim state; combat VFX.
+
+**Exit:** a standing / moving / harvesting / charging / just-upgraded worker each
+look visibly different; the world has motion at rest; verify gate green.
+
+#### Phase C.5 — Worker silhouette redesign · [FEEL, CLARITY]
+
+Give the worker a readable, on-theme silhouette — which also fixes the portrait,
+since `PortraitRenderer` shows the real mesh.
+
+Deliverables (`meshes.ts`; the portrait picks it up for free):
+- Replace the current worker geometry with a clear Tron read (e.g. a small
+  hovering data-courier / harvester), distinct from HQ and pod, and distinct
+  between factions via the existing emissive tint. Commit to one read.
+- Verify it reads both at game scale and in the 128px portrait box.
+- Keep the `entity-chrome` conventions (glow edges, selection ring, HP / charge
+  bar) unchanged. Re-touch HQ / pod silhouettes only if the worker change makes
+  them inconsistent — keep scope tight.
+- Tests: `source-scan` + `tsc` green; visual check in scene + portrait. Update
+  the manual if the described silhouette changes.
+
+Out of scope: animation (C.4 — the two reinforce each other visually); new units.
+
+**Exit:** a new player can tell at a glance what a worker is, in-world and in the
+portrait; verify gate green.
+
+#### Phase C.6 — Onboarding & tutorial sandbox · [ONBOARD]
+
+Teach the basics; remove the "discovered by guessing" wall. Lands **after**
+C.2–C.5 so it teaches a HUD worth pointing at and actions that already feel good
+— don't build it earlier.
+
+Deliverables:
+- **Main-menu Tutorial entry** (alongside the faction picks) → a fixed sandbox
+  scenario (deterministic seed, no enemy pressure, generous energy).
+- **Menu → game transition:** a short fade / wash into the match (reuse the
+  menu's wash-gradient idiom) so entry isn't a jarring cut — applies to normal
+  play too.
+- **Guided step sequence** with contextual visual + textual cues, each gated on
+  the player doing the thing: (1) select HQ, (2) train a worker, (3) select +
+  move it (right-click), (4) assign harvest (left-click a node), (5) read the
+  charge meter + understand charge mode, (6) build a work pod (capacity), (7)
+  research auto-resume and see the visible result. Cues point at the relevant
+  HUD region / world target.
+- **First-action nudge** on normal match start too (a single "select your HQ")
+  so even non-tutorial entry has a clue.
+- Skip / exit-to-menu at any time; completion → a normal match or back to menu.
+- Tests: e2e that the tutorial launches, advances on the gating action, and is
+  skippable; `tsc` / unit green. Update the manual (controls + a Tutorial line).
+
+Out of scope: branching / adaptive tutorial; voice; multi-scenario campaign.
+
+**Exit:** a first-time player completes the sandbox and can then move, harvest,
+build, and research unaided; menu → game has a transition; verify gate green.
+
+#### Phase C.7 — Economy depth: Matter + cost split  (was C.2)
+
+The original C.2 economy work, now after the experience pass.
+- Introduce **Matter** as the second resource (construction material). The cost
+  system handles `{ energy?: number; matter?: number }` cleanly — some costs
+  energy-only, some matter-only, some both. The C.2 resource bar's reserved
+  Matter field goes live here.
+- Resolve the carried-forward open question: is Energy a build-time cost only, or
+  also an ongoing upkeep?
+- Tests + manual updated; regenerate the golden fixtures (sim cost shapes change).
+
+#### Phase C.8 — Research depth: worker + HQ trees  (was C.2)
+
+- Worker-upgrade research hosted at work pods; the **energy-trail** mechanic
+  returns here as one upgrade-tree option.
+- HQ research track (vision aura, storage cap, auto-defence beam, …).
+- Every research result must change something **visible** on the HQ or worker —
+  research the player can't see doesn't reinforce the loop. (C.3 / C.4 now make
+  "visible + audible" real.)
+- Tests + manual updated.
+
+**Phase C exit (the fun gate):** ≥3 internal sessions per faction-pick where the
+player spends 5 minutes building economy + researching, and reports the time as
+enjoyable. Now gated behind the experience work (C.2–C.6), not the economy work
+alone.
 
 ### Phase D — First Combat Unit
 
