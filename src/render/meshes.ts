@@ -169,8 +169,10 @@ export function buildHqMesh(faction: Faction, tileX: number, tileY: number): HqV
       // (Phase D) this pulse and that flash must compose, not clobber.
       const lumaT = CAP_LUMA_MID + pulse(lifeClock, CAP_LUMA_AMP);
       for (const c of cap) c.mat.emissiveIntensity = intensityForLuma(c.hex, lumaT);
-      // Body tiers: gentle glow-up from the dark silhouette and back.
-      for (const tier of body) tier.mat.emissiveIntensity = tier.base + breathe(lifeClock, HQ_BODY_BREATHE_AMP, BUILDING_PULSE_PERIOD_S);
+      // Body tiers: gentle glow-up from the dark silhouette and back, at the
+      // slower BUILDING_BREATHE_PERIOD_S (breathe's default) so the body
+      // "breath" layers against the quicker cap "pulse" instead of locking to it.
+      for (const tier of body) tier.mat.emissiveIntensity = tier.base + breathe(lifeClock, HQ_BODY_BREATHE_AMP);
     },
   };
 }
