@@ -132,7 +132,7 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | C.2 | HUD overhaul — SC2 command-card model   | CLARITY, OPEN | ✅ landed             |
 | C.3 | Game-feel: audio (synth ambient + SFX)  | FEEL          | ✅ landed             |
 | C.4 | Game-feel: motion & world life          | FEEL          | ✅ landed (entity-driven; grid pulse deferred) |
-| C.5 | Worker silhouette redesign              | FEEL, CLARITY | —                    |
+| C.5 | Worker silhouette redesign              | FEEL, CLARITY | ✅ landed (hovering hex courier) |
 | C.6 | Onboarding & tutorial sandbox           | ONBOARD       | —                    |
 | C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
 | C.8 | Research depth — worker + HQ trees      | (was C.2)     | deferred             |
@@ -341,7 +341,7 @@ Out of scope: any new sim state; combat VFX.
 look visibly different; the HQ / pods / workers give the arena life at rest (no
 static scene) — entity-driven, grid pulse only if still needed; verify gate green.
 
-#### Phase C.5 — Worker silhouette redesign · [FEEL, CLARITY]
+#### Phase C.5 — Worker silhouette redesign · [FEEL, CLARITY] ✅ landed 2026-05-23
 
 Give the worker a readable, on-theme silhouette — which also fixes the portrait,
 since `PortraitRenderer` shows the real mesh.
@@ -361,6 +361,17 @@ Out of scope: animation (C.4 — the two reinforce each other visually); new uni
 
 **Exit:** a new player can tell at a glance what a worker is, in-world and in the
 portrait; verify gate green.
+
+**What landed:** the old 4-sided diamond (which echoed the gold 4-sided
+energy-node spike — a clarity bug) became a **hovering hex-courier**: a wide
+flat hexagonal hull (saucer deck) with a faction-bright core canopy on top and
+an underbelly tapering to a thruster pad, so it reads as a small harvester drone
+floating above the grid. All `entity-chrome` chrome (selection ring, HP / charge
+bar, glow edges, harvest-fill halo, C.4 idle-hover + move-glow) is unchanged —
+the redesign lives entirely in `legacy/worker.ts`'s geometry, so the renderer is
+the only thing touched and the sim/determinism gate is untouched. Faction tint
+is the unchanged `FACTION_EMISSIVE` map. Verified in-scene (distinct from the HQ
+tower + node spikes) and in the 128px portrait.
 
 #### Phase C.6 — Onboarding & tutorial sandbox · [ONBOARD]
 
