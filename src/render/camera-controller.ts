@@ -109,6 +109,12 @@ export class CameraController {
     this.applyTransform();
   }
 
+  // Current look-at target in world (x, z). Read by the minimap to draw
+  // the camera-focus marker.
+  getTarget(): { x: number; z: number } {
+    return { x: this.target.x, z: this.target.z };
+  }
+
   detach(): void {
     const c = this.opts.canvas;
     c.removeEventListener('pointerdown', this.onPointerDown);

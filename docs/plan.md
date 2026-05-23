@@ -129,7 +129,7 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | #   | Sub-phase                               | Closes        | State                |
 | --- | --------------------------------------- | ------------- | -------------------- |
 | C.1 | Work pods + worker charge + auto-resume | —             | ✅ landed 2026-05-12 |
-| C.2 | HUD overhaul — SC2 command-card model   | CLARITY, OPEN | ✅ landed (minimap deferred) |
+| C.2 | HUD overhaul — SC2 command-card model   | CLARITY, OPEN | ✅ landed             |
 | C.3 | Game-feel: audio (synth ambient + SFX)  | FEEL          | —                    |
 | C.4 | Game-feel: motion & world life          | FEEL          | —                    |
 | C.5 | Worker silhouette redesign              | FEEL, CLARITY | —                    |
@@ -191,17 +191,17 @@ Future research items land as additional `ResearchKind` values, additional rows 
 
 #### Phase C.2 — HUD overhaul (SC2 command-card model) · [CLARITY, OPEN]
 
-> **Mostly landed 2026-05-23.** Resource bar (HQ / Energy / Matter-reserved /
-> Supply), portrait panel (action-state icon + HP / charge bars), and the
-> command card (fixed 3-wide icon-tile grid with hotkey + cost badges + a
-> production-queue strip) all shipped, plus the `[OPEN]` train timer + queue
-> and the two faction-stat fixes (Swarm/Siege maxHp + trainCost now actually
-> applied). Implemented by enhancing the existing `action-bar.ts` +
+> **Landed 2026-05-23. Exit gate met.** All four SC2 regions shipped:
+> resource bar (HQ / Energy / Matter-reserved / Supply), portrait panel
+> (action-state icon + HP / charge bars), the command card (fixed 3-wide
+> icon-tile grid with hotkey + cost badges + a production-queue strip), and
+> the minimap (fog-respecting blips driven off mesh visibility, a camera-focus
+> marker, click-to-pan). Plus the `[OPEN]` train timer + queue and the two
+> faction-stat fixes (Swarm/Siege maxHp + trainCost now actually applied). The
+> card + portrait were done by enhancing the existing `action-bar.ts` +
 > `selection-portrait.ts` (reusing their tested selection logic) rather than a
 > from-scratch `src/render/hud/CommandHud` module — same SC2 information
-> architecture, much less churn. **Deferred:** the minimap (no existing
-> component to consolidate, and the one region the review didn't flag) →
-> tracked as a C.2 follow-up before C.3.
+> architecture, much less churn.
 
 Replace the ad-hoc bottom-corner HUD with one StarCraft 2-style command HUD:
 icon-driven, fixed-footprint, readable. Copy SC2's *information architecture*,

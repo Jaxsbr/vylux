@@ -151,6 +151,7 @@ A fixed-footprint HUD; nothing resizes to fit its text.
 - **Resource bar (top-centre):** HQ HP · Energy · **Matter** (reserved + greyed until Phase C.7) · Supply `used/cap` (turns red at the cap).
 - **Portrait panel (bottom-left):** a 3D snapshot of the selected entity + its name, plus an action-state icon and HP / charge bars (workers), HP + build status (pods), or remaining energy (nodes).
 - **Command card (bottom-centre):** a fixed 3-wide grid of **icon tiles**, each with a hotkey badge (top-left) + Energy-cost badge (top-right); unused slots render as dim cells. Above it, a **production-queue strip** shows the queued workers, the head one carrying a production-progress bar.
+- **Minimap (bottom-right):** a top-down map of the arena. Blips mirror what's currently visible in the 3D scene (so it respects fog), plus a camera-focus marker. **Click anywhere on it to recentre the camera.**
 
 Tiles by selection:
 - **HQ** → **TRAIN WORKER** (`W`). Greys out at the cap (queued units count toward it), when the queue is full (5), or out of Energy.
