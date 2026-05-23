@@ -50,6 +50,11 @@ export class GameEventDetector {
     private readonly sim: Sim,
     private readonly playerFaction: Faction,
     private readonly audio: AudioManager,
+    // Phase C.4: optional VFX hook fired alongside the researchComplete chime
+    // so the renderer can pulse the affected pods + workers. Kept as a
+    // callback (not a direct renderer ref) so the detector stays audio/sim
+    // only — the orchestration layer wires the visual.
+    private readonly onResearchComplete: (() => void) | null = null,
   ) {}
 
   update(): void {
@@ -130,6 +135,7 @@ export class GameEventDetector {
     }
     if (fs.autoResumeResearched && !this.prevAutoResume) {
       this.audio.researchComplete();
+      this.onResearchComplete?.();
     }
 
     this.snapshot();

@@ -32,6 +32,18 @@ import {
 } from './meshes';
 import { tileFloatToWorld } from './scene';
 import type { Exploration } from './exploration';
+import { workerHover, phaseOffset, WORKER_HOVER_PERIOD_S } from './entity-life';
+import { WorkBeams, type BeamSpec } from './work-beam';
+import { isInChargeMode } from '../sim/step';
+import type { Worker } from '../sim/types';
+
+// Phase C.4 work-beam colours, per work-state.
+const HARVEST_BEAM_COLOR = 0x66ff44; // green — matches the assign pulse + node target
+const CHARGE_BEAM_COLOR = 0xffd166;  // gold — matches the charge ring + energy node
+const FACTION_BEAM_COLOR: Record<Faction, number> = {
+  0: 0x00e5ff, // cyan
+  1: 0xff6a33, // red-orange
+};
 
 interface PrevPosition {
   x: number;
@@ -55,6 +67,10 @@ export class SimRenderer {
   private readonly nodeMeshes = new Map<number, NodeVisual>();
   private readonly structureMeshes = new Map<number, WorkPodVisual>();
   private readonly prevUnitPos = new Map<number, PrevPosition>();
+
+  // Phase C.4: work-state beams (worker → node / pod / build site). Pooled
+  // + reconciled each frame from the active-work specs collected in syncUnits.
+  private readonly workBeams: WorkBeams;
 
   // Phase 3.8: per-frame friendly vision-source cache. Refilled at the
   // top of update() so each enemy entity's visibility test is a linear
@@ -80,6 +96,7 @@ export class SimRenderer {
     this.playerFaction = playerFaction;
     this.bypassVision = bypassVision;
     this.exploration = exploration;
+    this.workBeams = new WorkBeams(entitiesGroup);
     this.spawnHqs();
   }
 
@@ -123,11 +140,16 @@ export class SimRenderer {
       : Math.min(0.1, (nowMs - this.lastAnimMs) / 1000);
     this.lastAnimMs = nowMs;
 
+    // Phase C.4: advance the shared "life at rest" clock (wall-clock
+    // seconds). Per-entity phase offsets keep workers / buildings from
+    // pulsing in lockstep.
+    this.lifeClock += dt;
+
     this.collectVisionSources();
     this.exploration?.update();
-    this.syncHqs();
+    this.syncHqs(dt);
     this.syncNodes();
-    this.syncStructures();
+    this.syncStructures(dt);
     this.syncUnits(alpha, dt);
     this.tickDyingUnits(dt);
   }
@@ -136,6 +158,9 @@ export class SimRenderer {
   // a side-pool of meshes that are mid-death-pulse (the unit is dead in
   // sim but the mesh stays visible until the pulse finishes).
   private lastAnimMs = -1;
+  // Phase C.4: monotonic render-rate clock driving the at-rest life
+  // animations (worker idle bob, building breathe).
+  private lifeClock = 0;
   private readonly dyingUnits = new Map<number, UnitVisual>();
 
   // Phase 3.8: rebuild the friendly vision-source cache for this frame.
@@ -260,10 +285,13 @@ export class SimRenderer {
     }
   }
 
-  private syncHqs(): void {
+  private syncHqs(dt: number): void {
     for (const f of [0, 1] as const) {
       const v = this.hqMeshes[f];
       if (!v) continue;
+      // Phase C.4 building life — breathe the accent cap whenever the HQ is
+      // on screen (cheap; two HQs at most).
+      v.tickLife(dt);
       const fs = this.sim.state.factions[f];
       // Phase 3.8: enemy HQ hidden until in the player's vision.
       // Friendly HQ always visible.
@@ -326,7 +354,7 @@ export class SimRenderer {
 
   private readonly nodeMaxSeen = new Map<number, number>();
 
-  private syncStructures(): void {
+  private syncStructures(dt: number): void {
     for (const s of this.sim.state.structures) {
       let v = this.structureMeshes.get(s.id);
       if (!v && s.alive) {
@@ -350,11 +378,18 @@ export class SimRenderer {
       const total = STRUCTURE_STATS.workPod.buildTicks;
       const ratio = total === 0 ? 1 : 1 - s.buildTicksRemaining / total;
       v.setBuildProgress(ratio);
+      // Phase C.4 building life — breathe the cap once the pod is built.
+      // Runs after setBuildProgress so the swell sits on top of the resting
+      // intensity it just set.
+      v.tickLife(dt, s.buildTicksRemaining === 0);
       v.hpBar.update(toFloat(s.hp), toFloat(STRUCTURE_STATS.workPod.maxHp));
     }
   }
 
   private syncUnits(alpha: number, dt: number): void {
+    // Phase C.4: collect work-state beams for visible working workers, then
+    // reconcile the pool once after the loop.
+    const beamSpecs: BeamSpec[] = [];
     for (const u of this.sim.state.units) {
       let v = this.unitMeshes.get(u.id);
       if (!v) {
@@ -387,6 +422,14 @@ export class SimRenderer {
         // remove it from unitMeshes so the next syncUnits doesn't
         // re-tick it as if alive.
         if (!this.dyingUnits.has(u.id)) {
+          // Phase C.4: clear the at-rest/work-state cues so the corpse plays
+          // its death pulse as a dark, grounded silhouette rather than a
+          // lifted, glowing, charge-ringed worker frozen mid-state. dt=1
+          // forces a full ease step so the move glow snaps to rest (the
+          // dying pool never ticks setMoveGlow again).
+          v.chargeRing.set(false, 0, dt);
+          v.setMoveGlow(0, 1);
+          v.setIdleBob(0);
           v.triggerDeathPulse();
           this.dyingUnits.set(u.id, v);
           this.unitMeshes.delete(u.id);
@@ -402,18 +445,95 @@ export class SimRenderer {
       const lerpX = prev ? prev.x + (curX - prev.x) * alpha : curX;
       const lerpY = prev ? prev.y + (curY - prev.y) * alpha : curY;
       const w = tileFloatToWorld(lerpX, lerpY);
+      // Group sits on the floor so the selection ring + chrome stay pinned;
+      // the idle hover lifts only the body (below).
       v.group.position.set(w.x, 0, w.z);
+      // Phase C.4 worker idle hover — a slow positive lift so a standing
+      // worker reads alive without clipping the grid. Per-id phase offset
+      // desyncs the crowd. Rides on top of the position lerp, so it's
+      // harmless during movement (the distinct move cue lands separately).
+      v.setIdleBob(workerHover(this.lifeClock + phaseOffset(u.id, WORKER_HOVER_PERIOD_S)));
 
       const maxHp = UNIT_STATS[u.kind].maxHp;
       v.hpBar.update(toFloat(u.hp), toFloat(maxHp));
-      // Phase C.1: charge bar + energy cue. Bar tracks the worker's
-      // per-unit charge; cue ticks toward fade-out (trigger fires from
+      // Phase C.1/C.4: charge ring + (hidden) bar + energy cue. The ring is
+      // the readable charge indicator; the bar is kept hidden for the
+      // portrait + types. Cue ticks toward fade-out (trigger fires from
       // outside this method when the input controller blocks a cmd).
       if (u.kind === 'worker') {
+        const charging = isInChargeMode(u);
+        v.chargeRing.set(charging, u.maxCharge > 0 ? u.charge / u.maxCharge : 0, dt);
         v.chargeBar.update(u.charge, u.maxCharge);
+        // Move cue — energise the body while the worker is in transit.
+        const moving = u.phase === 'movingToNode'
+          || u.phase === 'returning'
+          || u.phase === 'movingToBuildSite'
+          || u.phase === 'walkingToCharge';
+        v.setMoveGlow(moving ? 1 : 0, dt);
+        // Work-state beam — only for visible workers (no beams through fog).
+        if (visible) {
+          const beam = this.workBeamSpec(u, w.x, w.z);
+          if (beam !== null) beamSpecs.push(beam);
+        }
       }
       v.energyCue.tick(dt);
     }
+    this.workBeams.sync(beamSpecs, dt);
+  }
+
+  // Phase C.4: build the work-state beam spec for a working worker, or null
+  // when it's not in a beam-worthy phase (or its target has gone). Endpoints
+  // are Three.js world XZ; colour reads the work-state. The target tile is
+  // vision-gated (isPositionExplored) so a visible enemy worker can't draw a
+  // beam into the fog and reveal an undiscovered node / pod / HQ.
+  private workBeamSpec(u: Worker, fromX: number, fromZ: number): BeamSpec | null {
+    switch (u.phase) {
+      case 'harvesting': {
+        const n = this.findAliveNode(u.targetNodeId);
+        if (n === null || !this.isPositionExplored(n.x, n.y)) return null;
+        const w = tileFloatToWorld(toFloat(n.x), toFloat(n.y));
+        return { key: u.id, fromX, fromZ, toX: w.x, toZ: w.z, color: HARVEST_BEAM_COLOR };
+      }
+      case 'building': {
+        const s = this.findAliveStructure(u.targetStructureId);
+        if (s === null || !this.isPositionExplored(s.x, s.y)) return null;
+        const w = tileFloatToWorld(toFloat(s.x), toFloat(s.y));
+        return { key: u.id, fromX, fromZ, toX: w.x, toZ: w.z, color: FACTION_BEAM_COLOR[u.faction] };
+      }
+      case 'charging': {
+        const spot = this.chargeSpotWorld(u);
+        if (spot === null) return null;
+        return { key: u.id, fromX, fromZ, toX: spot.x, toZ: spot.z, color: CHARGE_BEAM_COLOR };
+      }
+      default:
+        return null;
+    }
+  }
+
+  private findAliveNode(id: number): { x: Fixed; y: Fixed } | null {
+    if (id === 0) return null;
+    for (const n of this.sim.state.nodes) if (n.id === id && n.alive) return n;
+    return null;
+  }
+
+  private findAliveStructure(id: number): { x: Fixed; y: Fixed } | null {
+    if (id === 0) return null;
+    for (const s of this.sim.state.structures) if (s.id === id && s.alive) return s;
+    return null;
+  }
+
+  // The charge spot a worker is plugged into: a pod structure, or the faction
+  // HQ when chargeTargetStructureId is 0 (HQs aren't in the structures array).
+  // Vision-gated like the other beam targets — null when the spot is fogged.
+  private chargeSpotWorld(u: Worker): { x: number; z: number } | null {
+    if (u.chargeTargetStructureId !== 0) {
+      const s = this.findAliveStructure(u.chargeTargetStructureId);
+      if (s === null || !this.isPositionExplored(s.x, s.y)) return null;
+      return tileFloatToWorld(toFloat(s.x), toFloat(s.y));
+    }
+    const fs = this.sim.state.factions[u.faction];
+    if (!this.isPositionExplored(fs.hqX, fs.hqY)) return null;
+    return tileFloatToWorld(toFloat(fs.hqX), toFloat(fs.hqY));
   }
 
   // Phase 3.9.6: advance the death-pulse animation on units that died
@@ -430,6 +550,7 @@ export class SimRenderer {
   }
 
   dispose(): void {
+    this.workBeams.dispose();
     removeHoverHalos(this.hoverHalos);
     this.hoverGroup = null;
     for (const v of this.unitMeshes.values()) this.entitiesGroup.remove(v.group);
