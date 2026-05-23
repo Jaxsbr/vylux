@@ -334,9 +334,12 @@ export class InputController {
     // worker still clickable when it stands clear of other entities.
     const pick = this.pickAtPriority(e);
     if (pick !== null) {
-      // Phase C.3: any entity pick is a selection — fire the cue once
-      // here rather than in each case arm below.
-      this.opts.feedback?.onSelect?.();
+      // Phase C.3: fire the select cue once here rather than in each case
+      // arm — but suppress it for a shift+click that *removes* an
+      // already-selected unit, since a deselection shouldn't play the
+      // "selected" ping.
+      const deselect = pick.kind === 'unit' && e.shiftKey && this.selectedUnitIds.has(pick.id);
+      if (!deselect) this.opts.feedback?.onSelect?.();
       switch (pick.kind) {
         case 'hq':
           this.selectedUnitIds.clear();

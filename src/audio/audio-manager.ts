@@ -88,6 +88,13 @@ export class AudioManager {
       this.context = ctx;
       this.master = master;
       this.noiseBuffer = buildNoiseBuffer(ctx);
+      // If the context starts suspended (created outside a gesture) and
+      // resumes later, flush any pending ambient bed the instant it goes
+      // live — so the bed starts on its own rather than waiting for some
+      // later cue's ensureContext() to happen to observe 'running'.
+      ctx.addEventListener('statechange', () => {
+        if (ctx.state === 'running') this.flushPendingBed();
+      });
       this.flushPendingBed();
       return ctx;
     } catch {

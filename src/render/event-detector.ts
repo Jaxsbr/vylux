@@ -69,7 +69,6 @@ export class GameEventDetector {
     let trainFired = false;
     let buildFired = false;
     let attackFired = false;
-    let alertFired = false;
     let chargeStartFired = false;
     let chargeCompleteFired = false;
 
@@ -116,9 +115,10 @@ export class GameEventDetector {
       }
     }
 
-    // Alert — friendly HQ HP decreased.
+    // Alert — friendly HQ HP decreased. (Single scalar check, so no
+    // per-tick throttle flag is needed.)
     const hqHp = toFloat(state.factions[this.playerFaction].hqHp);
-    if (hqHp < this.prevHqHp && !alertFired) {
+    if (hqHp < this.prevHqHp) {
       this.audio.alertHqHit();
     }
 
