@@ -40,7 +40,8 @@ Every worker carries an internal `charge` meter (default max **10**, drains **1*
 - **Charge ring** — a gold radial arc at a charging worker's base that fills with the charge fraction. Replaces the old tiny charge bar as the at-a-glance read; the precise value still shows in the selection portrait.
 - **Work-state beams** — a glowing floor conduit from a working worker to its target: green to the node it's harvesting, gold to the pod/HQ it's charging at, faction-tinted to the structure it's building.
 - **Idle hover** — a standing worker bobs gently so it reads as alive; a moving worker's body energises (inner glow) so transit looks different from rest.
-- **Building life** — the HQ accent cap and operational work-pod caps breathe (slow emissive swell) at rest.
+- **Building life** — the HQ pulses (bright accent cap dims + brightens, body tiers breathe) and operational work-pod caps pulse, so the base reads alive even before any worker is trained.
+- **Node life** — energy nodes slowly spin their core and breathe their emissive, so a resource reads as a live source at rest.
 - **Research-complete ripple** — a gold pulse on every owned worker + operational pod the instant an upgrade lands (pairs with the research-complete chime).
 - **Floating lightning icon** on a worker when the player tries to command it during charge mode. ~1 s fade.
 

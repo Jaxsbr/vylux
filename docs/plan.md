@@ -301,7 +301,9 @@ untouched**, determinism safe.
 floor); moving workers energise their body glow so transit reads differently
 from rest; charge ring (gold radial fill, replaces the tiny charge bar);
 work-state beams (green→node harvesting, gold→pod/HQ charging, faction→structure
-building); HQ + operational-pod cap breathe at rest; research-complete ripple on
+building); HQ life (accent-cap pulse + body-tier breathe), operational-pod cap
+pulse, and energy-node life (slow core spin + emissive breathe) so the arena
+reads alive at rest *before* any worker exists; research-complete ripple on
 every owned worker + pod. The grid-line pulse stayed **deferred** (see below) —
 the arena now reads alive through its entities, so it wasn't needed. `tsc` +
 unit (incl. new `entity-life.test.ts`) + e2e smoke (with a dropped-steps perf
