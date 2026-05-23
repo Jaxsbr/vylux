@@ -26,12 +26,19 @@ export const WORKER_HOVER_PERIOD_S = 2.4;
 export const WORKER_HOVER_BASE = 0.032;
 export const WORKER_HOVER_AMPLITUDE = 0.03;
 
-// Building breathe: a slow emissive swell layered on the bright accent cap so
-// structures glow like they're idling, not powered down. Additive and always
-// ≥ 0, so the building's built-look intensity is the floor — the swell only
-// ever brightens, never dims the building below its resting glow.
+// Building breathe: a slow emissive swell. Additive and always ≥ 0 — the swell
+// only brightens, never dims below the resting glow. Used for the dark body
+// tiers so they glow up gently from their near-black resting silhouette.
 export const BUILDING_BREATHE_PERIOD_S = 3.2;
 export const BUILDING_BREATHE_DELTA = 0.6;
+
+// Building/node pulse: a *symmetric* emissive swing (dims AND brightens) around
+// a resting base, with enough amplitude to read at a glance. Used for the
+// bright accent caps + node cores — a brighten-only swell on an already-bright,
+// near-bloom-saturated cap reads as nothing, so the cap needs to visibly dim
+// too. Default period is a touch quicker than the body breathe so the bright
+// element feels like the "pulse" and the body the slower "breath".
+export const BUILDING_PULSE_PERIOD_S = 2.8;
 
 // --- curves ----------------------------------------------------------------
 
@@ -65,4 +72,53 @@ export function breathe(
   period = BUILDING_BREATHE_PERIOD_S,
 ): number {
   return (0.5 - 0.5 * Math.cos((clockS / period) * TAU)) * delta;
+}
+
+// Symmetric emissive pulse in [-amplitude, +amplitude]. Add it to a resting
+// base for a bright element that should visibly dim and brighten (clamp ≥ 0 at
+// the call site if base - amplitude could go negative).
+export function pulse(
+  clockS: number,
+  amplitude: number,
+  period = BUILDING_PULSE_PERIOD_S,
+): number {
+  return Math.sin((clockS / period) * TAU) * amplitude;
+}
+
+// --- luminance-equalised emissive (faction-consistent bloom) ----------------
+//
+// The faction accent/charge caps share one emissiveIntensity range but
+// different emissive *colours* — cyan is luminous, red-orange is much darker.
+// Pulsing the *intensity* identically makes the red cap dip below the bloom
+// luminance knee (it flickers on/off there) while the cyan cap, which never
+// crosses the knee, modulates smoothly. The fix is to pulse in *luminance*
+// space — pick a target luminance curve that stays above the knee, then drive
+// each cap's intensity to hit it via `intensityForLuma`. Both factions then
+// render the same bloom pulse regardless of colour.
+
+// One sRGB channel (0..1) → linear. Three.js converts material colours to
+// linear before the shader, and the bloom pass reads that linear buffer.
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+// Rendered luminance of an emissive `hex` at intensity 1. Computed in LINEAR
+// space (the scene buffer the bloom high-pass reads — tone mapping + sRGB are
+// applied later, in OutputPass, after bloom) with the Rec. 601 weights
+// UnrealBloomPass uses. Working in sRGB here badly under-rates dark colours
+// like the red-orange faction (whose low green/blue channels collapse under
+// sRGB→linear), which is exactly what made the red cap dip onto the bloom knee.
+export function colorLuma(hex: number): number {
+  const r = srgbToLinear(((hex >> 16) & 0xff) / 255);
+  const g = srgbToLinear(((hex >> 8) & 0xff) / 255);
+  const b = srgbToLinear((hex & 0xff) / 255);
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+// The emissiveIntensity needed to render an emissive of colour `hex` at
+// `targetLuma` rendered luminance. Dividing the shared luminance curve by each
+// faction colour's luma equalises their bloom pulse.
+export function intensityForLuma(hex: number, targetLuma: number): number {
+  const luma = colorLuma(hex);
+  return luma > 0 ? targetLuma / luma : 0;
 }

@@ -148,7 +148,7 @@ export class SimRenderer {
     this.collectVisionSources();
     this.exploration?.update();
     this.syncHqs(dt);
-    this.syncNodes();
+    this.syncNodes(dt);
     this.syncStructures(dt);
     this.syncUnits(alpha, dt);
     this.tickDyingUnits(dt);
@@ -313,7 +313,7 @@ export class SimRenderer {
 
   private readonly hqMaxHpSeen: [number, number] = [0.0001, 0.0001];
 
-  private syncNodes(): void {
+  private syncNodes(dt: number): void {
     for (const n of this.sim.state.nodes) {
       let v = this.nodeMeshes.get(n.id);
       if (!v && n.alive) {
@@ -347,6 +347,9 @@ export class SimRenderer {
             : seen;
           this.nodeMaxSeen.set(n.id, max);
           v.setRemaining(toFloat(n.remaining), Math.max(max, 0.0001));
+          // Phase C.4 node life — spin + breathe. After setRemaining so the
+          // breathe rides on top of the remaining-driven base intensity.
+          v.tickLife(dt);
         }
       }
     }

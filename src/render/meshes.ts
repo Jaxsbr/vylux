@@ -15,7 +15,7 @@ import type { FactionId } from './legacy/placement';
 import { GRID_CONSTANTS, tileToWorld } from './legacy/grid';
 import { buildGlowEdges } from './glow-edge';
 import { buildSelectionRing, buildChargeRing, type ChargeRing } from './entity-chrome';
-import { breathe, BUILDING_BREATHE_PERIOD_S } from './entity-life';
+import { breathe, pulse, intensityForLuma, BUILDING_PULSE_PERIOD_S } from './entity-life';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
@@ -132,38 +132,59 @@ export interface NodeVisual {
   // the sprite label updates its text + fades when the node is nearly
   // empty. Pure presentation — sim hash is unaffected.
   setRemaining(value: number, max: number): void;
+  // Phase C.4 node life: slowly spin the core + breathe its emissive so an
+  // energy node reads as a live source even before any worker shows up. Call
+  // after setRemaining each frame (the breathe rides on top of the remaining-
+  // driven base intensity).
+  tickLife(dt: number): void;
 }
 
 export function buildHqMesh(faction: Faction, tileX: number, tileY: number): HqVisual {
   const b = legacyBuildHQ(factionToId(faction), tileX, tileY);
   b.group.scale.set(HQ_SCALE, HQ_SCALE, HQ_SCALE);
-  // Phase C.4 building life: grab the bright accent-cap material once so we
-  // can swell its emissive at rest. Seed the breathe clock with a random
-  // phase so the two HQs (and pods, below) don't pulse in lockstep.
-  let accentMat: THREE.MeshStandardMaterial | null = null;
+  // Phase C.4 building life: make the HQ visibly alive at rest. Collect the
+  // bright accent-cap material (symmetric pulse — dims + brightens) and the
+  // dark body-tier materials (gentle brighten-only breathe), so both the cap
+  // and the whole silhouette read as breathing. Seed a random phase so the
+  // two HQs don't pulse in lockstep.
+  const cap: { mat: THREE.MeshStandardMaterial; hex: number }[] = [];
+  const body: { mat: THREE.MeshStandardMaterial; base: number }[] = [];
   b.group.traverse((o) => {
-    if (o.name === 'hq-accent-cap' && o instanceof THREE.Mesh) {
-      accentMat = o.material as THREE.MeshStandardMaterial;
-    }
+    if (!(o instanceof THREE.Mesh) || !(o.material instanceof THREE.MeshStandardMaterial)) return;
+    if (o.name === 'hq-accent-cap') cap.push({ mat: o.material, hex: o.material.emissive.getHex() });
+    else if (o.name === 'hq-tier') body.push({ mat: o.material, base: o.material.emissiveIntensity });
   });
-  const accentBase = accentMat !== null ? (accentMat as THREE.MeshStandardMaterial).emissiveIntensity : 0;
-  let lifeClock = Math.random() * BUILDING_BREATHE_PERIOD_S;
+  let lifeClock = Math.random() * BUILDING_PULSE_PERIOD_S;
   return {
     group: b.group,
     hpBar: b.hpBar,
     selectionRing: b.selectionRing,
     tickLife(dt: number): void {
-      if (accentMat === null) return;
       lifeClock += dt;
-      // Absolute-assign on top of the static accent base. NOTE: the legacy
-      // HQ damage pulse (hq.ts) writes this same material; it isn't wired
-      // through HqVisual today, but when combat returns (Phase D) this
-      // breathe and that pulse must compose (or one gate the other) rather
-      // than clobber per frame.
-      accentMat.emissiveIntensity = accentBase + breathe(lifeClock);
+      // Cap: pulse in *luminance* space, then convert to per-colour intensity.
+      // The luminance curve stays above the bloom knee, so the cap never
+      // flickers on/off — cyan and red-orange render the same smooth pulse.
+      // NOTE: the legacy HQ damage pulse (hq.ts) writes this same material;
+      // it isn't wired through HqVisual today, but when combat returns
+      // (Phase D) this pulse and that flash must compose, not clobber.
+      const lumaT = CAP_LUMA_MID + pulse(lifeClock, CAP_LUMA_AMP);
+      for (const c of cap) c.mat.emissiveIntensity = intensityForLuma(c.hex, lumaT);
+      // Body tiers: gentle glow-up from the dark silhouette and back, at the
+      // slower BUILDING_BREATHE_PERIOD_S (breathe's default) so the body
+      // "breath" layers against the quicker cap "pulse" instead of locking to it.
+      for (const tier of body) tier.mat.emissiveIntensity = tier.base + breathe(lifeClock, HQ_BODY_BREATHE_AMP);
     },
   };
 }
+
+// Phase C.4 building life. Caps (HQ accent + pod charge bay) pulse in
+// luminance space, shared across factions: mid ± amp rendered luminance, where
+// the trough (mid - amp) stays clearly above the scene.ts bloom threshold
+// (0.5) so neither colour ever flickers across the bloom knee. The body tiers
+// only glow up a touch so the dark-silhouette idiom survives.
+const CAP_LUMA_MID = 1.35;
+const CAP_LUMA_AMP = 0.6; // trough luma 0.75 — well clear of the 0.5 knee
+const HQ_BODY_BREATHE_AMP = 0.3;
 
 export function buildUnitMesh(
   kind: UnitKind,
@@ -453,7 +474,11 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
   group.position.set(world.x, world.y, world.z);
   group.scale.set(WORK_POD_SCALE, WORK_POD_SCALE, WORK_POD_SCALE);
 
-  let lifeClock = Math.random() * BUILDING_BREATHE_PERIOD_S;
+  let lifeClock = Math.random() * BUILDING_PULSE_PERIOD_S;
+  // Cap emissive hex for the luminance-space pulse (same treatment as the HQ
+  // accent cap), so the red-orange pod cap pulses smoothly instead of
+  // flickering across the bloom knee.
+  const capHex = capMat.emissive.getHex();
 
   return {
     group,
@@ -476,9 +501,12 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
     },
     tickLife(dt: number, operational: boolean): void {
       lifeClock += dt;
-      // Additive on top of the resting intensity setBuildProgress just set
-      // (it runs first each frame), so there's no drift to correct for.
-      if (operational) capMat.emissiveIntensity += breathe(lifeClock);
+      // Luminance-space pulse (same as the HQ cap) — overrides the resting
+      // intensity setBuildProgress set this frame. Stays above the bloom knee
+      // for either faction colour, so the cap pulses smoothly, not on/off.
+      if (operational) {
+        capMat.emissiveIntensity = intensityForLuma(capHex, CAP_LUMA_MID + pulse(lifeClock, CAP_LUMA_AMP));
+      }
     },
   };
 }
@@ -498,6 +526,12 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
 const NODE_PALETTE: Record<ResourceKind, number> = {
   energy: 0xffd166, // gold
 };
+
+// Phase C.4 node life. A slow core spin (rad/s) reads as "live energy" at a
+// glance; a gentle emissive breathe rides on top of the remaining-driven base.
+const NODE_SPIN_SPEED = 0.6;
+const NODE_BREATHE_AMP = 0.3;
+const NODE_PULSE_PERIOD_S = 2.6;
 
 export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind = 'energy'): NodeVisual {
   const b = legacyBuildEnergyNode(tileX, tileY);
@@ -526,6 +560,17 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
   const selectionRing = buildSelectionRing(null, 'node', { emissive: colour });
   b.group.add(selectionRing);
 
+  // Phase C.4: collect the silhouette body materials so node life can breathe
+  // their emissive on top of the remaining-driven base. Seed a random phase so
+  // a field of nodes doesn't pulse in lockstep.
+  const silhouetteMats: THREE.MeshStandardMaterial[] = [];
+  silhouette.traverse((c) => {
+    if (c instanceof THREE.Mesh && c.material instanceof THREE.MeshStandardMaterial) {
+      silhouetteMats.push(c.material);
+    }
+  });
+  let lifeClock = Math.random() * NODE_PULSE_PERIOD_S;
+
   return {
     group: b.group,
     selectionRing,
@@ -542,6 +587,15 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
           if (m.emissive) m.emissiveIntensity = intensity;
         }
       });
+    },
+    tickLife(dt: number): void {
+      lifeClock += dt;
+      // Slow spin of the energy core — the strongest "this is live" read.
+      silhouette.rotation.y += dt * NODE_SPIN_SPEED;
+      // Gentle emissive breathe on top of the remaining-driven base (set by
+      // setRemaining, which runs first each frame).
+      const add = breathe(lifeClock, NODE_BREATHE_AMP, NODE_PULSE_PERIOD_S);
+      for (const m of silhouetteMats) m.emissiveIntensity += add;
     },
   };
 }
