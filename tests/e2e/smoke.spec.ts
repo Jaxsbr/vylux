@@ -36,6 +36,17 @@ test('AI-vs-AI match runs, ticks advance, units appear', async ({ page }) => {
   const units = parseInt(unitsMatch![1], 10);
   expect(units).toBeGreaterThan(0);
 
+  // Phase C.4 perf budget: the at-rest life + work-state VFX must not push
+  // the sim past its per-frame step cap. droppedSteps only accrues when a
+  // frame can't keep up (MAX_STEPS_PER_FRAME exceeded), so a renderer perf
+  // regression would inflate it steadily over the run. A healthy run is ~0;
+  // the threshold tolerates a startup catch-up hitch without masking a real
+  // regression.
+  const droppedMatch = hudText!.match(/dropped (\d+)/);
+  expect(droppedMatch).not.toBeNull();
+  const dropped = parseInt(droppedMatch![1], 10);
+  expect(dropped).toBeLessThan(40);
+
   expect(consoleErrors).toEqual([]);
 
   await page.screenshot({ path: 'test-results/smoke.png', fullPage: false });

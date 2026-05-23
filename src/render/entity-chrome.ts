@@ -113,3 +113,86 @@ export function buildSelectionRing(
   ring.visible = false;
   return ring;
 }
+
+// Phase C.4 — charge ring. A gold radial arc that fills with the charge
+// fraction while a worker is in charge mode; the readable replacement for the
+// old "tiny invisible" charge bar. Lives here (not in meshes.ts) because the
+// chrome-drift guard keeps all RingGeometry construction in this module — and
+// a charge ring is per-entity chrome, even though it's a progress indicator
+// rather than a selection ring.
+const CHARGE_RING_COLOR = 0xffd166; // energy gold — matches the node + charge cue
+const CHARGE_RING_INNER = 0.30;
+const CHARGE_RING_OUTER = 0.40;
+const CHARGE_RING_BUCKETS = 24; // arc resolution
+
+export interface ChargeRing {
+  group: THREE.Group;
+  // active = worker is in charge mode; fraction = charge / maxCharge.
+  set(active: boolean, fraction: number, dt: number): void;
+}
+
+export function buildChargeRing(): ChargeRing {
+  const group = new THREE.Group();
+  group.name = 'charge-ring';
+  group.visible = false;
+  group.position.y = 0.05; // just above the floor
+
+  // Dim full backing ring so the "remaining" portion still reads as a ring.
+  const backGeo = new THREE.RingGeometry(CHARGE_RING_INNER, CHARGE_RING_OUTER, 28);
+  const backMat = new THREE.MeshBasicMaterial({
+    color: CHARGE_RING_COLOR,
+    transparent: true,
+    opacity: 0.12,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const back = new THREE.Mesh(backGeo, backMat);
+  back.rotation.x = -Math.PI / 2;
+  back.renderOrder = 5;
+
+  const fillMat = new THREE.MeshBasicMaterial({
+    color: CHARGE_RING_COLOR,
+    transparent: true,
+    opacity: 0.9,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  // thetaStart at the top; negative thetaLength grows the arc clockwise. The
+  // arc geometry is regenerated only when the charge bucket changes (charge is
+  // integer, maxCharge ~10, so ~10 cheap regens per full recharge).
+  const makeArcGeo = (bucket: number): THREE.RingGeometry => {
+    const frac = bucket / CHARGE_RING_BUCKETS;
+    const segs = Math.max(2, bucket);
+    return new THREE.RingGeometry(CHARGE_RING_INNER, CHARGE_RING_OUTER, segs, 1, Math.PI / 2, -frac * Math.PI * 2);
+  };
+  const fill = new THREE.Mesh(makeArcGeo(0), fillMat);
+  fill.rotation.x = -Math.PI / 2;
+  fill.position.y = 0.002; // avoid z-fight with the backing ring
+  fill.renderOrder = 6;
+
+  group.add(back, fill);
+
+  let lastBucket = -1;
+  let pulse = 0;
+
+  return {
+    group,
+    set(active: boolean, fraction: number, dt: number): void {
+      group.visible = active;
+      if (!active) {
+        lastBucket = -1;
+        return;
+      }
+      const clamped = fraction < 0 ? 0 : fraction > 1 ? 1 : fraction;
+      const bucket = Math.round(clamped * CHARGE_RING_BUCKETS);
+      if (bucket !== lastBucket) {
+        lastBucket = bucket;
+        fill.geometry.dispose();
+        fill.geometry = makeArcGeo(bucket);
+      }
+      pulse += dt;
+      // Gentle brightness pulse so the ring reads as actively charging.
+      fillMat.opacity = 0.65 + 0.25 * Math.sin(pulse * 4);
+    },
+  };
+}

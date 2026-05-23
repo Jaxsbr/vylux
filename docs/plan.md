@@ -1,6 +1,6 @@
 # Vylux — Plan
 
-> **Last updated:** 2026-05-23 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8.
+> **Last updated:** 2026-05-23 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands.
 > **Visual north star:** [`concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`](concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png) — dense glowing Tron city, cyan/red grid lines pulsing through the world, lit vertical structures, purposeful silhouettes.
 > **Mindset:** the game must be fun. A good game loop matters more than feature count. Strip down to the minimum that's already fun, polish until it sings, *then* layer more on.
 
@@ -130,8 +130,8 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | --- | --------------------------------------- | ------------- | -------------------- |
 | C.1 | Work pods + worker charge + auto-resume | —             | ✅ landed 2026-05-12 |
 | C.2 | HUD overhaul — SC2 command-card model   | CLARITY, OPEN | ✅ landed             |
-| C.3 | Game-feel: audio (synth ambient + SFX)  | FEEL          | —                    |
-| C.4 | Game-feel: motion & world life          | FEEL          | —                    |
+| C.3 | Game-feel: audio (synth ambient + SFX)  | FEEL          | ✅ landed             |
+| C.4 | Game-feel: motion & world life          | FEEL          | ✅ landed (entity-driven; grid pulse deferred) |
 | C.5 | Worker silhouette redesign              | FEEL, CLARITY | —                    |
 | C.6 | Onboarding & tutorial sandbox           | ONBOARD       | —                    |
 | C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
@@ -290,11 +290,22 @@ Out of scope: real music / sampled SFX (deferred by decision — synth only).
 **Exit:** every player action fires a distinct cue; an ambient bed plays from
 match start; mute silences all of it; verify gate green.
 
-#### Phase C.4 — Game-feel: motion & world life · [FEEL]
+#### Phase C.4 — Game-feel: motion & world life · [FEEL] ✅ landed 2026-05-23
 
 Make entities and the arena feel alive, and make every work-state visible.
-Renderer-only (`feedback.ts`, `sim-renderer.ts`, `meshes.ts`) — **sim untouched**,
-determinism safe.
+Renderer-only (`feedback.ts`, `sim-renderer.ts`, `meshes.ts`, plus new
+`entity-life.ts` + `work-beam.ts`, charge ring in `entity-chrome.ts`) — **sim
+untouched**, determinism safe.
+
+**Landed (entity-driven life):** worker idle hover (body-only, never clips the
+floor); moving workers energise their body glow so transit reads differently
+from rest; charge ring (gold radial fill, replaces the tiny charge bar);
+work-state beams (green→node harvesting, gold→pod/HQ charging, faction→structure
+building); HQ + operational-pod cap breathe at rest; research-complete ripple on
+every owned worker + pod. The grid-line pulse stayed **deferred** (see below) —
+the arena now reads alive through its entities, so it wasn't needed. `tsc` +
+unit (incl. new `entity-life.test.ts`) + e2e smoke (with a dropped-steps perf
+guard) all green.
 
 Deliverables:
 - **Worker idle:** a subtle bob / internal pulse so a standing worker reads alive.
@@ -307,18 +318,26 @@ Deliverables:
   from C.2.
 - **Research-complete VFX:** a pulse on the pod and on every affected worker the
   instant the upgrade lands (pairs with C.3's `researchComplete` chime).
-- **World life:** ambient pulse along grid lines toward each HQ + the lit-backdrop
-  tiles from the Phase B plan, so the arena isn't static at rest. (Finishes the
-  at-rest liveliness the Phase B vibe pass began.)
+- **Building life:** give the HQ and worker pods their own subtle idle animation /
+  internal pulse — the same "alive at rest" treatment as the worker idle bob. The
+  arena should feel alive through its *entities*, not a moving backdrop.
 - Keep / upgrade the floating-lightning reject cue when a charge-locked worker is
   commanded.
 - Tests: e2e smoke that the scene renders with no perf regression (respect the
   `MAX_STEPS_PER_FRAME` budget); `tsc` / unit green.
 
+**Deferred within C.4 — grid-line pulse (revisit only if needed):** the Phase B
+"world life" idea of an ambient pulse along the grid lines toward each HQ + the
+lit-backdrop tiles. Risk: the whole grid in motion may be more visually
+distracting than alive. So do this *last* — land everything above first, then
+play it and judge whether the arena already feels alive through its entities.
+Only if it still reads static at rest do we attempt the grid-line pulse.
+
 Out of scope: any new sim state; combat VFX.
 
 **Exit:** a standing / moving / harvesting / charging / just-upgraded worker each
-look visibly different; the world has motion at rest; verify gate green.
+look visibly different; the HQ / pods / workers give the arena life at rest (no
+static scene) — entity-driven, grid pulse only if still needed; verify gate green.
 
 #### Phase C.5 — Worker silhouette redesign · [FEEL, CLARITY]
 

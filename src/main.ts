@@ -360,7 +360,22 @@ async function bootstrap(): Promise<void> {
   // cues fire from the first interaction.
   const eventDetector = isObserver
     ? null
-    : new GameEventDetector(match.sim, playerFaction, audio);
+    : new GameEventDetector(match.sim, playerFaction, audio, () => {
+        // Phase C.4: research-complete VFX. Ripple every owned worker +
+        // operational pod the instant the upgrade lands.
+        if (feedback === null) return;
+        const st = match.sim.state;
+        for (const u of st.units) {
+          if (u.faction === playerFaction && u.alive) {
+            feedback.spawnResearchPulse(toFloat(u.x), toFloat(u.y));
+          }
+        }
+        for (const s of st.structures) {
+          if (s.faction === playerFaction && s.alive && s.kind === 'workPod' && s.buildTicksRemaining === 0) {
+            feedback.spawnResearchPulse(toFloat(s.x), toFloat(s.y));
+          }
+        }
+      });
 
   // Observer view: no input, no buildables panel. The DOWNLOAD REPLAY
   // path still works (an observer can save its own replay log too —

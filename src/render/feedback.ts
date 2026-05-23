@@ -30,10 +30,12 @@ const FACTION_COLOR: Record<Faction, number> = {
 
 const NEUTRAL_COLOR = 0xb6e8ff; // soft cyan-white for placement bursts
 const ASSIGN_COLOR = 0x66ff44;  // matches Flux node rim — reads as "harvest target"
+const RESEARCH_COLOR = 0xffe05a; // upgrade gold — matches the energy/lightning palette
 
 const MOVE_PING_LIFETIME_MS = 600;
 const ASSIGN_PULSE_LIFETIME_MS = 500;
 const PLACEMENT_BURST_LIFETIME_MS = 350;
+const RESEARCH_PULSE_LIFETIME_MS = 650;
 
 // All click-feedback cues sit above the fog overlay (y=0.05,
 // renderOrder=1) so the cue is never obscured by fog, even if the
@@ -113,6 +115,22 @@ export class FeedbackOverlay {
       outerRadius: 0.6,
       startScale: 1.4,
       endScale: 0.9,
+    });
+  }
+
+  // Phase C.4: fired on each owned pod + worker the instant a research
+  // upgrade lands (pairs with C.3's researchComplete chime). A wide gold
+  // ripple that blooms outward — reads as "this entity just got upgraded."
+  spawnResearchPulse(tileX: number, tileY: number): void {
+    this.spawnRing({
+      tileX,
+      tileY,
+      color: RESEARCH_COLOR,
+      lifetimeMs: RESEARCH_PULSE_LIFETIME_MS,
+      innerRadius: 0.22,
+      outerRadius: 0.34,
+      startScale: 0.4,
+      endScale: 2.1,
     });
   }
 

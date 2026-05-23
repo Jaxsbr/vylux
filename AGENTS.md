@@ -97,8 +97,10 @@ Same gate the CI determinism workflow runs (`.github/workflows/determinism.yml`)
 | `selection-portrait.ts` | The **portrait panel** (bottom-left): a 3D mesh snapshot (`PortraitRenderer`) + name + action-state icon + HP / charge bars (workers) or HP + build status (pods). |
 | `hud-icons.ts`    | Tron-neon SVG glyph set (`hudIconSvg`, `workerPhaseIcon`) for the command card + worker action states. |
 | `minimap.ts`      | Bottom-right minimap. Blips are drawn only when the entity's mesh is `.visible`, so it mirrors the fog without re-deriving vision; camera-focus marker; click-to-pan via `CameraController.centerOn`. |
-| `feedback.ts`     | `FeedbackOverlay` — renderer-only floating cues (move-X, assign pulse, placement burst). Sim-untouched; the extension point for Phase C.4 visual juice. |
-| `event-detector.ts` | `GameEventDetector` — renderer-side watch that diffs `sim.state` between ticks and fires audio cues (e.g. the HQ-hit alert). Constructed with the `AudioManager`. This is where Phase C.3's charge / research-complete cue triggers land — keeps audio detection out of the sim. |
+| `feedback.ts`     | `FeedbackOverlay` — renderer-only floating cues (move-X, assign pulse, placement burst, Phase C.4 research-complete ripple). Sim-untouched; the home for transient click/event juice. |
+| `event-detector.ts` | `GameEventDetector` — renderer-side watch that diffs `sim.state` between ticks and fires audio cues (e.g. the HQ-hit alert). Constructed with the `AudioManager` + an optional `onResearchComplete` VFX hook (C.4). This is where Phase C.3's charge / research-complete cue triggers land — keeps audio detection out of the sim. |
+| `entity-life.ts`  | Phase C.4 pure animation curves (no Three.js): `workerHover` (positive-only idle hover, never clips the floor), `breathe` (additive building emissive swell), `phaseOffset` (golden-ratio per-id desync). Unit-tested like `event-pulse.ts`; `SimRenderer` owns the clock + applies them. |
+| `work-beam.ts`    | Phase C.4 `WorkBeams` — pooled glowing floor conduits from a working worker to its target (green→node harvesting, gold→pod/HQ charging, faction→structure building). Reconciled each frame from specs `SimRenderer` collects in `syncUnits`. Renderer-only. |
 
 ### `src/audio/` — synthesised cue layer (no assets)
 

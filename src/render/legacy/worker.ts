@@ -140,6 +140,9 @@ type DiamondMeshResult = {
 
 function buildDiamondMesh(emissiveHex: number): DiamondMeshResult {
   const group = new THREE.Group();
+  // Named so the Phase C.4 idle hover can grab + bob just the body, leaving
+  // the selection ring + chrome on the floor.
+  group.name = 'worker-body';
 
   // Upper half — top cone, wide base pointing down.
   const upperGeo = new THREE.CylinderGeometry(

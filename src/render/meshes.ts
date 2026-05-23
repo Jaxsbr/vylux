@@ -14,7 +14,8 @@ import { buildHpBar, type HpBar } from './legacy/hp-bar';
 import type { FactionId } from './legacy/placement';
 import { GRID_CONSTANTS, tileToWorld } from './legacy/grid';
 import { buildGlowEdges } from './glow-edge';
-import { buildSelectionRing } from './entity-chrome';
+import { buildSelectionRing, buildChargeRing, type ChargeRing } from './entity-chrome';
+import { breathe, BUILDING_BREATHE_PERIOD_S } from './entity-life';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
@@ -46,6 +47,10 @@ export interface HqVisual {
   group: THREE.Group;
   hpBar: HpBar;
   selectionRing: THREE.Mesh;
+  // Phase C.4 building life: gently breathe the accent cap's emissive each
+  // frame so an idle HQ glows like it's powered, not switched off. Driven by
+  // SimRenderer with wall-clock dt; renderer-only, determinism-safe.
+  tickLife(dt: number): void;
 }
 
 export interface UnitVisual {
@@ -57,6 +62,9 @@ export interface UnitVisual {
   // Purely functional: it conveys the per-unit charge meter the player
   // needs to read to make decisions about workers.
   chargeBar: ChargeBar;
+  // Phase C.4 — charge ring. The readable charge indicator that replaced the
+  // tiny charge bar. Driven by SimRenderer from the worker's charge mode.
+  chargeRing: ChargeRing;
   // Phase C.1 — "needs energy" lightning cue. Floats above the worker
   // for ~1 s when the renderer detects a blocked command. trigger()
   // resets the fade; tick() advances + auto-hides.
@@ -71,12 +79,27 @@ export interface UnitVisual {
   tickPlacementPulse(dt: number): void;
   tickDeathPulse(dt: number): boolean;
   readonly deathPulseActive: boolean;
+  // Phase C.4 idle hover — lift the worker *body* by `offsetY` world units
+  // (relative to its resting height). Applied to the body only, so the
+  // selection ring + chrome stay pinned to the floor. SimRenderer feeds the
+  // positive `workerHover` curve here each frame.
+  setIdleBob(offsetY: number): void;
+  // Phase C.4 move cue — "energy in motion": ramp the body's inner glow up
+  // while the worker is moving and ease it back to the dark resting
+  // silhouette when it stops. `target` is 0 (standing) or 1 (moving); the
+  // ramp is smoothed by dt so it eases rather than pops.
+  setMoveGlow(target: number, dt: number): void;
 }
 
 export interface ChargeBar {
   group: THREE.Group;
   update(value: number, max: number): void;
 }
+
+// Phase C.4 — the charge ring (a gold radial arc that fills with the charge
+// fraction) lives in entity-chrome.ts so all RingGeometry construction stays
+// in one place. Re-exported here for callers already importing from meshes.ts.
+export type { ChargeRing };
 
 export interface EnergyCue {
   group: THREE.Group;
@@ -90,6 +113,11 @@ export interface WorkPodVisual {
   selectionRing: THREE.Mesh;
   scaffoldingRing: THREE.Mesh;
   setBuildProgress(ratio: number): void;
+  // Phase C.4 building life: swell the charge-bay cap's emissive at rest so
+  // an operational pod reads alive. No-op while under construction (build
+  // progress owns the cap intensity then). Call after setBuildProgress each
+  // frame — the swell is added on top of the resting intensity.
+  tickLife(dt: number, operational: boolean): void;
 }
 
 export interface NodeVisual {
@@ -109,7 +137,27 @@ export interface NodeVisual {
 export function buildHqMesh(faction: Faction, tileX: number, tileY: number): HqVisual {
   const b = legacyBuildHQ(factionToId(faction), tileX, tileY);
   b.group.scale.set(HQ_SCALE, HQ_SCALE, HQ_SCALE);
-  return { group: b.group, hpBar: b.hpBar, selectionRing: b.selectionRing };
+  // Phase C.4 building life: grab the bright accent-cap material once so we
+  // can swell its emissive at rest. Seed the breathe clock with a random
+  // phase so the two HQs (and pods, below) don't pulse in lockstep.
+  let accentMat: THREE.MeshStandardMaterial | null = null;
+  b.group.traverse((o) => {
+    if (o.name === 'hq-accent-cap' && o instanceof THREE.Mesh) {
+      accentMat = o.material as THREE.MeshStandardMaterial;
+    }
+  });
+  const accentBase = accentMat !== null ? (accentMat as THREE.MeshStandardMaterial).emissiveIntensity : 0;
+  let lifeClock = Math.random() * BUILDING_BREATHE_PERIOD_S;
+  return {
+    group: b.group,
+    hpBar: b.hpBar,
+    selectionRing: b.selectionRing,
+    tickLife(dt: number): void {
+      if (accentMat === null) return;
+      lifeClock += dt;
+      accentMat.emissiveIntensity = accentBase + breathe(lifeClock);
+    },
+  };
 }
 
 export function buildUnitMesh(
@@ -131,11 +179,22 @@ export function buildUnitMesh(
       // the HP bar; energy cue floats higher and is hidden by default.
       const chargeBar = buildChargeBar();
       chargeBar.group.position.y = 0.42; // below the HP bar
+      // Phase C.4: the always-on tiny charge bar is replaced by the charge
+      // ring as the at-a-glance read — keep the object (portrait + tests may
+      // reference the type) but stop rendering it on the map.
+      chargeBar.group.visible = false;
       b.mesh.add(chargeBar.group);
       const energyCue = buildEnergyCue();
       energyCue.group.position.y = 0.7;
       b.mesh.add(energyCue.group);
-      return wrapUnitVisual(b, chargeBar, energyCue);
+      // Phase C.4: charge ring at the worker's base — the readable charge
+      // indicator, shown only while in charge mode.
+      const chargeRing = buildChargeRing();
+      b.mesh.add(chargeRing.group);
+      // Phase C.4: grab the body group so the idle hover can bob it without
+      // moving the floor-pinned selection ring.
+      const body = b.mesh.getObjectByName('worker-body') ?? null;
+      return wrapUnitVisual(b, chargeBar, chargeRing, energyCue, body);
     }
   }
 }
@@ -154,18 +213,53 @@ interface LegacyUnitMesh {
   readonly deathPulseActive: boolean;
 }
 
-function wrapUnitVisual(b: LegacyUnitMesh, chargeBar: ChargeBar, energyCue: EnergyCue): UnitVisual {
+// How much the moving worker's body emissive lifts above its resting (dark)
+// intensity at full speed. Subtle — an inner energising glow, not a washout.
+const MOVE_GLOW_DELTA = 0.7;
+// Ease rate for the move glow (per second). Higher = snappier ramp.
+const MOVE_GLOW_EASE = 6;
+
+function wrapUnitVisual(
+  b: LegacyUnitMesh,
+  chargeBar: ChargeBar,
+  chargeRing: ChargeRing,
+  energyCue: EnergyCue,
+  body: THREE.Object3D | null,
+): UnitVisual {
+  const bodyRestY = body !== null ? body.position.y : 0;
+  // Grab the shared body material (worker-upper + worker-lower use the same
+  // instance) so the move cue can ramp its emissive. Edges/fill are skipped.
+  let bodyMat: THREE.MeshStandardMaterial | null = null;
+  if (body !== null) {
+    body.traverse((o) => {
+      if (bodyMat === null && o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardMaterial) {
+        bodyMat = o.material;
+      }
+    });
+  }
+  const bodyGlowBase = bodyMat !== null ? (bodyMat as THREE.MeshStandardMaterial).emissiveIntensity : 0;
+  let glow = 0;
   return {
     group: b.mesh,
     hpBar: b.hpBar,
     selectionRing: b.selectionRing,
     chargeBar,
+    chargeRing,
     energyCue,
     triggerPlacementPulse: () => b.triggerPlacementPulse(),
     triggerDeathPulse: () => b.triggerDeathPulse(),
     tickPlacementPulse: (dt) => b.tickPlacementPulse(dt),
     tickDeathPulse: (dt) => b.tickDeathPulse(dt),
     get deathPulseActive() { return b.deathPulseActive; },
+    setIdleBob: (offsetY) => {
+      if (body !== null) body.position.y = bodyRestY + offsetY;
+    },
+    setMoveGlow: (target, dt) => {
+      if (bodyMat === null) return;
+      const k = Math.min(1, dt * MOVE_GLOW_EASE);
+      glow += (target - glow) * k;
+      bodyMat.emissiveIntensity = bodyGlowBase + glow * MOVE_GLOW_DELTA;
+    },
   };
 }
 
@@ -354,6 +448,8 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
   group.position.set(world.x, world.y, world.z);
   group.scale.set(WORK_POD_SCALE, WORK_POD_SCALE, WORK_POD_SCALE);
 
+  let lifeClock = Math.random() * BUILDING_BREATHE_PERIOD_S;
+
   return {
     group,
     hpBar,
@@ -372,6 +468,12 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
       bodyMat.transparent = clamped < 1;
       capMat.emissiveIntensity = 0.2 + 1.8 * clamped;
       scaffoldingRing.visible = clamped < 1;
+    },
+    tickLife(dt: number, operational: boolean): void {
+      lifeClock += dt;
+      // Additive on top of the resting intensity setBuildProgress just set
+      // (it runs first each frame), so there's no drift to correct for.
+      if (operational) capMat.emissiveIntensity += breathe(lifeClock);
     },
   };
 }
