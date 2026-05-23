@@ -79,7 +79,11 @@ export class ActionBar {
   private readonly hint: HTMLDivElement;
   private readonly queueStrip: HTMLDivElement;
   private readonly buttonContainer: HTMLDivElement;
-  private currentSpecKey = '';
+  // Separate skip-keys so the queue strip (advances every tick) doesn't
+  // force the command-card tiles to rebuild every frame during production.
+  private currentHint = '';
+  private currentTilesKey = '';
+  private currentQueueKey = '';
 
   constructor(faction: Faction, delegate: ActionBarDelegate, root: HTMLElement) {
     this.faction = faction;
@@ -141,19 +145,30 @@ export class ActionBar {
     selectedNodeId: number | null = null,
   ): void {
     const { hint, specs, queue } = this.computeView(sim, selectedUnitIds, selectedStructureId, selectedHqFaction, selectedNodeId);
-    // Refresh-skip key must include the label (the in-progress research
-    // tile counts seconds down each frame) and the queue head progress
-    // (the production bar advances each tick) — both change without the
-    // selection changing, so they need to defeat the short-circuit.
-    const queueKey = queue === null ? '' : `${queue.count}:${Math.round(queue.headFraction * 100)}`;
-    const key = hint + '|' + specs.map((s) =>
+
+    if (hint !== this.currentHint) {
+      this.currentHint = hint;
+      this.hint.textContent = hint;
+    }
+
+    // Tiles rebuild only when the action set changes. The label is in the
+    // key so the in-progress research tile's countdown still repaints;
+    // the queue progress is deliberately NOT here so a producing HQ
+    // doesn't churn the command-card buttons (+ flicker hover) each tick.
+    const tilesKey = specs.map((s) =>
       `${s.id}:${s.enabled ? '1' : '0'}:${s.disabledReason ?? ''}:${s.label}`
-    ).join('/') + '|q' + queueKey;
-    if (key === this.currentSpecKey) return;
-    this.currentSpecKey = key;
-    this.hint.textContent = hint;
-    this.renderQueue(queue);
-    this.renderTiles(specs);
+    ).join('/');
+    if (tilesKey !== this.currentTilesKey) {
+      this.currentTilesKey = tilesKey;
+      this.renderTiles(specs);
+    }
+
+    // Queue strip advances each tick the head progresses.
+    const queueKey = queue === null ? '' : `${queue.count}:${Math.round(queue.headFraction * 100)}`;
+    if (queueKey !== this.currentQueueKey) {
+      this.currentQueueKey = queueKey;
+      this.renderQueue(queue);
+    }
   }
 
   private computeView(
