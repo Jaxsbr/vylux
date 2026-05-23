@@ -28,19 +28,20 @@ test('clicking WORKER trains a worker (spawns at HQ)', async ({ page }) => {
   await page.waitForTimeout(50);
   await page.getByRole('button', { name: /worker/i }).click();
 
-  // 400ms = 8 sim ticks at 20 Hz. The TrainUnit command queues for the
-  // next tick and the worker spawns then.
-  await page.waitForTimeout(400);
+  // Phase C.2: training is timed (40 ticks ≈ 2 s) + queued. Energy is
+  // charged immediately at enqueue, but the worker doesn't spawn until the
+  // timer elapses — so wait out the train time before checking the count.
+  await page.waitForTimeout(2600);
 
   const afterText = await page.locator('div').filter({ hasText: /vylux ·/ }).textContent();
   const afterUnits = parseInt(afterText!.match(/units (\d+)/)![1], 10);
   const afterEnergy = parseInt(afterText!.match(/you  hp \d+ {2}e (\d+)/)![1], 10);
 
-  // Unit count grew (player worker + AI activity).
+  // Unit count grew once the queued worker popped (plus any AI activity).
   expect(afterUnits).toBeGreaterThan(beforeUnits);
-  // Player energy decreased — proves the train actually charged us.
-  // Worker costs 50; we may have gained back some from harvest deposits
-  // by tick 8, so allow a wide band but require we spent at least 30.
+  // Player energy dropped by the worker's train cost, charged at enqueue
+  // (Swarm worker = 40 E). The idle new worker earns nothing back, so the
+  // delta is the full cost; require at least 30 for slack.
   expect(beforeEnergy - afterEnergy).toBeGreaterThanOrEqual(30);
 
   expect(consoleErrors).toEqual([]);

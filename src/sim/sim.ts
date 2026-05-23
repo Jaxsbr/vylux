@@ -68,6 +68,16 @@ export class Sim {
       h.writeU32(fs.researchingKind === null ? 0 : 1);
       h.writeU32(fs.researchTicksRemaining);
       h.writeU32(fs.autoResumeResearched ? 1 : 0);
+      // Phase C.2: worker production queue. Head timer + length + each
+      // item's kind and reserved spawn tile (Fixed, hashed as i32).
+      h.writeU32(fs.trainTicksRemaining);
+      h.writeU32(fs.trainQueue.length);
+      for (let q = 0; q < fs.trainQueue.length; q++) {
+        const item = fs.trainQueue[q];
+        h.writeU32(unitKindToInt(item.kind));
+        h.writeI32(item.x);
+        h.writeI32(item.y);
+      }
     }
 
     // Units — array order is the sim's iteration order; tombstones

@@ -59,15 +59,17 @@ test('two-tab WebRTC lockstep handshake reaches matching hashes', async ({ conte
   expect(hudHost).toMatch(/peer connected/);
   expect(hudJoin).toMatch(/peer connected/);
 
-  // Both clients should be ticking; tolerance ≤ 6 ticks because
-  // WebRTC datachannel adds a small latency vs in-process
-  // BroadcastChannel and Phase 3.0's structure advancement adds a tiny
-  // amount of work per sim tick that widens cross-tab rAF jitter.
+  // Both clients should be ticking; tolerance ≤ 8 ticks because WebRTC
+  // datachannel adds a small latency vs in-process BroadcastChannel,
+  // Phase 3.0's structure advancement adds work per sim tick, and Phase
+  // C.2's per-tick production pass (worker train queue) adds a touch
+  // more — all widening cross-tab rAF jitter under a loaded run. Timing
+  // tolerance only; determinism is gated by the hash-match check below.
   const tickHost = parseInt(hudHost.match(/tick (\d+)/)![1], 10);
   const tickJoin = parseInt(hudJoin.match(/tick (\d+)/)![1], 10);
   expect(tickHost).toBeGreaterThan(20);
   expect(tickJoin).toBeGreaterThan(20);
-  expect(Math.abs(tickHost - tickJoin)).toBeLessThanOrEqual(6);
+  expect(Math.abs(tickHost - tickJoin)).toBeLessThanOrEqual(8);
 
   expect(hudHost).toMatch(/hash@\d+ match/);
   expect(hudJoin).toMatch(/hash@\d+ match/);

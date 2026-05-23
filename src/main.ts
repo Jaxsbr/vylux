@@ -52,6 +52,7 @@ import { ActionBar } from './render/action-bar';
 import { SelectionPortrait } from './render/selection-portrait';
 import { InputController } from './render/input-controller';
 import { CameraController } from './render/camera-controller';
+import { Minimap } from './render/minimap';
 import { FeedbackOverlay } from './render/feedback';
 import { FogOverlay } from './render/fog-overlay';
 import { Exploration } from './render/exploration';
@@ -496,6 +497,13 @@ async function bootstrap(): Promise<void> {
     cameraController.centerOn(hqWorld.x, hqWorld.z);
   }
 
+  // Phase C.2: minimap (bottom-right). Blips mirror mesh visibility, so it
+  // respects fog; clicking it recentres the camera. Observer mode omits it
+  // (no player faction to anchor vision to — same as the other HUD panels).
+  const minimap = isObserver
+    ? null
+    : new Minimap(playerFaction, document.body, (x, z) => cameraController.centerOn(x, z));
+
   // Phase 3.10.9 — focused resource bar (top-centre).
   //
   // The pre-pivot HUD was a dense monospace text dump (tick / winner /
@@ -541,6 +549,13 @@ async function bootstrap(): Promise<void> {
   resourceBar.appendChild(hpCard.root);
   const energyCard = makeResourceCard('E', '0', RESOURCE_COLOR.energy, false, factionTint);
   resourceBar.appendChild(energyCard.root);
+  // Phase C.2: Matter is the planned construction-material companion
+  // (plan.md C.7). Reserved + greyed in the SC2-model resource bar so the
+  // slot exists now and goes live later without a layout shift.
+  const matterCard = makeResourceCard('M', '—', '#6b7d88', false, factionTint);
+  matterCard.root.style.opacity = '0.45';
+  matterCard.root.title = 'Matter — reserved (Phase C.7)';
+  resourceBar.appendChild(matterCard.root);
   const supplyCard = makeResourceCard('S', '0/5', RESOURCE_COLOR.supply, false, factionTint);
   resourceBar.appendChild(supplyCard.root);
 
@@ -664,6 +679,7 @@ async function bootstrap(): Promise<void> {
     const selNode = input?.getSelectedNodeId() ?? null;
     panel?.refresh(match.sim, selection, selStructure, selHq, selNode);
     portrait?.refresh(match.sim, selection, selStructure, selHq, selNode);
+    minimap?.update(match.sim, renderer, cameraController.getTarget());
     renderer.applyInputVisuals(selection, selStructure, selHq, selNode);
     renderer.setHover(input?.getHoveredEntity() ?? null);
 

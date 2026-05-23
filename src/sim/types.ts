@@ -49,6 +49,17 @@ export type StructureKind = 'workPod';
 // research rule stays.
 export type ResearchKind = 'autoResume';
 
+// Phase C.2: one entry in a faction's worker production queue. The spawn
+// position is resolved to concrete Fixed coords at enqueue time (HQ
+// perimeter round-robin, or the command's explicit tile) so the queue
+// item is fully hashable and the perimeter rotation advances
+// deterministically when the command lands, not when the unit pops.
+export interface TrainQueueItem {
+  kind: UnitKind;
+  x: Fixed;
+  y: Fixed;
+}
+
 export interface FactionState {
   factionId: FactionId;
   hqX: Fixed;
@@ -77,6 +88,16 @@ export interface FactionState {
   // last harvest target after charging. Without this flag, workers
   // park at idle post-charge and need a new player command.
   autoResumeResearched: boolean;
+  // Phase C.2: worker production queue. FIFO — index 0 is the unit
+  // currently being produced. TrainUnit pays energy + reserves supply at
+  // enqueue; advanceProduction ticks `trainTicksRemaining` down for the
+  // head and spawns + shifts the queue on completion. Capped at
+  // MAX_TRAIN_QUEUE.
+  trainQueue: TrainQueueItem[];
+  // Ticks remaining for the head queue item (index 0); 0 when the queue
+  // is empty. Reset to the head unit's trainTicks each time a new item
+  // reaches the front.
+  trainTicksRemaining: number;
 }
 
 // Phase C.1 adds four worker phases:
