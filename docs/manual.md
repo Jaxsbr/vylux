@@ -137,6 +137,7 @@ Research is hosted at any operational work pod — pick one, click **RESEARCH AU
 ### Keyboard
 
 - **R** — download the current replay as JSON.
+- **M** — toggle mute (silences every cue **and** the ambient bed; status shown top-right).
 - **W / A / S / D** or **arrow keys** — pan the camera (continuous while held).
 
 ### Camera
@@ -160,6 +161,29 @@ Tiles by selection:
 - Anything else / nothing → an empty card + guidance hint.
 
 A dense diagnostic panel (tick / winner / both factions' stats / dropped steps / peer state) is available via `?debug=1`.
+
+### Audio (Phase C.3)
+
+Fully synthesised via the Web Audio API — **no sampled assets, no loader**. Web Audio needs a user gesture to start, so sound unlocks on the first menu interaction (or the first in-match click); anything fired before that is silently dropped. **M** mutes everything.
+
+**Ambient bed** — a low, slowly-pulsing Tron drone starts on match begin and runs for the match. It's faction-tinted (cyan plays a whole tone above red, so the bed alone tells you your side), sits well under the cues in the mix, and dips briefly each time a cue fires so the cue cuts through.
+
+**Cues** — each meaningful action fires a distinct synth cue:
+
+| Cue | Fires when |
+|---|---|
+| **select** | You select an entity (unit / HQ / work pod / node) — soft rising ping. |
+| **move** | You issue a move order — quick downward swish. |
+| **harvest** | You assign workers to a node — upward chirp (the opposite gesture to *move*). |
+| **charge start** | A worker drops into charge mode — low descending sweep. |
+| **charge complete** | A worker leaves charge mode at a full tank — bright rising sweep. |
+| **research start** | Research begins at a pod — mid two-step. |
+| **research complete** | An upgrade lands — rising three-note "unlock" chime. |
+| **train complete** | A worker spawns at the HQ — rising two-note chime. |
+| **build complete** | A work pod becomes operational — double tick. |
+| **HQ alert** | The friendly HQ takes damage — pulsing low triple-beep. |
+
+Charge / research / build / train / HQ-alert cues are detected renderer-side by diffing sim state between ticks (`event-detector.ts`) — **the sim never references audio**, so cues can't affect the determinism gate. Select / move / harvest fire from the input controller alongside the on-screen feedback pings. (A UI **click** also plays on every command-card button press, and the main menu plays a **faction-switch** cue.)
 
 ---
 
