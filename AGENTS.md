@@ -92,7 +92,19 @@ Same gate the CI determinism workflow runs (`.github/workflows/determinism.yml`)
 | `meshes.ts`       | Per-entity mesh builders. Tron-style emissive geometry: HQ as edge-glowing cube, worker as cylinder, defender as box, raider as cone-on-base. Faction colours: cyan (faction 0), red-orange (faction 1). |
 | `sim-renderer.ts` | `SimRenderer` class. Reconciles `sim.state` ↔ Three.js meshes. `capturePrev()` snapshots positions before each sim tick; `update(alpha)` lerps between previous and current state for smooth render-rate motion. Dead units kept around with `mesh.visible = false`. |
 | `sim-driver.ts`   | Fixed-tick driver. `requestAnimationFrame` for both sim catch-up and rendering, capped at `MAX_STEPS_PER_FRAME=5` to prevent spiral-of-death after long pauses. Sim-frontend-agnostic — takes a `commandsForTick` callback. |
-| `player-input.ts` | `PlayerInput` (buildables panel, queues `TrainUnit` commands on click, refreshes affordability from sim each frame) + `MatchEndOverlay` (VICTORY/DEFEAT screen; Play Again reloads the page). |
+| `player-input.ts` | `PlayerInput` + `MatchEndOverlay` (VICTORY/DEFEAT screen; Play Again reloads the page). |
+| `action-bar.ts`   | Phase C.2 SC2-model **command card** (bottom-centre): a fixed 3-wide icon-tile grid (hotkey + Energy-cost badges, dim empty slots) + a production-queue strip. Selection-driven via `computeView`; separate hint/tiles/queue refresh-skip keys. |
+| `selection-portrait.ts` | The **portrait panel** (bottom-left): a 3D mesh snapshot (`PortraitRenderer`) + name + action-state icon + HP / charge bars (workers) or HP + build status (pods). |
+| `hud-icons.ts`    | Tron-neon SVG glyph set (`hudIconSvg`, `workerPhaseIcon`) for the command card + worker action states. |
+| `minimap.ts`      | Bottom-right minimap. Blips are drawn only when the entity's mesh is `.visible`, so it mirrors the fog without re-deriving vision; camera-focus marker; click-to-pan via `CameraController.centerOn`. |
+| `feedback.ts`     | `FeedbackOverlay` — renderer-only floating cues (move-X, assign pulse, placement burst). Sim-untouched; the extension point for Phase C.4 visual juice. |
+| `event-detector.ts` | `GameEventDetector` — renderer-side watch that diffs `sim.state` between ticks and fires audio cues (e.g. the HQ-hit alert). Constructed with the `AudioManager`. This is where Phase C.3's charge / research-complete cue triggers land — keeps audio detection out of the sim. |
+
+### `src/audio/` — synthesised cue layer (no assets)
+
+| File              | Role |
+| ----------------- | ---- |
+| `audio-manager.ts` | `AudioManager` — Web Audio cues synthesised from oscillators + envelopes (no asset bundle, no loader, fail-soft if `AudioContext` is unavailable). Cues today: `click`, `trainComplete`, `buildComplete`, `attackHit`, `alertHqHit`, `factionSwitch`. The `AudioContext` is lazy (created on the first call inside a user gesture); `setMuted` is wired to the **M** key. `FACTION_FREQ_BASE` is a reserved cyan/red tonal centre, currently unused (`void`'d) — the hook for Phase C.3's faction-tinted ambient bed. New C.3 cues (select / move-assign / harvest-assign / charge-start+complete / research-start+complete) land here as new methods; **the sim never references audio**, so cues can't affect the determinism gate. |
 
 ### `src/net/` — multiplayer transport _(DORMANT — see "Dormant code" below)_
 
