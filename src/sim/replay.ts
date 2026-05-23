@@ -194,7 +194,18 @@ import type { InitialMatchSpec } from './state';
 // hex / octagonal offsets so they don't stack on one point. Same
 // idiom as harvest-slot allocation at energy nodes. Golden fixtures
 // regenerated.
-export const REPLAY_VERSION = 23;
+// Phase C.2 bumps to v24 (2026-05-23). Worker training is queued + timed,
+// not instant. FactionState gains `trainQueue: TrainQueueItem[]` +
+// `trainTicksRemaining`; UNIT_STATS.worker.trainTicks is now 40 (2 s).
+// TrainUnit pays energy + reserves supply at enqueue (supplyUsed + queue
+// length must stay under the cap; queue capped at MAX_TRAIN_QUEUE=5);
+// a new advanceProduction step pass spawns the head on completion. The
+// hash gains the head timer + queue contents per faction. Two latent
+// faction-override bugs fixed alongside: spawnUnit now sources maxHp
+// from the per-faction stats (Swarm 30 / Siege 60, not a flat 40) and
+// TrainUnit charges the per-faction trainCost (40 / 60, not a flat 50).
+// Golden fixtures regenerated.
+export const REPLAY_VERSION = 24;
 
 export interface ReplayLog {
   version: number;

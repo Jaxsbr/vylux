@@ -52,11 +52,14 @@ export function buildScriptedFrames(durationTicks: number): InputFrame[] {
           { kind: CommandKind.TrainUnit, faction: 1, unitKind: 'worker', x: 18, y: 18 },
         ],
       });
-    } else if (t === 1) {
-      // Worker IDs are 4 and 5: nodes occupy 1..3, then the two workers
-      // are spawned in faction order at tick 0 → IDs 4 and 5.
+    } else if (t === 45) {
+      // Phase C.2: training is timed (40 ticks), so the two workers
+      // enqueued at tick 0 don't spawn until tick 40. Worker IDs are 4
+      // and 5 — nodes occupy 1..3, and the two workers pop in faction
+      // order during the same production tick (faction 0 first → ID 4,
+      // faction 1 → ID 5). Assign at tick 45, comfortably after spawn.
       frames.push({
-        tick: 1,
+        tick: 45,
         commands: [
           { kind: CommandKind.AssignWorkerToNode, workerId: 4, nodeId: 1 },
           { kind: CommandKind.AssignWorkerToNode, workerId: 5, nodeId: 2 },

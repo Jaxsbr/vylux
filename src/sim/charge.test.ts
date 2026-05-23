@@ -6,6 +6,7 @@ import { Sim } from './sim';
 import { CommandKind } from './commands';
 import { fromInt } from './fixed';
 import type { InitialMatchSpec } from './state';
+import type { Worker } from './types';
 import {
   CHARGE_TICKS_PER_UNIT_HQ,
   CHARGE_TICKS_PER_UNIT_POD,
@@ -25,11 +26,25 @@ const SPEC: InitialMatchSpec = {
   initialEnergy: 10000,
 };
 
+function ownedWorkerCount(sim: Sim, faction: 0 | 1): number {
+  return sim.state.units.filter((u) => u.alive && u.kind === 'worker' && u.faction === faction).length;
+}
+
+// Phase C.2: training is queued + timed (40 ticks), so a freshly-issued
+// TrainUnit no longer spawns synchronously. The helper enqueues one
+// worker and advances the sim until it pops, so existing per-worker
+// charge tests can keep grabbing `sim.state.units[...]` right after.
 function trainWorker(sim: Sim, faction: 0 | 1, x: number, y: number) {
+  const before = ownedWorkerCount(sim, faction);
   sim.step({
     tick: sim.state.tick,
     commands: [{ kind: CommandKind.TrainUnit, faction, unitKind: 'worker', x, y }],
   });
+  let guard = 0;
+  while (ownedWorkerCount(sim, faction) <= before && guard < 200) {
+    sim.step({ tick: sim.state.tick, commands: [] });
+    guard += 1;
+  }
 }
 
 describe('Sim — worker charge', () => {
@@ -205,18 +220,26 @@ describe('Sim — worker charge', () => {
       hp: STRUCTURE_STATS.workPod.maxHp,
       buildTicksRemaining: 0,
     });
-    const workers = [];
+    // Phase C.2: enqueue three workers at the pod tile, then advance
+    // until all three have popped (training is timed). Then zero their
+    // charge so they each enter charge mode and pick a slot.
     for (let i = 0; i < 3; i++) {
       sim.step({
         tick: sim.state.tick,
         commands: [{ kind: CommandKind.TrainUnit, faction: 0, unitKind: 'worker', x: 10, y: 10 }],
       });
-      const w = sim.state.units[i];
-      if (w.kind !== 'worker') throw new Error('expected worker');
-      w.charge = 0;
-      w.phase = 'idle';
-      workers.push(w);
     }
+    for (let g = 0; g < 400 && ownedWorkerCount(sim, 0) < 3; g++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+    }
+    const workers: Worker[] = [];
+    for (const u of sim.state.units) {
+      if (!u.alive || u.kind !== 'worker' || u.faction !== 0) continue;
+      u.charge = 0;
+      u.phase = 'idle';
+      workers.push(u);
+    }
+    expect(workers).toHaveLength(3);
     // Let the sim run until all three workers are charging.
     for (let i = 0; i < 1000; i++) {
       sim.step({ tick: sim.state.tick, commands: [] });
@@ -259,12 +282,18 @@ describe('Sim — worker charge', () => {
 describe('Sim — supply cap', () => {
   it('HQ alone caps trains at HQ_SUPPLY_CAP_INITIAL', () => {
     const sim = new Sim(SPEC);
-    // Train more than the cap — extras get silently rejected.
+    // Train more than the cap — extras get silently rejected at enqueue
+    // (the reservation gate counts queued units against the cap).
     for (let i = 0; i < HQ_SUPPLY_CAP_INITIAL + 3; i++) {
       sim.step({
         tick: sim.state.tick,
         commands: [{ kind: CommandKind.TrainUnit, faction: 0, unitKind: 'worker' }],
       });
+    }
+    // Phase C.2: advance until the timed queue drains, then exactly cap
+    // workers are alive.
+    for (let g = 0; g < 600 && sim.state.factions[0].trainQueue.length > 0; g++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
     }
     const aliveOwn = sim.state.units.filter((u) => u.alive && u.faction === 0);
     expect(aliveOwn.length).toBe(HQ_SUPPLY_CAP_INITIAL);
@@ -548,13 +577,17 @@ describe('Sim — AI work-pod growth', () => {
       nodes: [{ x: 6, y: 5, energy: 1000 }],
       initialEnergy: 10000,
     });
-    // Fill the faction-0 worker cap by injecting workers directly.
+    // Fill the faction-0 worker cap by training to it.
     const cap = sim.state.factions[0].supplyCap;
     for (let i = 0; i < cap; i++) {
       sim.step({
         tick: sim.state.tick,
         commands: [{ kind: CommandKind.TrainUnit, faction: 0, unitKind: 'worker' }],
       });
+    }
+    // Phase C.2: wait for the timed trains to fill the cap with live workers.
+    for (let g = 0; g < 600 && sim.state.factions[0].supplyUsed < cap; g++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
     }
     // Run forward to a tick that's % AI_TICK_INTERVAL.
     while (sim.state.tick % 10 !== 0) {
@@ -583,12 +616,15 @@ describe('Sim — AI work-pod growth', () => {
       hp: STRUCTURE_STATS.workPod.maxHp,
       buildTicksRemaining: 15,
     });
-    // Fill the worker cap.
+    // Fill the worker cap (timed trains — wait for them to pop).
     for (let i = 0; i < HQ_SUPPLY_CAP_INITIAL; i++) {
       sim.step({
         tick: sim.state.tick,
         commands: [{ kind: CommandKind.TrainUnit, faction: 0, unitKind: 'worker' }],
       });
+    }
+    for (let g = 0; g < 600 && sim.state.factions[0].supplyUsed < HQ_SUPPLY_CAP_INITIAL; g++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
     }
     while (sim.state.tick % 10 !== 0) {
       sim.step({ tick: sim.state.tick, commands: [] });

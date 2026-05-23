@@ -18,7 +18,7 @@
 import { CommandKind, type Command } from './commands';
 import { distSq, fromInt, type Fixed } from './fixed';
 import { type Faction, type ResourceNode, type SimState } from './types';
-import { STRUCTURE_STATS, UNIT_STATS } from './units-config';
+import { MAX_TRAIN_QUEUE, STRUCTURE_STATS, unitStatsFor } from './units-config';
 import { isInChargeMode } from './step';
 
 export const AI_TICK_INTERVAL = 10;
@@ -47,12 +47,16 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
   const commands: Command[] = autoAssignIdleWorkers(state, faction);
   const fs = state.factions[faction];
   const workerCount = countOwnedWorkers(state, faction);
-  const workerCost = UNIT_STATS.worker.trainCost;
+  const workerCost = unitStatsFor(fs.factionId, 'worker').trainCost;
 
-  // 1) Train workers up to the current cap.
+  // 1) Train workers up to the current cap. Phase C.2: queue-aware — the
+  // sim reserves supply for already-queued units, so the AI counts the
+  // queue too (otherwise it would spam TrainUnit commands the sim
+  // silently rejects, and over-commit once they all pop).
+  const queued = fs.trainQueue.length;
   if (
-    workerCount < fs.supplyCap
-    && fs.supplyUsed < fs.supplyCap
+    fs.supplyUsed + queued < fs.supplyCap
+    && queued < MAX_TRAIN_QUEUE
     && fs.energy >= workerCost
   ) {
     commands.push({ kind: CommandKind.TrainUnit, faction, unitKind: 'worker' });

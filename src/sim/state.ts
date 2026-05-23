@@ -23,8 +23,8 @@ import {
   HQ_SUPPLY_CAP_INITIAL,
   HQ_VISION_RADIUS,
   STRUCTURE_STATS,
-  UNIT_STATS,
   WORKER_DEFAULT_MAX_CHARGE,
+  unitStatsFor,
 } from './units-config';
 
 export interface InitialMatchSpec {
@@ -64,6 +64,8 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       researchingKind: null,
       researchTicksRemaining: 0,
       autoResumeResearched: false,
+      trainQueue: [],
+      trainTicksRemaining: 0,
     },
     {
       factionId: factionId1,
@@ -77,6 +79,8 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       researchingKind: null,
       researchTicksRemaining: 0,
       autoResumeResearched: false,
+      trainQueue: [],
+      trainTicksRemaining: 0,
     },
   ];
 
@@ -184,7 +188,10 @@ export function spawnUnit(
   x: Fixed,
   y: Fixed,
 ): Unit {
-  const stats = UNIT_STATS[kind];
+  // Phase C.2: source maxHp from the per-faction stat block (Swarm 30 /
+  // Siege 60) rather than the shared baseline — the spawn path previously
+  // ignored the documented asymmetry and gave every worker 40 HP.
+  const stats = unitStatsFor(state.factions[faction].factionId, kind);
   const id = state.nextEntityId++;
   const w: Worker = {
     id,

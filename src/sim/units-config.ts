@@ -17,13 +17,19 @@ export interface UnitStats {
   // Line-of-sight radius (tiles, Fixed). Drives the discovery sweep +
   // the renderer's vision filter.
   visionRadius: Fixed;
-  // Ticks the HQ takes to produce one unit of this kind. Workers stay
-  // instant for the Phase A cut so the existing economy + tests keep
-  // their pacing.
+  // Ticks the HQ takes to produce one unit of this kind. Phase C.2 gives
+  // the worker a short, non-zero train time so the player gets a beat of
+  // anticipation and the command card has a live production element.
+  // Symmetric across factions for this cut (the cost / HP asymmetry
+  // already differentiates the two).
   trainTicks: number;
 }
 
 const SPEED_WORKER: Fixed = fromFloat(0.05);
+
+// Phase C.2: worker train time — 40 ticks = 2 s at 20 Hz. Short enough to
+// stay snappy, long enough to read as "producing".
+const WORKER_TRAIN_TICKS = 40;
 
 // Shared UNIT_STATS baseline. Per-faction overrides below.
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
@@ -32,9 +38,14 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     speed: SPEED_WORKER,
     trainCost: fromInt(50),
     visionRadius: fromInt(4),
-    trainTicks: 0,
+    trainTicks: WORKER_TRAIN_TICKS,
   },
 };
+
+// Phase C.2: max units a faction may have queued at its HQ at once
+// (matches the SC2 command-card convention). The supply cap also bounds
+// the queue — whichever is smaller wins at enqueue.
+export const MAX_TRAIN_QUEUE = 5;
 
 // HQ vision radius. Bigger than any unit so the opening home patch is
 // comfortably scouted by default — the player shouldn't have to dispatch

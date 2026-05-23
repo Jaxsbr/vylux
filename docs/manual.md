@@ -52,8 +52,8 @@ Resource nodes are discovered persistently — once a friendly unit / HQ / pod c
 
 | Kind | HP | Speed | Train cost | Max charge | Train time | Trained at |
 |---|---|---|---|---|---|---|
-| **Worker (Swarm)** | 30 | 0.055 | 40 E | 10 | instant | HQ |
-| **Worker (Siege)** | 60 | 0.045 | 60 E | 10 | instant | HQ |
+| **Worker (Swarm)** | 30 | 0.055 | 40 E | 10 | 40 ticks (2 s) | HQ |
+| **Worker (Siege)** | 60 | 0.045 | 60 E | 10 | 40 ticks (2 s) | HQ |
 
 `E` = Energy. Speeds are tiles per sim tick (sim runs at 20 Hz; multiply by 20 for tiles/second).
 
@@ -87,7 +87,13 @@ Resource nodes are discovered persistently — once a friendly unit / HQ / pod c
 
 - HQ baseline: **5** worker cap.
 - Each operational work pod: **+5**.
-- `TrainUnit` is silently rejected when `supplyUsed >= supplyCap`. Both values are recomputed at end of each sim step.
+- `TrainUnit` is silently rejected when the cap is full. Phase C.2: queued-but-not-yet-spawned workers count against the cap too — the gate is `supplyUsed + queued >= supplyCap`, so you can't over-queue past the cap. `supplyUsed` / `supplyCap` are recomputed at end of each sim step.
+
+### Production queue (Phase C.2)
+
+- Worker training is **timed**, not instant: each worker takes **40 ticks (2 s)** to produce.
+- Each HQ holds a **FIFO production queue** (max **5** entries). `TrainUnit` pays the worker's Energy cost **and reserves a supply slot at enqueue**; the head of the queue counts down (`trainTicksRemaining`) and the worker spawns on completion — at the HQ perimeter via the round-robin offset table, or at an explicit tile when the command carries one.
+- The queue is bounded by both `MAX_TRAIN_QUEUE` (5) and the supply cap — whichever is smaller.
 
 ---
 

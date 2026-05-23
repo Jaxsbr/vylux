@@ -50,6 +50,7 @@ import {
   HQ_CHARGE_SLOT_OFFSETS,
   HQ_SUPPLY_CAP_INITIAL,
   HQ_VISION_RADIUS,
+  MAX_TRAIN_QUEUE,
   POD_CHARGE_SLOT_COUNT,
   POD_CHARGE_SLOT_OFFSETS,
   RESEARCH_AUTO_RESUME_COST,
@@ -301,16 +302,22 @@ export function applyCommand(state: SimState, cmd: Command): void {
       return;
     }
     case CommandKind.TrainUnit: {
-      const stats = UNIT_STATS[cmd.unitKind];
+      // Phase C.2: training is queued + timed, not instant. The command
+      // pays energy + reserves supply at enqueue; advanceProduction ticks
+      // the head down and spawns it on completion.
       const fs = state.factions[cmd.faction];
+      const stats = unitStatsFor(fs.factionId, cmd.unitKind);
       if (fs.energy < stats.trainCost) return;
-      // Phase C.1: supply cap gate. supplyUsed is recomputed at end of
-      // each step so reads stable here. Train command is silently
-      // rejected when the cap is full.
-      if (fs.supplyUsed >= fs.supplyCap) return;
+      // Reserve supply: live workers (supplyUsed, recomputed end-of-step
+      // so stable here) PLUS already-queued units must stay under the cap.
+      // Silent reject when the cap is full or the queue is full.
+      if (fs.supplyUsed + fs.trainQueue.length >= fs.supplyCap) return;
+      if (fs.trainQueue.length >= MAX_TRAIN_QUEUE) return;
       fs.energy = sub(fs.energy, stats.trainCost);
-      // Spawn at the given tile if provided (player click-to-place);
-      // otherwise at the HQ perimeter via round-robin offset.
+      // Resolve the spawn tile NOW (concrete Fixed coords) so the queue
+      // item is fully hashable and the perimeter rotation advances
+      // deterministically at enqueue. Explicit tile = click-to-place;
+      // otherwise the HQ-perimeter round-robin.
       let spawnX: Fixed;
       let spawnY: Fixed;
       if (cmd.x !== undefined && cmd.y !== undefined) {
@@ -322,12 +329,11 @@ export function applyCommand(state: SimState, cmd: Command): void {
         spawnX = add(fs.hqX, fromInt(offset.dx));
         spawnY = add(fs.hqY, fromInt(offset.dy));
       }
-      spawnUnit(state, cmd.unitKind, cmd.faction, spawnX, spawnY);
-      // supplyUsed is recomputed at end of step; bumping inline here
-      // would make subsequent same-tick TrainUnit commands see a stale
-      // cap. The "one train per AI tick" pattern keeps this from being
-      // a problem in practice, but if you ever want burst-spawn the
-      // recompute pass is where this would land.
+      fs.trainQueue.push({ kind: cmd.unitKind, x: spawnX, y: spawnY });
+      // If this is the only item, it's the head — start its timer.
+      if (fs.trainQueue.length === 1) {
+        fs.trainTicksRemaining = stats.trainTicks;
+      }
       return;
     }
     case CommandKind.MoveUnit: {
@@ -441,6 +447,26 @@ function advanceResearch(state: SimState): void {
     }
     fs.researchingKind = null;
     fs.researchTicksRemaining = 0;
+  }
+}
+
+// Phase C.2 — production pass. Ticks the head of each faction's worker
+// queue down; on completion spawns the unit at its reserved tile and
+// advances the queue. Runs in faction-index order (0 then 1) so
+// nextEntityId assignment stays deterministic regardless of command
+// merge order.
+function advanceProduction(state: SimState): void {
+  for (let f = 0; f < 2; f++) {
+    const fs = state.factions[f];
+    if (fs.trainQueue.length === 0) continue;
+    fs.trainTicksRemaining -= 1;
+    if (fs.trainTicksRemaining > 0) continue;
+    const item = fs.trainQueue.shift();
+    if (item === undefined) continue;
+    spawnUnit(state, item.kind, f as Faction, item.x, item.y);
+    fs.trainTicksRemaining = fs.trainQueue.length > 0
+      ? unitStatsFor(fs.factionId, fs.trainQueue[0].kind).trainTicks
+      : 0;
   }
 }
 
@@ -825,6 +851,11 @@ export function step(state: SimState, rng: Rng, frame: InputFrame): void {
     for (let i = 0; i < frame.commands.length; i++) {
       applyCommand(state, frame.commands[i]);
     }
+    // Phase C.2: spawn any units whose train timer elapses this tick
+    // before the advance pass, so a just-popped worker is included in
+    // this tick's iteration (idle, no-op) and the end-of-step supply
+    // recompute.
+    advanceProduction(state);
     for (let i = 0; i < state.units.length; i++) {
       advanceUnit(state, state.units[i]);
     }
