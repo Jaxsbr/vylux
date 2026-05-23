@@ -130,7 +130,7 @@ Research is hosted at any operational work pod — pick one, click **RESEARCH AU
 - With selected workers, **left-click** a node → all selected workers are assigned to harvest there. Each accepted worker pays 1 charge; workers in charge mode silently flash the lightning cue.
 - **Right-click** on empty ground → MoveUnit for every selected unit. Workers in charge mode flash the lightning cue and stay put.
 - **Left-click on empty ground** → clears the unit selection.
-- **Left-click your HQ** → selects the HQ (TRAIN WORKER appears on the action bar with a `used/cap` indicator).
+- **Left-click your HQ** → selects the HQ (the command card shows the TRAIN WORKER tile + a `used/cap` indicator; a production-queue strip appears above it while workers are training).
 - **Left-click a work pod** → selects the pod (info-only panel for now).
 - **Esc** → clears selection. Cancels any pending placement.
 
@@ -144,12 +144,21 @@ Research is hosted at any operational work pod — pick one, click **RESEARCH AU
 - **Middle-mouse drag** — pan the camera.
 - **Scroll wheel** — zoom in / out within 0.5×–2.0× of the default frustum height.
 
-### Action bar (bottom of screen)
+### Command HUD (Phase C.2 — SC2 command-card model)
 
-- Select your **HQ** → **TRAIN WORKER** + a `used/cap` indicator. Greys out when at the cap or out of Energy.
-- Select a **Worker** (one or more) → **BUILD WORK POD**. Greys out if no selected worker is actionable (in charge mode / 0 charge) or if Energy can't cover the cost.
-- Select a **Work Pod** → **RESEARCH AUTO-RESUME** (or its in-progress / completed status) + a `+5 cap · charge bay` info hint.
-- Anything else / nothing → guidance hint.
+A fixed-footprint HUD; nothing resizes to fit its text.
+
+- **Resource bar (top-centre):** HQ HP · Energy · **Matter** (reserved + greyed until Phase C.7) · Supply `used/cap` (turns red at the cap).
+- **Portrait panel (bottom-left):** a 3D snapshot of the selected entity + its name, plus an action-state icon and HP / charge bars (workers), HP + build status (pods), or remaining energy (nodes).
+- **Command card (bottom-centre):** a fixed 3-wide grid of **icon tiles**, each with a hotkey badge (top-left) + Energy-cost badge (top-right); unused slots render as dim cells. Above it, a **production-queue strip** shows the queued workers, the head one carrying a production-progress bar.
+
+Tiles by selection:
+- **HQ** → **TRAIN WORKER** (`W`). Greys out at the cap (queued units count toward it), when the queue is full (5), or out of Energy.
+- **Worker** (one or more) → **BUILD WORK POD** (`B`). Greys out if no selected worker is actionable (charge mode / 0 charge) or Energy can't cover the cost.
+- **Work Pod** → **AUTO-RESUME** research (`R`) — or its in-progress (`RESEARCHING Xs`) / completed state — with a `+5 cap · charge bay` hint.
+- Anything else / nothing → an empty card + guidance hint.
+
+A dense diagnostic panel (tick / winner / both factions' stats / dropped steps / peer state) is available via `?debug=1`.
 
 ---
 

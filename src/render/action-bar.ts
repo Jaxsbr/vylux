@@ -11,12 +11,27 @@
 import type { Faction, UnitKind } from '../sim/types';
 import type { Sim } from '../sim/sim';
 import { toFloat, type Fixed } from '../sim/fixed';
-import { RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, STRUCTURE_STATS, unitStatsFor } from '../sim/units-config';
+import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, STRUCTURE_STATS, unitStatsFor } from '../sim/units-config';
 import { findStructure, findUnit } from '../sim/state';
 import { isInChargeMode } from '../sim/step';
 import { themeForFaction } from './factions/theme';
+import { hudIconSvg, type HudIconName } from './hud-icons';
 
 const displayCost = (f: Fixed): number => Math.round(toFloat(f));
+
+// Phase C.2: SC2-style command card — a fixed 3-wide grid of icon tiles so
+// the bar never resizes to fit its text and actions read as buttons, not
+// labels. Empty slots render as dim grid cells.
+const GRID_COLS = 3;
+const TILE_PX = 64;
+
+// A render-ready view of the HQ production queue (head progress + how many
+// units are waiting). Null whenever the HQ isn't the active selection or
+// nothing is queued.
+interface QueueView {
+  count: number;
+  headFraction: number; // 0..1 production progress of the in-build head
+}
 
 export interface ActionBarDelegate {
   onTrainKindSelected(kind: UnitKind): void;
@@ -39,6 +54,7 @@ export interface ActionBarDelegate {
 interface ButtonSpec {
   id: string;
   label: string;
+  icon: HudIconName;
   hotkey?: string;
   costEnergy?: number;
   enabled: boolean;
@@ -61,6 +77,7 @@ export class ActionBar {
   private readonly delegate: ActionBarDelegate;
   private readonly bar: HTMLDivElement;
   private readonly hint: HTMLDivElement;
+  private readonly queueStrip: HTMLDivElement;
   private readonly buttonContainer: HTMLDivElement;
   private currentSpecKey = '';
 
@@ -68,36 +85,44 @@ export class ActionBar {
     this.faction = faction;
     this.delegate = delegate;
 
+    // Bottom-centre command area (SC2 model: portrait bottom-left, command
+    // card bottom-centre). Fixed-width grid below, so the card never
+    // reflows as the selection changes.
     this.bar = document.createElement('div');
     this.bar.style.cssText = [
-      'position:fixed', 'right:18px', 'bottom:18px', 'z-index:8',
-      'display:flex', 'flex-direction:column', 'align-items:flex-end',
-      'gap:8px',
+      'position:fixed', 'left:50%', 'bottom:18px', 'transform:translateX(-50%)',
+      'z-index:8',
+      'display:flex', 'flex-direction:column', 'align-items:center',
+      'gap:6px',
       'font-family:ui-monospace,Menlo,monospace',
       'pointer-events:auto',
-      // Keep the bar narrow enough that the portrait on the left has
-      // breathing room; buttons wrap below when more than ~3 fit.
-      'max-width:min(60vw,560px)',
     ].join(';');
 
     this.hint = document.createElement('div');
     this.hint.style.cssText = [
       'font-size:10px', 'letter-spacing:0.32em',
-      'color:rgba(154,170,180,0.6)',
-      'min-height:14px', 'text-align:right',
+      'color:rgba(154,170,180,0.7)',
+      'min-height:14px', 'text-align:center',
     ].join(';');
     this.bar.appendChild(this.hint);
 
+    // Production-queue strip (only visible when the HQ has a queue).
+    this.queueStrip = document.createElement('div');
+    this.queueStrip.style.cssText = [
+      'display:none', 'flex-direction:row', 'gap:5px',
+      'align-items:center', 'justify-content:center', 'min-height:0',
+    ].join(';');
+    this.bar.appendChild(this.queueStrip);
+
     this.buttonContainer = document.createElement('div');
     this.buttonContainer.style.cssText = [
-      'display:flex', 'flex-wrap:wrap', 'gap:10px',
-      'background:rgba(7,9,12,0.78)',
-      'padding:10px 14px',
-      'border:1px solid rgba(0,229,255,0.18)',
+      'display:grid', `grid-template-columns:repeat(${GRID_COLS},${TILE_PX}px)`,
+      'gap:8px',
+      'background:rgba(7,9,12,0.82)',
+      'padding:10px',
+      `border:1px solid ${FACTION_TINT_DIM[faction]}`,
       'border-radius:6px',
-      'box-shadow:0 0 12px rgba(0,229,255,0.12)',
-      'min-height:74px', 'min-width:140px',
-      'align-items:center', 'justify-content:flex-end',
+      `box-shadow:0 0 14px ${FACTION_TINT_DIM[faction]}`,
     ].join(';');
     this.bar.appendChild(this.buttonContainer);
 
@@ -115,18 +140,20 @@ export class ActionBar {
     selectedHqFaction: Faction | null,
     selectedNodeId: number | null = null,
   ): void {
-    const { hint, specs } = this.computeView(sim, selectedUnitIds, selectedStructureId, selectedHqFaction, selectedNodeId);
-    // Refresh-skip key must include the label too — the in-progress
-    // research button paints its label as `RESEARCHING (Xs)` and the
-    // seconds tick down each frame. Without the label in the key,
-    // refresh() short-circuits and the counter freezes.
+    const { hint, specs, queue } = this.computeView(sim, selectedUnitIds, selectedStructureId, selectedHqFaction, selectedNodeId);
+    // Refresh-skip key must include the label (the in-progress research
+    // tile counts seconds down each frame) and the queue head progress
+    // (the production bar advances each tick) — both change without the
+    // selection changing, so they need to defeat the short-circuit.
+    const queueKey = queue === null ? '' : `${queue.count}:${Math.round(queue.headFraction * 100)}`;
     const key = hint + '|' + specs.map((s) =>
       `${s.id}:${s.enabled ? '1' : '0'}:${s.disabledReason ?? ''}:${s.label}`
-    ).join('/');
+    ).join('/') + '|q' + queueKey;
     if (key === this.currentSpecKey) return;
     this.currentSpecKey = key;
     this.hint.textContent = hint;
-    this.renderButtons(specs);
+    this.renderQueue(queue);
+    this.renderTiles(specs);
   }
 
   private computeView(
@@ -135,7 +162,7 @@ export class ActionBar {
     selectedStructureId: number | null,
     selectedHqFaction: Faction | null,
     selectedNodeId: number | null,
-  ): { hint: string; specs: ButtonSpec[] } {
+  ): { hint: string; specs: ButtonSpec[]; queue: QueueView | null } {
     const fs = sim.state.factions[this.faction];
 
     // Nodes have no actions today — short-circuit so the hint doesn't
@@ -143,30 +170,41 @@ export class ActionBar {
     // clearly selected on screen. The portrait sub-text carries the
     // node readout.
     if (selectedNodeId !== null) {
-      return { hint: '', specs: [] };
+      return { hint: '', specs: [], queue: null };
     }
 
     // 1. HQ selected → TRAIN WORKER + cap meter in the hint.
     if (selectedHqFaction === this.faction) {
       const factionId = fs.factionId;
       const stats = unitStatsFor(factionId, 'worker');
+      const queued = fs.trainQueue.length;
       const energyOk = fs.energy >= stats.trainCost;
-      const capOk = fs.supplyUsed < fs.supplyCap;
-      const enabled = energyOk && capOk;
+      // Phase C.2: the cap counts queued units too (matches the sim
+      // reservation gate), and the queue itself is bounded.
+      const capOk = (fs.supplyUsed + queued) < fs.supplyCap;
+      const queueOk = queued < MAX_TRAIN_QUEUE;
+      const enabled = energyOk && capOk && queueOk;
       let reason: string | undefined;
-      if (!capOk) reason = 'cap reached';
+      if (!queueOk) reason = 'queue full';
+      else if (!capOk) reason = 'cap reached';
       else if (!energyOk) reason = 'no energy';
+      const headTotal = queued > 0 ? unitStatsFor(factionId, fs.trainQueue[0].kind).trainTicks : 0;
+      const queue: QueueView | null = queued > 0
+        ? { count: queued, headFraction: headTotal > 0 ? (headTotal - fs.trainTicksRemaining) / headTotal : 1 }
+        : null;
       return {
         hint: `HQ  ·  ${fs.supplyUsed}/${fs.supplyCap}`,
         specs: [{
           id: 'train-worker',
-          label: 'TRAIN  WORKER',
+          label: 'TRAIN WORKER',
+          icon: 'worker',
           hotkey: 'W',
           costEnergy: displayCost(stats.trainCost),
           enabled,
           disabledReason: reason,
           onClick: () => this.delegate.onTrainKindSelected('worker'),
         }],
+        queue,
       };
     }
 
@@ -176,22 +214,23 @@ export class ActionBar {
       if (s && s.faction === this.faction && s.kind === 'workPod') {
         const op = s.buildTicksRemaining === 0;
         if (!op) {
-          return { hint: 'WORK  POD  ·  BUILDING', specs: [] };
+          return { hint: 'WORK  POD  ·  BUILDING', specs: [], queue: null };
         }
         const specs: ButtonSpec[] = [];
-        // Auto-resume research: button when idle + not done; status
-        // when in progress; "active" label when complete.
+        // Auto-resume research: tile when idle + not done; status tile
+        // when in progress; nothing once complete (info is in the hint).
         if (fs.autoResumeResearched) {
           // Researched — info only; another slot will land here once
           // the second research item exists.
         } else if (fs.researchingKind === 'autoResume') {
-          // Mid-research. Show a disabled button with the remaining
+          // Mid-research. Show a disabled tile with the remaining
           // seconds so the player can see progress without scraping
           // sim state.
           const secs = Math.ceil(fs.researchTicksRemaining / 20);
           specs.push({
             id: 'research-auto-resume',
-            label: `RESEARCHING  (${secs}s)`,
+            label: `RESEARCHING ${secs}s`,
+            icon: 'research',
             enabled: false,
             disabledReason: 'in progress',
             onClick: () => { /* no-op while mid-research */ },
@@ -205,7 +244,8 @@ export class ActionBar {
           else if (!energyOk) reason = 'no energy';
           specs.push({
             id: 'research-auto-resume',
-            label: 'RESEARCH  AUTO-RESUME',
+            label: 'AUTO-RESUME',
+            icon: 'research',
             hotkey: 'R',
             costEnergy: displayCost(RESEARCH_AUTO_RESUME_COST),
             enabled,
@@ -216,7 +256,7 @@ export class ActionBar {
         const hint = fs.autoResumeResearched
           ? 'WORK  POD  ·  AUTO-RESUME  ACTIVE'
           : `WORK  POD  ·  +5  CAP  ·  CHARGE  BAY`;
-        return { hint, specs };
+        return { hint, specs, queue: null };
       }
     }
     // Reference the duration constant so the import isn't dead — surfaces
@@ -244,71 +284,123 @@ export class ActionBar {
         hint: 'WORKER',
         specs: [{
           id: 'build-work-pod',
-          label: 'BUILD  WORK  POD',
+          label: 'BUILD WORK POD',
+          icon: 'pod',
           hotkey: 'B',
           costEnergy: displayCost(podStats.buildCost),
           enabled,
           disabledReason: reason,
           onClick: () => this.delegate.onBuildWorkPodSelected(),
         }],
+        queue: null,
       };
     }
 
-    return { hint: 'SELECT  YOUR  HQ  OR  A  WORKER', specs: [] };
+    return { hint: 'SELECT  YOUR  HQ  OR  A  WORKER', specs: [], queue: null };
   }
 
-  private renderButtons(specs: ButtonSpec[]): void {
-    this.buttonContainer.innerHTML = '';
-    if (specs.length === 0) {
-      const placeholder = document.createElement('div');
-      placeholder.style.cssText = [
-        'font-size:10px', 'letter-spacing:0.32em',
-        'color:rgba(154,170,180,0.4)',
-      ].join(';');
-      placeholder.textContent = 'NO  ACTIONS';
-      this.buttonContainer.appendChild(placeholder);
+  // Production-queue strip — one cell per queued worker; the head cell
+  // carries a thin production-progress bar that advances each tick.
+  private renderQueue(queue: QueueView | null): void {
+    this.queueStrip.innerHTML = '';
+    if (queue === null) {
+      this.queueStrip.style.display = 'none';
       return;
     }
-    for (const spec of specs) {
-      this.buttonContainer.appendChild(this.makeButton(spec));
+    this.queueStrip.style.display = 'flex';
+    const tint = FACTION_TINT[this.faction];
+    for (let i = 0; i < queue.count; i++) {
+      const head = i === 0;
+      const cell = document.createElement('div');
+      cell.style.cssText = [
+        'position:relative', 'width:24px', 'height:24px', 'box-sizing:border-box',
+        'display:flex', 'align-items:center', 'justify-content:center',
+        'border-radius:3px', 'background:rgba(7,9,12,0.85)', 'overflow:hidden',
+        `border:1px solid ${head ? tint : FACTION_TINT_DIM[this.faction]}`,
+        `color:${head ? tint : 'rgba(154,170,180,0.65)'}`, 'line-height:0',
+      ].join(';');
+      cell.innerHTML = hudIconSvg('worker', 14);
+      if (head) {
+        const bar = document.createElement('div');
+        const pct = Math.max(0, Math.min(1, queue.headFraction)) * 100;
+        bar.style.cssText = [
+          'position:absolute', 'left:0', 'bottom:0', 'height:3px',
+          `width:${pct}%`, `background:${tint}`,
+        ].join(';');
+        cell.appendChild(bar);
+      }
+      this.queueStrip.appendChild(cell);
     }
   }
 
-  private makeButton(spec: ButtonSpec): HTMLButtonElement {
+  private renderTiles(specs: ButtonSpec[]): void {
+    this.buttonContainer.innerHTML = '';
+    // Always fill a whole number of GRID_COLS-wide rows (min one) so the
+    // card footprint never changes as the selection changes — empty slots
+    // render as dim cells.
+    const cells = Math.max(GRID_COLS, Math.ceil(specs.length / GRID_COLS) * GRID_COLS);
+    for (let i = 0; i < cells; i++) {
+      const spec = specs[i];
+      this.buttonContainer.appendChild(spec ? this.makeTile(spec) : makeEmptyCell());
+    }
+  }
+
+  private makeTile(spec: ButtonSpec): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.disabled = !spec.enabled;
+    const accent = spec.enabled ? FACTION_TINT[this.faction] : FACTION_TINT_DIM[this.faction];
     btn.style.cssText = [
-      'background:rgba(13,17,22,0.92)',
-      `border:1px solid ${spec.enabled ? FACTION_TINT[this.faction] : FACTION_TINT_DIM[this.faction]}`,
-      'border-radius:4px',
-      'padding:8px 12px',
-      'min-width:120px', 'min-height:54px',
-      'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center', 'gap:4px',
-      'color:rgba(216,232,240,0.92)',
+      `width:${TILE_PX}px`, `height:${TILE_PX}px`, 'box-sizing:border-box',
+      'position:relative',
+      'background:rgba(13,17,22,0.95)',
+      `border:1px solid ${accent}`,
+      'border-radius:5px',
+      'padding:5px 3px 4px',
+      'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center', 'gap:2px',
+      'color:rgba(216,232,240,0.95)',
       'font-family:ui-monospace,Menlo,monospace',
       `cursor:${spec.enabled ? 'pointer' : 'not-allowed'}`,
-      `opacity:${spec.enabled ? '1' : '0.5'}`,
+      `opacity:${spec.enabled ? '1' : '0.45'}`,
+      `box-shadow:${spec.enabled ? `0 0 8px ${FACTION_TINT_DIM[this.faction]}` : 'none'}`,
     ].join(';');
 
+    const iconWrap = document.createElement('div');
+    iconWrap.style.cssText = `color:${accent};line-height:0;`;
+    iconWrap.innerHTML = hudIconSvg(spec.icon, 26);
+    btn.appendChild(iconWrap);
+
     const labelRow = document.createElement('div');
-    labelRow.style.cssText = 'font-size:13px; letter-spacing:0.18em; font-weight:600;';
+    labelRow.style.cssText = 'font-size:7px;letter-spacing:0.06em;font-weight:600;text-align:center;line-height:1.1;';
     labelRow.textContent = spec.label;
     btn.appendChild(labelRow);
 
     if (spec.hotkey) {
       const hk = document.createElement('div');
-      hk.style.cssText = 'font-size:9px; letter-spacing:0.32em; color:rgba(154,170,180,0.6);';
-      hk.textContent = `[ ${spec.hotkey} ]`;
+      hk.style.cssText = 'position:absolute;top:2px;left:3px;font-size:8px;font-weight:700;color:rgba(154,170,180,0.85);';
+      hk.textContent = spec.hotkey;
       btn.appendChild(hk);
     }
     if (spec.costEnergy !== undefined) {
       const cost = document.createElement('div');
-      cost.style.cssText = 'font-size:11px; letter-spacing:0.16em; color:#ffd166;';
-      cost.textContent = `E ${spec.costEnergy}`;
+      cost.style.cssText = 'position:absolute;top:2px;right:3px;font-size:8px;font-weight:700;color:#ffd166;';
+      cost.textContent = `${spec.costEnergy}`;
       btn.appendChild(cost);
     }
     if (!spec.enabled && spec.disabledReason) btn.title = spec.disabledReason;
     btn.addEventListener('click', () => spec.onClick());
     return btn;
   }
+}
+
+// A dim, empty command-card slot — keeps the grid a fixed size regardless
+// of how many actions the current selection offers.
+function makeEmptyCell(): HTMLDivElement {
+  const cell = document.createElement('div');
+  cell.style.cssText = [
+    `width:${TILE_PX}px`, `height:${TILE_PX}px`, 'box-sizing:border-box',
+    'border-radius:5px',
+    'border:1px solid rgba(80,96,108,0.18)',
+    'background:rgba(13,17,22,0.45)',
+  ].join(';');
+  return cell;
 }

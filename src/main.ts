@@ -541,6 +541,13 @@ async function bootstrap(): Promise<void> {
   resourceBar.appendChild(hpCard.root);
   const energyCard = makeResourceCard('E', '0', RESOURCE_COLOR.energy, false, factionTint);
   resourceBar.appendChild(energyCard.root);
+  // Phase C.2: Matter is the planned construction-material companion
+  // (plan.md C.7). Reserved + greyed in the SC2-model resource bar so the
+  // slot exists now and goes live later without a layout shift.
+  const matterCard = makeResourceCard('M', '—', '#6b7d88', false, factionTint);
+  matterCard.root.style.opacity = '0.45';
+  matterCard.root.title = 'Matter — reserved (Phase C.7)';
+  resourceBar.appendChild(matterCard.root);
   const supplyCard = makeResourceCard('S', '0/5', RESOURCE_COLOR.supply, false, factionTint);
   resourceBar.appendChild(supplyCard.root);
 

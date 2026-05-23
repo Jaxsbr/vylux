@@ -60,7 +60,12 @@ test('two-tab lockstep host + join reach matching hashes and run a match', async
   // same tick number. The hash-status check below verifies that.
   // Bound bumped from 2 to 5 in Phase 3.0 — structure advancement adds
   // a small amount of per-tick work that widens cross-tab rAF jitter.
-  expect(Math.abs(tickHost - tickJoin)).toBeLessThanOrEqual(5);
+  // Phase C.2 bumps to 8: the per-tick production pass (worker train
+  // queue) adds a touch more work, and under a loaded full-suite run the
+  // two independently-rAF-driven tabs drift a tick or two further apart.
+  // Timing tolerance only — determinism is gated by the per-tick hash
+  // agreement below + the golden fixtures.
+  expect(Math.abs(tickHost - tickJoin)).toBeLessThanOrEqual(8);
 
   // The per-tick hash exchange line. Once both peers have exchanged
   // hashes for the previous tick, the HUD reads `hash@<n> match`.
