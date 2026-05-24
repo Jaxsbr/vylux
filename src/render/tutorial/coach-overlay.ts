@@ -201,6 +201,8 @@ export class CoachOverlay {
     bx = Math.max(bubbleW / 2 + margin, Math.min(window.innerWidth - bubbleW / 2 - margin, bx));
     let by = a.y - bubbleH - 40; // above the anchor
     if (by < margin) by = a.y + 40; // not enough room above → drop below
+    // Clamp vertically so a low anchor that drops below can't run off-screen.
+    by = Math.max(margin, Math.min(window.innerHeight - bubbleH - margin, by));
     this.bubble.style.left = `${bx}px`;
     this.bubble.style.top = `${by}px`;
 

@@ -141,6 +141,10 @@ export class TutorialController {
   // Called each render frame from main's tickHud, with the same dtMs the HUD
   // uses for its other per-frame animation.
   update(dtMs: number): void {
+    // Once complete the sim is halted and the overlay is up — nothing left to
+    // poll, so don't keep rebuilding the ctx / re-reading exploration.
+    if (this.phase === 'complete') return;
+
     this.opts.exploration.update();
     const ctx = this.buildCtx();
 
@@ -181,6 +185,12 @@ export class TutorialController {
   // ----- internals --------------------------------------------------------
 
   private showStep(): void {
+    // Clear the action latches on every step entry so a move / harvest order
+    // issued during an EARLIER step can't auto-satisfy this one. The `scout`
+    // (didMove) and `harvest` (didAssignHarvest) gates must reflect an action
+    // taken while the step is actually active, not anything latched before it.
+    this.didMove = false;
+    this.didAssignHarvest = false;
     const step = GUIDED_STEPS[this.stepIndex];
     this.coach.setStep({
       title: step.title,
