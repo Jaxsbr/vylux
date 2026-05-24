@@ -35,7 +35,7 @@ export function opposingFactionId(id: FactionId): FactionId {
 export type UnitKind = 'worker';
 
 // Energy is the only live resource. Matter (construction material) lands
-// in Phase C.2.
+// in Phase C.7.
 export type ResourceKind = 'energy';
 
 // Phase C.1: only the work pod survives in the structures union. Future

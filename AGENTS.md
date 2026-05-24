@@ -74,15 +74,15 @@ Same gate the CI determinism workflow runs (`.github/workflows/determinism.yml`)
 | `fixed.ts`        | Q16.16 fixed-point arithmetic. Add/sub via int32 wraparound; mul/div via BigInt to dodge int32-truncation on intermediate products. `distSq` + `rangeSq` for sqrt-free range checks. |
 | `rng.ts`          | splitmix64 PRNG with BigInt state. Seeded per match; snapshot/restore for replays. No `Math.random()` anywhere in sim. |
 | `hash.ts`         | FNV-1a 64-bit hasher. Sync, BigInt-backed. Used for tick-by-tick desync detection. |
-| `types.ts`        | `SimState`, `Unit` (discriminated `Worker \| Defender \| Raider`), `EnergyNode`, `FactionState`. All state fields are integers or `Fixed`. |
-| `units-config.ts` | Per-kind stats (HP, speed, attackRange, attackDamage, attackCooldownTicks, trainCost). Hoist target for Phase 3 difficulty tiers. |
+| `types.ts`        | `SimState`, `Unit` (= `Worker` only — combat units return in Phase D, their `CommandKind` slots reserved), `ResourceNode` (with `EnergyNode` kept as an alias), `WorkPod`, `FactionState`. All state fields are integers or `Fixed`. |
+| `units-config.ts` | Per-faction, per-kind worker stats (`maxHp`, `speed`, `trainCost`, `visionRadius`, `trainTicks`) read via `unitStatsFor(factionId, kind)`, plus the worker-charge / supply-cap / research-cost constants. Combat-unit attack stats were stripped with the units — they return in Phase D. |
 | `commands.ts`     | Input commands consumed by the sim: `AssignWorkerToNode`, `SpawnUnit`, `TrainUnit`. Plain data, replay-safe. |
 | `state.ts`        | Initial-state factory + entity-lookup helpers (linear scan; entity counts are small, iteration is cache-friendly). |
-| `step.ts`         | One tick: apply commands → advance units (worker harvest loop, defender attack-in-range, raider march+attack-or-attack-HQ) → win check → bump tick + RNG. Sim freezes once `state.winner` is set so past-end frames stay deterministic. |
+| `step.ts`         | One tick: apply commands → advance workers (harvest cycle, charge mode, work-pod build) → advance structures → win check (HQ destroyed or Resign) → bump tick + RNG. Sim freezes once `state.winner` is set so past-end frames stay deterministic. |
 | `sim.ts`          | Public `Sim` class: state + step + `stateHash()` (canonical FNV-1a digest). |
-| `ai.ts`           | Pure `tickAi(state, faction)` returning `Command[]`. Build order: workers → defenders → raiders. `autoAssignIdleWorkers` is exported separately so player-controlled factions get the same idle-worker convenience without the AI's training decisions. |
+| `ai.ts`           | Pure `tickAi(state, faction)` returning `Command[]`. Current macro: auto-assign idle workers to the nearest discovered live node → train workers to the supply cap → build a work pod at the cap (≤5, fixed HQ-offset table). `autoAssignIdleWorkers` is exported separately so player-controlled factions get the same idle-worker convenience without the AI's training decisions. Proactive scouting + expansion land in Phase C.6.7 of `docs/plan.md`. |
 | `replay.ts`       | `Match` class wraps `Sim` and records every input frame. `ReplayLog` JSON format `{ version, spec, frames, finalHash, finalWinner }`. `playReplay` validates against the embedded final hash. |
-| `scripted-match.ts` | Reusable test fixtures (harvest, combat, AI-vs-AI). Drives both Vitest gates and the committed golden hash files. |
+| `scripted-match.ts` | Reusable test fixtures (harvest, AI-vs-AI). Drives both Vitest gates and the committed golden hash files. |
 
 ### `src/render/` — Three.js scene (read-only consumer of sim state)
 
@@ -129,7 +129,7 @@ Three run modes selected from URL params:
 - `?lockstep=host` / `?lockstep=join` (no room): same-machine two-tab lockstep over `BroadcastChannel`. Local determinism gate.
 - `?lockstep=host&room=ABCDEF` / `?lockstep=join&room=ABCDEF`: peer-to-peer lockstep over WebRTC datachannel via the signaling server. Substrate-only swap; `LockstepChannel` is unchanged.
 
-Wires `Sim` → `Match` → `SimRenderer` → `startSimDriver`, plus `PlayerInput` and `tickAi` (PvAI) or `LockstepChannel` (lockstep). For WebRTC mode, `WebRtcTransport.connect()` is awaited before the scene is built and a "connecting · room ABCDEF" overlay is shown until the datachannel opens. HUD overlay shows tick / winner / per-faction HP / points / energy / unit count / dropped sim steps; in lockstep mode it also shows peer connection + the latest *resolved* per-tick hash status (BroadcastChannel + WebRTC delivery are both async, so the most-recent tick is almost always still "pending" at render time).
+Wires `Sim` → `Match` → `SimRenderer` → `startSimDriver`, plus `PlayerInput` and `tickAi` (PvAI) or `LockstepChannel` (lockstep). For WebRTC mode, `WebRtcTransport.connect()` is awaited before the scene is built and a "connecting · room ABCDEF" overlay is shown until the datachannel opens. HUD overlay shows tick / winner / per-faction HP / energy / unit count / dropped sim steps; in lockstep mode it also shows peer connection + the latest *resolved* per-tick hash status (BroadcastChannel + WebRTC delivery are both async, so the most-recent tick is almost always still "pending" at render time).
 
 ### `src/grid.ts` — shared
 
@@ -155,7 +155,7 @@ We don't go *out of our way* to add new uses of determinism, but we don't break 
 - **State hash** (`Sim.stateHash`) defines the canonical serialisation. Changing it invalidates all replays and golden fixtures.
 - **`CommandKind` IDs are append-only — never reuse a slot, even after removal.** Each value in the `CommandKind` const enum corresponds to a wire-format byte; a v3 replay that contains `kind: 6` (the deprecated 3.1 `ResearchTier2`) must continue to parse without crashing under v4 even though no current command interface uses that slot. Removing a command means dropping its interface from the union and leaving the enum value behind as a reserved/dead slot — see `src/sim/commands.ts` header for the rule, and `ResearchTier2 = 6` for the worked example. Adding a command means picking the next unused number; never recycle.
 
-The `tests/determinism/` directory contains committed golden hash sequences for four scripted matches (200-tick + 12,000-tick harvest, 1500-tick combat, 3000-tick AI-vs-AI). The CI workflow runs the same `npm test` on Linux + macOS + Windows; if any platform's V8 produces a different hash than the committed fixture, the workflow fails with the first divergent tick visible in the diff.
+The `tests/determinism/` directory contains committed golden hash sequences for three scripted matches (200-tick + 12,000-tick harvest, 3000-tick AI-vs-AI). The CI workflow runs the same `npm test` on Linux + macOS + Windows; if any platform's V8 produces a different hash than the committed fixture, the workflow fails with the first divergent tick visible in the diff.
 
 To regenerate the fixtures after intentional sim changes:
 

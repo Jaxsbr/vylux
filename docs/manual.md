@@ -12,7 +12,7 @@
 
 | Resource | Source | Used for | Notes |
 |---|---|---|---|
-| **Energy** | Energy nodes scattered around the map. Workers gather → return → deposit at HQ. | Worker training, work pod construction. | The only live resource at this cut; **Matter** is the planned construction-material companion (Phase C.2 of `plan.md`). |
+| **Energy** | Energy nodes scattered around the map. Workers gather → return → deposit at HQ. | Worker training, work pod construction. | The only live resource at this cut; **Matter** is the planned construction-material companion (Phase C.7 of `plan.md`). |
 
 ### Worker harvest model
 

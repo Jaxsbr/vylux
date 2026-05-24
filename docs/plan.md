@@ -1,6 +1,6 @@
 # Vylux — Plan
 
-> **Last updated:** 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change. Map work inserted as **C.6.5** ahead of the economy depth by owner direction (2026-05-24): double the grid to 64², ~16 seeded random nodes with low/med/high values + brightness, fully-random (not mirrored), placement barred from HQ / HQ-adjacent / edge tiles and guaranteed ≥1 node in each HQ's vision; the tutorial keeps its hand-placed layout.
+> **Last updated:** 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change. Map work inserted as **C.6.5** ahead of the economy depth by owner direction (2026-05-24): double the grid to 64², ~16 seeded random nodes with low/med/high values + brightness, fully-random (not mirrored), placement barred from HQ / HQ-adjacent / edge tiles and guaranteed ≥1 node in each HQ's vision; the tutorial keeps its hand-placed layout. Two further sub-phases inserted 2026-05-24 by owner direction: **C.6.6** (sim-side obstacle avoidance so workers stop clipping through the HQ / pods / nodes — accepted as a sim change, goldens regen + version bump) ahead of the economy; and **C.7.5** (a dedicated **Resource Depot** building — a closer offload point that fixes the long-haul collection stall, plus the resource-collection research tree — sequenced after C.7 so it collects Matter too, not just energy).
 > **Visual north star:** [`concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`](concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png) — dense glowing Tron city, cyan/red grid lines pulsing through the world, lit vertical structures, purposeful silhouettes.
 > **Mindset:** the game must be fun. A good game loop matters more than feature count. Strip down to the minimum that's already fun, polish until it sings, *then* layer more on.
 
@@ -133,9 +133,12 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | C.3 | Game-feel: audio (synth ambient + SFX)  | FEEL          | ✅ landed             |
 | C.4 | Game-feel: motion & world life          | FEEL          | ✅ landed (entity-driven; grid pulse deferred) |
 | C.5 | Worker silhouette redesign              | FEEL, CLARITY | ✅ landed (hovering hex courier) |
-| C.6 | Onboarding & tutorial sandbox           | ONBOARD       | spec refined 2026-05-24 |
+| C.6 | Onboarding & tutorial sandbox           | ONBOARD       | ✅ landed 2026-05-24 (#17) |
 | C.6.5 | **Map: bigger arena + randomised energy field** | new scope | ✅ landed 2026-05-24 |
+| C.6.6 | **Sim-side obstacle avoidance (worker pathing)** | new scope | spec'd 2026-05-24 |
+| C.6.7 | **AI behaviour — scout, expand-harvest, grow** | new scope | spec'd 2026-05-25 |
 | C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
+| C.7.5 | **Resource Depot — collection building + research** | new scope | spec'd 2026-05-24 |
 | C.8 | Research depth — worker + HQ trees      | (was C.2)     | deferred             |
 
 The original "C.2+" economy/research work (Matter, upgrade trees) is intentionally
@@ -605,6 +608,102 @@ map:
   `REPLAY_VERSION` 24 → 25 and all three golden fixtures regenerated (each
   exercises the faction-1 = Siege worker).
 
+#### Phase C.6.6 — Sim-side obstacle avoidance (worker pathing) · [new — owner-inserted 2026-05-24]
+
+> **Inserted by owner direction (2026-05-24).** Workers currently walk straight
+> *through* the HQ, work pods, and energy nodes — the Chebyshev step-toward-target
+> (`step.ts:519–540`) has no obstacle awareness, so it reads as unfinished. Add
+> deterministic local avoidance so a worker routes *around* a static blocker
+> instead of clipping through it. Sequenced now (a C.4 motion sequel), ahead of the
+> economy work, because it's a standing visual blemish on the otherwise-polished
+> motion pass.
+
+**Sim-side, not render-only (owner decision).** Worker `x/y` are hashed sim state
+(`sim.ts:120–121`), so a render-only nudge would let the mesh diverge from its true
+position — the selection ring, work-beams, and arrival tile all key off the sim
+position and would lag the dodge. Doing it in the sim keeps mesh + ring + beams in
+agreement. The cost is accepted: it's a sim change → **regenerate the golden
+fixtures and bump `REPLAY_VERSION`** (25 → 26), and travel paths get marginally
+longer (slightly more time/charge per cycle — a deliberate, deterministic nudge).
+
+**Approach.**
+- Treat the few static blockers (HQ, operational work pods, depots, energy nodes)
+  as small convex footprints with a soft clearance radius. There is **no occupancy
+  grid today** (confirmed — `step.ts` has none); introduce only what's needed.
+- **Local steering first, not full A\*.** When the straight `moveTowards` step would
+  enter a blocker footprint, deflect the per-axis step tangentially around it and
+  resume the straight line once clear. Our obstacles are small and convex, so local
+  avoidance won't trap on concavities; reserve grid A\* for Phase D, where combat
+  units in contested space actually need it.
+- All math stays in fixed-point (`Fixed`, reuse `clampStep`) — never float, never
+  `Math.*` — so replays reproduce.
+- The worker's *own* destination footprint is exempt (it can walk onto the node /
+  pod / HQ / depot it is targeting); avoidance applies only to blockers in the way.
+
+**Tests.** Unit-test the avoidance step as a pure deterministic function (same
+inputs → same path; a step that would enter a non-target footprint is deflected;
+clear paths are unchanged, so straight-line behaviour is preserved where there's
+nothing to avoid). Regenerate goldens; `tsc` + unit + e2e green; e2e smoke that the
+scene still renders within the `MAX_STEPS_PER_FRAME` budget (no perf regression from
+the per-step blocker checks).
+
+Out of scope: grid A\* / global pathfinding (Phase D); unit-vs-unit avoidance (no
+combat units yet); moving-obstacle avoidance.
+
+**Exit:** a worker visibly routes around the HQ / pods / depots / energy nodes
+instead of clipping through them; verify gate green incl. regenerated goldens.
+
+#### Phase C.6.7 — AI behaviour: scout, expand-harvest, grow · [new — owner-inserted 2026-05-25]
+
+> **Inserted by owner direction (2026-05-25).** C.6.5's 64² map + randomised
+> energy field exposed an economic-AI gap: the AI only **auto-assigns idle workers
+> to already-*discovered* live nodes** and never proactively scouts (`ai.ts` —
+> `autoAssignIdleWorkers` + the train/pod build order; see `manual.md` → AI
+> behaviour). On the small fixed map its home patch was enough; on the big random
+> map, once the AI exhausts the nodes near its HQ it has **no discovered live node
+> left and silently stalls** — it stops harvesting, never expands, and stops being
+> a real opponent. Make the AI a competent economic player on the new map.
+
+**Three behaviours.**
+1. **Scout to uncover fog.** Periodically dispatch a worker to explore unseen tiles
+   (toward the nearest unexplored region / map centre), flipping `discoveredBy`
+   flags so fresh nodes become harvest-eligible. Target selection is deterministic
+   (derived from sim state, **never `Math.random`**). This is the missing primitive —
+   auto-assign already routes to the nearest discovered live node; the gap is
+   *discovery*.
+2. **Expand-harvest when the home patch exhausts.** When the AI has no discovered
+   live node within easy reach, it routes workers to the nearest discovered live
+   node *anywhere*, and if none is discovered, it scouts (behaviour 1) rather than
+   idling. No economic deadlock.
+3. **Grow via pods at the cap.** The cap→pod build already exists (train to cap →
+   build a pod, ≤5, via the fixed HQ offset table). Harden it and bias pod
+   placement *toward discovered node clusters* rather than only hugging the HQ —
+   this is the same expansion instinct the C.7.5 depot-AI note calls for, so the
+   two should share the cluster-targeting helper.
+
+**Determinism.** AI logic is the pure `tickAi(state, faction)` returning
+`Command[]` — it changes *what the AI does*, not the replay wire format, so **no
+`REPLAY_VERSION` bump**, but the AI now plays differently → the **`ai-vs-ai-3000`
+golden fixture must be regenerated** (`RECORD_GOLDEN=1 npm test`). All scout/expand
+target picks must read deterministic sim state / the seeded RNG.
+
+**Tests.** Unit-test the new decision helpers as pure functions (same state → same
+commands; scouts when no discovered live node exists; expands to a distant
+discovered node once the home patch is depleted; still builds a pod at the cap).
+Extend the AI-vs-AI e2e smoke so it asserts **neither faction economically
+deadlocks** over a long match on the 64² randomised map (strengthens C.6.5's
+no-harvest-deadlock guard into a no-*stall* guard). Regenerate the `ai-vs-ai`
+golden; `tsc` + unit + e2e green. Update `docs/manual.md` → AI behaviour.
+
+Out of scope: autonomous AI research (still deferred — the AI doesn't research
+auto-resume on its own); combat AI (Phase D); difficulty tiers; depot placement
+(C.7.5, but it reuses this phase's cluster-targeting helper).
+
+**Exit:** on a normal 64² match the AI scouts out from its home patch, keeps
+harvesting after the nearby nodes deplete (no economic stall), and grows its
+workforce via pods; an AI-vs-AI smoke proves no deadlock over a long match; verify
+gate green incl. the regenerated `ai-vs-ai` golden.
+
 #### Phase C.7 — Economy depth: Matter + cost split  (was C.2)
 
 The original C.2 economy work, now after the experience pass.
@@ -616,15 +715,116 @@ The original C.2 economy work, now after the experience pass.
   also an ongoing upkeep?
 - Tests + manual updated; regenerate the golden fixtures (sim cost shapes change).
 
+#### Phase C.7.5 — Resource Depot: dedicated collection building + research · [new — owner-inserted 2026-05-24]
+
+> **Inserted by owner direction (2026-05-24), sequenced after C.7.** Origin: once
+> the energy nodes near the HQ exhaust, workers haul all the way back to the HQ to
+> offload (deposit is hardcoded to the HQ — `step.ts:630–636`), the round trip
+> balloons, and the collection rate craters — the opposite of the "economy
+> accelerates with more workers" feel we want. C.6.5's bigger 64² map made this
+> worse. The fix is a **dedicated resource-collection building** you plant near a
+> fresh node cluster so the offload trip stays short. Owner chose a distinct
+> building over reusing the work pod, and chose to land it *with the resource
+> expansion* (C.7) rather than as an early energy-only patch: since Matter (C.7)
+> adds a second resource, this building is the home for **multi-resource collection
+> and the resource-collection research tree**.
+
+> **Lever.** This defers the energy-haul stall fix until after C.7. If the stall
+> hurts the Phase C fun gate before then, pull a minimal energy-only version of the
+> deposit-retarget below forward as a stopgap (same `pickDepositTarget` seam) — but
+> the full building lands here.
+
+**The depot (new structure).** A worker-built structure dedicated to resource
+logistics, distinct from the work pod (pod = supply cap + worker charge; depot =
+resource collection + resource research). New `StructureKind`, new mesh (Tron-themed,
+distinct silhouette from HQ / pod), worker-built via the existing
+`BuildStructureByWorker` path (the pod already uses command slot 11 — the depot is a
+second target of the same worker-build flow). HP / build cost / build time tuned in
+scope.
+
+**Deposit retarget (the stall fix).** Add `pickDepositTarget()` mirroring the
+existing `pickChargeTarget()` (`step.ts:138–145`): a returning worker offloads at the
+**nearest friendly operational depot, falling back to the HQ** — exactly the pattern
+charge already uses. Called at the head of the `returning` phase in place of the
+hardcoded HQ walk. Energy is a faction-global pool, so depositing at a depot still
+credits `faction.energy` (no per-structure storage) — same for Matter once C.7 lands.
+
+**Resource-collection research (the "relevant research").** The depot surfaces a
+research slot (same infra as the pod's auto-resume — `ResearchKind` + action-bar row +
+completion switch). Candidate items (pick a first cut in scope): deposit throughput,
+deposit/collection radius, passive trickle-collection, or a yield bonus on nearby
+nodes. Each must produce a **visible** change on the depot (reuse the C.4 beam/ring
+idiom) — the C.8 rule applies here too. This is the *resource* research tree; C.8's
+worker/HQ trees layer beside it.
+
+**AI.** The AI plants pods around its own HQ via a deterministic offset table — it
+won't *expand toward nodes* on its own, so a depot near remote clusters is a
+player-only advantage at first. Teach the AI to place a depot toward its nearest
+discovered-but-distant node cluster (deterministic, same RNG discipline).
+Non-blocking if it slips, but note it so the AI doesn't stall on a depleted home
+patch.
+
+**Determinism.** New structure kind + the deposit retarget both change hashed sim
+state → **regenerate the golden fixtures and bump `REPLAY_VERSION`**. Build the depot
+placement and any research draws off the deterministic sim RNG — never `Math.random`.
+
+**Tests.** Unit: `pickDepositTarget` picks nearest operational depot then HQ (mirror
+the charge-target tests); the depot build + research-complete switch arm. e2e: a
+worker offloads at a depot near a remote cluster (round trip shortened); the depot's
+command card shows its research tile. Golden fixtures regenerated; `tsc` + unit + e2e
+green. Update `docs/manual.md` (the depot, the deposit rule, the resource-research
+tree).
+
+Out of scope: combat-unit interaction; the depot doubling as a charge spot (decide in
+scope — keep concerns split, or let the depot also charge so a remote cluster needs
+one building, not two); meta-progression.
+
+**Exit:** a player plants a depot near a remote node cluster, workers offload there
+instead of hauling to the HQ, the collection rate holds as the economy scales out,
+and ≥1 resource-collection research item lands with a visible change; verify gate
+green incl. regenerated goldens.
+
 #### Phase C.8 — Research depth: worker + HQ trees  (was C.2)
 
-- Worker-upgrade research hosted at work pods; the **energy-trail** mechanic
-  returns here as one upgrade-tree option.
+- **Worker-upgrade research, hosted at any operational work pod.** The first
+  concrete worker-tree items beside the C.1 auto-resume validator. Each is a
+  one-time, faction-level upgrade (the auto-resume single-active-research rule
+  holds — at most one research mid-flight at a time), and each is **deliberately
+  expensive** (well above auto-resume's 80 E) so it reads as a real economic
+  commitment, not a default pickup:
+  - **Harvest Speed** — cuts the worker harvest interval (`harvestTicks`, today
+    23) by ~30% (≈16 ticks), so each parked worker gathers faster. Faction-level
+    flag, mirroring `autoResumeResearched`. Cost ≈ **200 E / 200 ticks** (tune in
+    playtest).
+  - **Move Speed** — raises worker move speed (`speed`, today 0.055) by ~30%
+    (≈0.072 tiles/tick), so transit + redeploy is quicker. Faction-level flag.
+    Cost ≈ **250 E / 250 ticks** (tune).
+  - The two together are a straight economy accelerant: `FactionConfig` notes
+    that harvest interval normally pairs *inversely* with speed (fast workers
+    harvest slower per tick), so buying both deliberately breaks that trade-off.
+    That's the intent — the high price is what balances it.
+  - The **energy-trail** mechanic also returns here as a further upgrade-tree
+    option.
+- **Determinism + HUD for the worker tree.** New `ResearchKind` values
+  (`harvestSpeed`, `moveSpeed`) + matching `*Researched` flags on `FactionState`;
+  the harvest-tick and move-speed reads consult the flags (a multiplier applied
+  in `step.ts`'s harvest loop + movement, or surfaced through `factionConfigFor` /
+  `unitStatsFor` taking the researched flags). New hashed fields + changed
+  movement/harvest math → **regenerate the golden fixtures and bump
+  `REPLAY_VERSION`**. The pod command card shows **one** research tile today; with
+  three items it must become a small fixed grid of research tiles (auto-resume +
+  the two speed upgrades) with per-item cost / disabled / in-progress / done
+  states (the C.2 command-card model).
 - HQ research track (vision aura, storage cap, auto-defence beam, …).
 - Every research result must change something **visible** on the HQ or worker —
-  research the player can't see doesn't reinforce the loop. (C.3 / C.4 now make
+  research the player can't see doesn't reinforce the loop. Move Speed is
+  inherently visible (workers visibly quicker); Harvest Speed reads via a faster /
+  brighter work-beam pulse plus the C.4 research-complete ripple. (C.3 / C.4 make
   "visible + audible" real.)
-- Tests + manual updated.
+- Tests + manual updated: add the two rows to the manual's Tech table + the
+  multi-item pod-research note; regenerate the golden fixtures; unit-test that a
+  researched flag actually applies its multiplier (deterministically); e2e that
+  every research tile renders with the correct state.
 
 **Phase C exit (the fun gate):** ≥3 internal sessions per faction-pick where the
 player spends 5 minutes building economy + researching, and reports the time as
