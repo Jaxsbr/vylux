@@ -210,8 +210,9 @@ import type { InitialMatchSpec } from './state';
 // / maxHp 30) and Siege's harvest interval matches Swarm's (harvestTicks 23) —
 // the slower + costlier Siege worker made the faction strictly worse, so the
 // asymmetry is parked until combat units return (Phase D). Sim STATE shape is
-// unchanged; only per-faction stat VALUES move, so v24 replays still parse but
-// no longer validate against the new sim. Golden fixtures regenerated. (The
+// unchanged — only per-faction stat VALUES move — but per the version contract
+// any pre-bump v24 replay no longer loads (parseReplay + playReplay reject any
+// version ≠ the current one). Golden fixtures regenerated. (The
 // C.6.5 map work itself — 64² grid + randomised energy field — needed no bump:
 // it's render + spec-builder only, and the golden fixtures use their own
 // scripted-match specs.)

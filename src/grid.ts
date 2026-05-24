@@ -44,8 +44,12 @@ export const GRID_CONSTANTS = {
   extendedMajorIntensity: 0.18,
   extendedMinorIntensity: 0.04,
   extendedDividerY: 0.015,
-  extendedFadeInner: 16, // right at the play boundary (worldExtent/2)
-  extendedFadeOuter: 38, // tight falloff — lines gone within ~0.7× worldExtent past the play edge
+  // Derived from the grid extent (not hard-coded) so the fade tracks the play
+  // boundary if gridSize moves again — C.6.5 doubled the grid and the old
+  // literals (16 / 38, tuned for the 32² worldExtent) would have dissolved the
+  // backdrop grid *inside* the new play area.
+  extendedFadeInner: (GRID_SIZE * TILE_SIZE) / 2, // right at the play boundary (worldExtent/2)
+  extendedFadeOuter: GRID_SIZE * TILE_SIZE * 1.2, // tight falloff — lines gone ~0.7× worldExtent past the play edge
 } as const;
 
 export const TILE_COUNT = GRID_CONSTANTS.gridSize * GRID_CONSTANTS.gridSize;

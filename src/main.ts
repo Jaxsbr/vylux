@@ -375,13 +375,16 @@ async function bootstrap(): Promise<void> {
     ? (playerFaction === 0 ? pickedFactionId : (pickedFactionId === 'swarm' ? 'siege' : 'swarm'))
     : 'swarm';
   const factionId1: FactionId = factionId0 === 'swarm' ? 'siege' : 'swarm';
-  // Phase C.6.5: a fresh random energy field per PvA / observe match (the
-  // menu-owned surfaces). The chosen seed is baked into the spec and
-  // serialised into the replay, so the layout reproduces. Lockstep modes keep
-  // SPEC's fixed seed + field so both peers generate the same map (no desync),
-  // and the tutorial keeps its hand-placed nodes.
-  const isLockstep = mode.kind === 'lockstep-local' || mode.kind === 'lockstep-webrtc';
-  const randomiseMap = !isTutorial && !isLockstep;
+  // Phase C.6.5: a fresh random energy field per standalone PvA match. The
+  // chosen seed is baked into the spec and serialised into the replay, so the
+  // layout reproduces. Only a real `pva` (non-tutorial) match randomises:
+  //  - the tutorial keeps its hand-placed nodes;
+  //  - lockstep peers must agree on the map, so they keep SPEC's fixed seed;
+  //  - an `observe-local` tab replays the lockstep players' frames against its
+  //    own Sim (see ObserverLoop) and has NO hash-exchange to catch a desync,
+  //    so it MUST build the same fixed-seed field the players use — randomising
+  //    it would silently diverge the observed match from tick 0.
+  const randomiseMap = mode.kind === 'pva' && !isTutorial;
   const baseSpec = isTutorial ? TUTORIAL_SPEC : SPEC;
   const mapSeed = randomiseMap ? (Math.floor(Math.random() * 0x1_0000_0000) >>> 0) : (baseSpec.seed as number);
   const matchSpec: InitialMatchSpec = {
