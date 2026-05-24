@@ -38,7 +38,7 @@ test('tutorial launches, advances on the gating action, and is skippable', async
 
   // 2. Performing the gated action (select the HQ) advances to the next step.
   await page.evaluate(() => (window as unknown as { __vyluxTest: TutorialHooks }).__vyluxTest.selectHq());
-  await expect.poll(currentStep).toBe('trainWorker');
+  await expect.poll(currentStep).toBe('trainToCap');
 
   await page.screenshot({ path: 'test-results/tutorial.png', fullPage: false });
 

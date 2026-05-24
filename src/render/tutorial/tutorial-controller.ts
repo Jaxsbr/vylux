@@ -14,7 +14,7 @@
 import type { Camera } from 'three';
 import { toFloat } from '../../sim/fixed';
 import type { Sim } from '../../sim/sim';
-import { findUnit } from '../../sim/state';
+import { findStructure } from '../../sim/state';
 import type { Faction } from '../../sim/types';
 import type { AudioManager } from '../../audio/audio-manager';
 import type { Exploration } from '../exploration';
@@ -214,13 +214,23 @@ export class TutorialController {
     const state = sim.state;
     const fs = state.factions[playerFaction];
 
-    let selectedWorkerCount = 0;
-    for (const id of input.getSelectedUnitIds()) {
-      const u = findUnit(state, id);
-      if (u && u.alive && u.kind === 'worker' && u.faction === playerFaction) selectedWorkerCount += 1;
+    const podExists = state.structures.some((s) => s.alive && s.faction === playerFaction);
+
+    // A friendly work pod is the current selection (the gate for the "select
+    // the pod" step — research lives on the pod, not the worker).
+    let podSelected = false;
+    const selStructureId = input.getSelectedStructureId();
+    if (selStructureId !== null) {
+      const s = findStructure(state, selStructureId);
+      podSelected = s !== null && s.alive && s.faction === playerFaction && s.kind === 'workPod';
     }
 
-    const podExists = state.structures.some((s) => s.alive && s.faction === playerFaction);
+    // Cap reached: wait for the workers to actually *arrive* (supplyUsed, not
+    // queued) so the player sees the SUPPLY pill hit 5/5 and pulse red — the
+    // capacity wall the build step then answers. Also means all five workers
+    // are alive + freshly charged when the build step opens, so its button is
+    // never greyed waiting on a recharge.
+    const atSupplyCap = fs.supplyUsed >= fs.supplyCap;
 
     const enemy = (1 - playerFaction) as Faction;
     const enemyFs = state.factions[enemy];
@@ -228,9 +238,9 @@ export class TutorialController {
 
     return {
       hqSelected: input.getSelectedHqFaction() === playerFaction,
-      selectedWorkerCount,
-      workerExists: fs.supplyUsed >= 1 || fs.trainQueue.length > 0,
+      atSupplyCap,
       podExists,
+      podSelected,
       researchActiveOrDone: fs.researchingKind === 'autoResume' || fs.autoResumeResearched,
       didMove: this.didMove,
       didAssignHarvest: this.didAssignHarvest,
@@ -254,23 +264,38 @@ export class TutorialController {
         return { x: 132, y: h - 92 };
       case 'resourceBar':
         return { x: w / 2, y: 44 };
+      case 'minimap':
+        return { x: w - 110, y: h - 110 };
     }
   }
 
   private worldTargetTile(
-    target: 'playerHq' | 'firstWorker' | 'nearestNode' | 'enemyHq',
+    target: 'playerHq' | 'firstWorker' | 'nearestNode' | 'enemyHq' | 'scoutPoint' | 'firstPod',
   ): { x: number; y: number } {
     const { sim, playerFaction } = this.opts;
     const state = sim.state;
     const fs = state.factions[playerFaction];
     const hq = { x: toFloat(fs.hqX), y: toFloat(fs.hqY) };
+    const enemyFs = state.factions[(1 - playerFaction) as Faction];
+    const enemy = { x: toFloat(enemyFs.hqX), y: toFloat(enemyFs.hqY) };
 
     switch (target) {
       case 'playerHq':
         return hq;
-      case 'enemyHq': {
-        const enemyFs = state.factions[(1 - playerFaction) as Faction];
-        return { x: toFloat(enemyFs.hqX), y: toFloat(enemyFs.hqY) };
+      case 'enemyHq':
+        return enemy;
+      case 'scoutPoint':
+        // Halfway from the player HQ toward the enemy corner — a concrete
+        // "go this way" target that starts the player toward the find-enemy-HQ
+        // goal rather than just "move somewhere".
+        return { x: hq.x + (enemy.x - hq.x) * 0.5, y: hq.y + (enemy.y - hq.y) * 0.5 };
+      case 'firstPod': {
+        for (const s of state.structures) {
+          if (s.alive && s.faction === playerFaction && s.kind === 'workPod') {
+            return { x: toFloat(s.x), y: toFloat(s.y) };
+          }
+        }
+        return hq;
       }
       case 'firstWorker': {
         for (const u of state.units) {

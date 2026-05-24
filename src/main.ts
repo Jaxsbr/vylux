@@ -620,6 +620,18 @@ async function bootstrap(): Promise<void> {
   ].join(';');
   document.body.appendChild(resourceBar);
 
+  // Supply-at-cap pulse: when supply is full the count flashes red↔white so
+  // "you're capped — do something about it" reads at a glance (it's the cue
+  // the tutorial's build-a-pod step points at, and useful in any match).
+  if (document.getElementById('vy-cap-pulse-kf') === null) {
+    const kf = document.createElement('style');
+    kf.id = 'vy-cap-pulse-kf';
+    kf.textContent =
+      '@keyframes vyCapPulse{0%,100%{color:#ff5577}50%{color:#ffffff}}' +
+      '.vy-cap-pulse{animation:vyCapPulse 1.05s ease-in-out infinite}';
+    document.head.appendChild(kf);
+  }
+
   // Phase 3.11a: faction colour comes from the shared theme so menu /
   // HUD / end-screen all read from one palette source.
   const playerTheme = themeForFaction(playerFaction);
@@ -720,7 +732,14 @@ async function bootstrap(): Promise<void> {
     supplyCard.value.textContent = `${me.supplyUsed}/${me.supplyCap}`;
     const blocked = me.supplyUsed >= me.supplyCap;
     supplyCard.root.style.borderColor = blocked ? '#ff5577' : '#234';
-    supplyCard.value.style.color = blocked ? '#ff5577' : '#cde';
+    if (blocked) {
+      // Let the pulse keyframe own the colour while capped.
+      supplyCard.value.classList.add('vy-cap-pulse');
+      supplyCard.value.style.color = '';
+    } else {
+      supplyCard.value.classList.remove('vy-cap-pulse');
+      supplyCard.value.style.color = '#cde';
+    }
 
     // Debug panel. Only built if ?debug=1, but cheap to update — the
     // textContent assignment is a no-op when the panel is display:none

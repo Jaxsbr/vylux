@@ -154,7 +154,7 @@ Research is hosted at any operational work pod — pick one, click **RESEARCH AU
 
 A fixed-footprint HUD; nothing resizes to fit its text.
 
-- **Resource bar (top-centre):** HQ HP · Energy · **Matter** (reserved + greyed until Phase C.7) · Supply `used/cap` (turns red at the cap).
+- **Resource bar (top-centre):** HQ HP · Energy · **Matter** (reserved + greyed until Phase C.7) · Supply `used/cap` (pulses red/white at the cap — build a work pod to raise it).
 - **Portrait panel (bottom-left):** a 3D snapshot of the selected entity + its name, plus an action-state icon and HP / charge bars (workers), HP + build status (pods), or remaining energy (nodes).
 - **Command card (bottom-centre):** a fixed 3-wide grid of **icon tiles**, each with a hotkey badge (top-left) + Energy-cost badge (top-right); unused slots render as dim cells. Above it, a **production-queue strip** shows the queued workers, the head one carrying a production-progress bar.
 - **Minimap (bottom-right):** a top-down map of the arena. Blips mirror what's currently visible in the 3D scene (so it respects fog), plus a camera-focus marker. **Click anywhere on it to recentre the camera.**
@@ -198,7 +198,7 @@ A guided sandbox for first-time players. Launch it from the **main menu** via th
 
 The sandbox is a calm, deterministic scenario — generous starting energy (400), energy nodes by both home corners, and **no enemy AI** (the opponent HQ sits passively in the far corner). Nothing here touches the deterministic sim's hash; the tutorial is a renderer-side layer that reads state and never writes it.
 
-**Guided phase.** A coach bubble with a looping ghost-cursor demonstrates each gesture and only advances once you perform it: (1) select your HQ, (2) train a worker, (3) move it (right-click), (4) assign it to harvest (left-click a node), (5) read the charge meter (acknowledge), (6) build a work pod, (7) research auto-resume.
+**Guided phase.** A coach bubble with a looping ghost-cursor demonstrates each gesture and only advances once you perform it: (1) select your HQ, (2) train workers until you hit the supply cap (5/5), (3) build a work pod to raise the cap, (4) harvest energy, (5) camera controls — zoom / pan / minimap (acknowledge), (6) scout a worker toward the enemy corner, (7) read the charge meter (acknowledge), (8) select the work pod, (9) research auto-resume. Training to the cap comes before building so the build step always has a freshly-charged worker to dispatch, and so the capacity wall (the cap stops you at 5/5) motivates the pod.
 
 **Graduation phase.** An objectives panel (top-left) then tracks three completion goals:
 

@@ -9,14 +9,25 @@
 //
 // The energy goal is a *current-balance* read (no new sim field), so nothing
 // here touches the determinism contract or the golden fixtures.
+//
+// Step ordering is load-bearing and was tuned from a playtest:
+//   - Train to the supply cap BEFORE building, so the build step always has a
+//     freshly-trained (fully-charged) worker to dispatch — no "button greyed
+//     while my only worker recharges" dead-end.
+//   - Building is gated behind hitting 5/5, so the player feels the capacity
+//     wall and the pod's purpose (+5 cap AND recharging) lands as the answer.
+//   - Scouting points the player toward the enemy corner, seeding the
+//     graduation "find the enemy HQ" goal.
 
 export type TutorialStepId =
   | 'selectHq'
-  | 'trainWorker'
-  | 'moveWorker'
-  | 'assignHarvest'
-  | 'readCharge'
+  | 'trainToCap'
   | 'buildPod'
+  | 'harvest'
+  | 'navigate'
+  | 'scout'
+  | 'readCharge'
+  | 'selectPod'
   | 'research';
 
 // How the coach ghost-cursor demonstrates a step's gesture.
@@ -26,8 +37,8 @@ export type CoachGesture = 'leftClick' | 'rightClick' | 'point';
 //   world  — a sim tile projected to screen each frame (pans with the camera)
 //   screen — a viewport region the HUD owns (command card, portrait, …)
 export type CoachAnchor =
-  | { kind: 'world'; target: 'playerHq' | 'firstWorker' | 'nearestNode' | 'enemyHq' }
-  | { kind: 'screen'; region: 'commandCard' | 'portrait' | 'resourceBar' };
+  | { kind: 'world'; target: 'playerHq' | 'firstWorker' | 'nearestNode' | 'enemyHq' | 'scoutPoint' | 'firstPod' }
+  | { kind: 'screen'; region: 'commandCard' | 'portrait' | 'resourceBar' | 'minimap' };
 
 export interface TutorialStep {
   id: TutorialStepId;
@@ -41,8 +52,6 @@ export interface TutorialStep {
   ack?: boolean;
 }
 
-// The guided sequence. Order is load-bearing: each step teaches the gesture
-// the next one assumes the player can perform.
 export const GUIDED_STEPS: readonly TutorialStep[] = [
   {
     id: 'selectHq',
@@ -52,45 +61,60 @@ export const GUIDED_STEPS: readonly TutorialStep[] = [
     gesture: 'leftClick',
   },
   {
-    id: 'trainWorker',
-    title: 'TRAIN A WORKER',
-    body: 'Click TRAIN WORKER on the command card. Workers gather energy and build.',
+    id: 'trainToCap',
+    title: 'TRAIN WORKERS',
+    body: 'Click TRAIN WORKER to queue workers. Watch SUPPLY (top): it stops you at 5/5. Fill it up.',
     anchor: { kind: 'screen', region: 'commandCard' },
     gesture: 'leftClick',
   },
   {
-    id: 'moveWorker',
-    title: 'MOVE YOUR WORKER',
-    body: 'Click the worker to select it, then RIGHT-CLICK open ground to move it there.',
-    anchor: { kind: 'world', target: 'firstWorker' },
-    gesture: 'rightClick',
+    id: 'buildPod',
+    title: 'RAISE YOUR CAP — BUILD A POD',
+    body: "You're capped at 5/5 (flashing, top). A Work Pod adds +5 cap AND recharges nearby workers. Select a worker, click BUILD WORK POD, then click a tile.",
+    anchor: { kind: 'screen', region: 'commandCard' },
+    gesture: 'leftClick',
   },
   {
-    id: 'assignHarvest',
+    id: 'harvest',
     title: 'HARVEST ENERGY',
-    body: 'With the worker selected, LEFT-CLICK an energy node to send it harvesting.',
+    body: 'Select a worker and LEFT-CLICK an energy node to send it gathering. Energy pays for everything.',
     anchor: { kind: 'world', target: 'nearestNode' },
     gesture: 'leftClick',
   },
   {
+    id: 'navigate',
+    title: 'MOVE THE CAMERA',
+    body: 'SCROLL to zoom · WASD / arrows / middle-drag to pan · click the MINIMAP (bottom-right) to jump. Zoom out to see the whole arena before you scout.',
+    anchor: { kind: 'screen', region: 'minimap' },
+    gesture: 'point',
+    ack: true,
+  },
+  {
+    id: 'scout',
+    title: 'SCOUT THE MAP',
+    body: 'Select a worker and RIGHT-CLICK far toward the opposite corner. The enemy HQ is out there — go uncover it.',
+    anchor: { kind: 'world', target: 'scoutPoint' },
+    gesture: 'rightClick',
+  },
+  {
     id: 'readCharge',
     title: 'THE CHARGE METER',
-    body: 'Each worker carries energy charge (portrait, bottom-left). At empty it stops to recharge at a pod or your HQ.',
+    body: 'Each worker carries charge (portrait, bottom-left). At empty it stops to recharge at a pod or your HQ — that is the other reason pods matter.',
     anchor: { kind: 'screen', region: 'portrait' },
     gesture: 'point',
     ack: true,
   },
   {
-    id: 'buildPod',
-    title: 'BUILD A WORK POD',
-    body: 'Select a worker, click BUILD WORK POD, then click a tile. Pods raise your worker cap (+5) and recharge workers.',
-    anchor: { kind: 'screen', region: 'commandCard' },
+    id: 'selectPod',
+    title: 'SELECT THE WORK POD',
+    body: 'Click your Work Pod — NOT the worker — to select it. Research lives on the pod, so selecting it swaps the command card.',
+    anchor: { kind: 'world', target: 'firstPod' },
     gesture: 'leftClick',
   },
   {
     id: 'research',
     title: 'RESEARCH AUTO-RESUME',
-    body: 'Select an operational pod and click AUTO-RESUME. Workers will return to harvesting on their own after recharging.',
+    body: 'Click AUTO-RESUME on the command card. Workers will return to harvesting on their own after recharging.',
     anchor: { kind: 'screen', region: 'commandCard' },
     gesture: 'leftClick',
   },
@@ -100,9 +124,9 @@ export const GUIDED_STEPS: readonly TutorialStep[] = [
 export interface TutorialCtx {
   // step gates
   hqSelected: boolean;
-  selectedWorkerCount: number;
-  workerExists: boolean; // supplyUsed >= 1 || a worker is queued
+  atSupplyCap: boolean; // worker cap reached (queued + alive ≥ cap) with ≥1 alive
   podExists: boolean; // any alive friendly structure (building or operational)
+  podSelected: boolean; // a friendly alive work pod is the current selection
   researchActiveOrDone: boolean;
   // latched player-action flags (fed from the input feedback hooks)
   didMove: boolean;
@@ -113,22 +137,27 @@ export interface TutorialCtx {
   enemyHqFound: boolean; // enemy HQ tile has been explored
 }
 
-// Action-gated step predicates. Ack steps (e.g. `readCharge`) are not driven
-// from here — they advance on the coach's GOT IT click — so they return false.
+// Action-gated step predicates. Ack steps (`navigate`, `readCharge`) are not
+// driven from here — they advance on the coach's GOT IT click — so they
+// return false.
 export function isStepDone(id: TutorialStepId, ctx: TutorialCtx): boolean {
   switch (id) {
     case 'selectHq':
       return ctx.hqSelected;
-    case 'trainWorker':
-      return ctx.workerExists;
-    case 'moveWorker':
-      return ctx.didMove;
-    case 'assignHarvest':
-      return ctx.didAssignHarvest;
-    case 'readCharge':
-      return false; // ack-gated; controller advances on the GOT IT click
+    case 'trainToCap':
+      return ctx.atSupplyCap;
     case 'buildPod':
       return ctx.podExists;
+    case 'harvest':
+      return ctx.didAssignHarvest;
+    case 'navigate':
+      return false; // ack-gated
+    case 'scout':
+      return ctx.didMove;
+    case 'readCharge':
+      return false; // ack-gated
+    case 'selectPod':
+      return ctx.podSelected;
     case 'research':
       return ctx.researchActiveOrDone;
   }

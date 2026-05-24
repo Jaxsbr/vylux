@@ -11,9 +11,9 @@ import {
 function ctx(over: Partial<TutorialCtx> = {}): TutorialCtx {
   return {
     hqSelected: false,
-    selectedWorkerCount: 0,
-    workerExists: false,
+    atSupplyCap: false,
     podExists: false,
+    podSelected: false,
     researchActiveOrDone: false,
     didMove: false,
     didAssignHarvest: false,
@@ -25,21 +25,28 @@ function ctx(over: Partial<TutorialCtx> = {}): TutorialCtx {
 }
 
 describe('guided step sequence', () => {
-  it('teaches the seven gestures in order', () => {
+  it('teaches the gestures in the playtest-tuned order (train → build before harvest)', () => {
     expect(GUIDED_STEPS.map((s) => s.id)).toEqual([
       'selectHq',
-      'trainWorker',
-      'moveWorker',
-      'assignHarvest',
-      'readCharge',
+      'trainToCap',
       'buildPod',
+      'harvest',
+      'navigate',
+      'scout',
+      'readCharge',
+      'selectPod',
       'research',
     ]);
   });
 
-  it('marks exactly one step as an acknowledge step (read charge)', () => {
+  it('marks navigate + readCharge as acknowledge steps', () => {
     const ackSteps = GUIDED_STEPS.filter((s) => s.ack === true);
-    expect(ackSteps.map((s) => s.id)).toEqual(['readCharge']);
+    expect(ackSteps.map((s) => s.id)).toEqual(['navigate', 'readCharge']);
+  });
+
+  it('builds the pod before harvesting so the build worker is freshly charged', () => {
+    const ids = GUIDED_STEPS.map((s) => s.id);
+    expect(ids.indexOf('buildPod')).toBeLessThan(ids.indexOf('harvest'));
   });
 });
 
@@ -49,28 +56,37 @@ describe('isStepDone', () => {
     expect(isStepDone('selectHq', ctx({ hqSelected: true }))).toBe(true);
   });
 
-  it('trainWorker gates on a worker existing or being queued', () => {
-    expect(isStepDone('trainWorker', ctx())).toBe(false);
-    expect(isStepDone('trainWorker', ctx({ workerExists: true }))).toBe(true);
-  });
-
-  it('moveWorker gates on a move order having been issued', () => {
-    expect(isStepDone('moveWorker', ctx())).toBe(false);
-    expect(isStepDone('moveWorker', ctx({ didMove: true }))).toBe(true);
-  });
-
-  it('assignHarvest gates on a harvest assignment having been issued', () => {
-    expect(isStepDone('assignHarvest', ctx())).toBe(false);
-    expect(isStepDone('assignHarvest', ctx({ didAssignHarvest: true }))).toBe(true);
-  });
-
-  it('readCharge is ack-gated, so the action predicate is always false', () => {
-    expect(isStepDone('readCharge', ctx({ selectedWorkerCount: 3 }))).toBe(false);
+  it('trainToCap gates on the supply cap being reached', () => {
+    expect(isStepDone('trainToCap', ctx())).toBe(false);
+    expect(isStepDone('trainToCap', ctx({ atSupplyCap: true }))).toBe(true);
   });
 
   it('buildPod gates on a friendly pod existing', () => {
     expect(isStepDone('buildPod', ctx())).toBe(false);
     expect(isStepDone('buildPod', ctx({ podExists: true }))).toBe(true);
+  });
+
+  it('harvest gates on a harvest assignment having been issued', () => {
+    expect(isStepDone('harvest', ctx())).toBe(false);
+    expect(isStepDone('harvest', ctx({ didAssignHarvest: true }))).toBe(true);
+  });
+
+  it('navigate is ack-gated, so the action predicate is always false', () => {
+    expect(isStepDone('navigate', ctx({ didMove: true, podExists: true }))).toBe(false);
+  });
+
+  it('scout gates on a move order having been issued', () => {
+    expect(isStepDone('scout', ctx())).toBe(false);
+    expect(isStepDone('scout', ctx({ didMove: true }))).toBe(true);
+  });
+
+  it('readCharge is ack-gated, so the action predicate is always false', () => {
+    expect(isStepDone('readCharge', ctx({ podSelected: true }))).toBe(false);
+  });
+
+  it('selectPod gates on a friendly work pod being selected', () => {
+    expect(isStepDone('selectPod', ctx())).toBe(false);
+    expect(isStepDone('selectPod', ctx({ podSelected: true }))).toBe(true);
   });
 
   it('research gates on auto-resume being in progress or done', () => {
