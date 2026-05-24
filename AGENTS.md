@@ -129,7 +129,7 @@ Three run modes selected from URL params:
 - `?lockstep=host` / `?lockstep=join` (no room): same-machine two-tab lockstep over `BroadcastChannel`. Local determinism gate.
 - `?lockstep=host&room=ABCDEF` / `?lockstep=join&room=ABCDEF`: peer-to-peer lockstep over WebRTC datachannel via the signaling server. Substrate-only swap; `LockstepChannel` is unchanged.
 
-Wires `Sim` → `Match` → `SimRenderer` → `startSimDriver`, plus `PlayerInput` and `tickAi` (PvAI) or `LockstepChannel` (lockstep). For WebRTC mode, `WebRtcTransport.connect()` is awaited before the scene is built and a "connecting · room ABCDEF" overlay is shown until the datachannel opens. HUD overlay shows tick / winner / per-faction HP / points / energy / unit count / dropped sim steps; in lockstep mode it also shows peer connection + the latest *resolved* per-tick hash status (BroadcastChannel + WebRTC delivery are both async, so the most-recent tick is almost always still "pending" at render time).
+Wires `Sim` → `Match` → `SimRenderer` → `startSimDriver`, plus `PlayerInput` and `tickAi` (PvAI) or `LockstepChannel` (lockstep). For WebRTC mode, `WebRtcTransport.connect()` is awaited before the scene is built and a "connecting · room ABCDEF" overlay is shown until the datachannel opens. HUD overlay shows tick / winner / per-faction HP / energy / unit count / dropped sim steps; in lockstep mode it also shows peer connection + the latest *resolved* per-tick hash status (BroadcastChannel + WebRTC delivery are both async, so the most-recent tick is almost always still "pending" at render time).
 
 ### `src/grid.ts` — shared
 
