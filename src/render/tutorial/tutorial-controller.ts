@@ -41,6 +41,12 @@ export interface TutorialControllerOptions {
   camera: Camera;
   canvas: HTMLCanvasElement;
   audio: AudioManager;
+  // Fired once when all goals are met, before the player dismisses the
+  // complete screen. Wired in main.ts to halt the sim driver + quiet audio —
+  // a normal match freezes itself when `winner` is set, but the tutorial has
+  // no winner, so without this the world keeps ticking (and audibly working)
+  // behind the TUTORIAL COMPLETE overlay.
+  onComplete: () => void;
   // Leave the tutorial — wired in main.ts to clear ?tutorial and show the
   // menu (window.location → pathname).
   onExit: () => void;
@@ -206,7 +212,11 @@ export class TutorialController {
     this.objectives.style.display = 'none';
     this.skipBtn.style.display = 'none';
     this.completeOverlay.style.display = 'flex';
+    // Ring the completion chime first, then hand off to onComplete (which
+    // halts the sim + quiets the bed) so the world goes still behind the
+    // overlay — no more workers harvesting under a "complete" screen.
     this.opts.audio.trainComplete();
+    this.opts.onComplete();
   }
 
   private buildCtx(): TutorialCtx {

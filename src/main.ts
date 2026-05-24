@@ -586,6 +586,10 @@ async function bootstrap(): Promise<void> {
         camera: scene.camera,
         canvas,
         audio,
+        // Freeze the sim + silence audio the moment the tutorial completes, so
+        // nothing keeps working behind the TUTORIAL COMPLETE overlay. (A normal
+        // match stops itself on `winner`; the tutorial has none.)
+        onComplete: () => { driver.stop(); audio.setMuted(true); },
         onExit: () => { window.location.href = window.location.pathname; },
       });
     } else if (mode.kind === 'pva') {
