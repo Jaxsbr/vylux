@@ -192,6 +192,28 @@ Charge / research / build / train / HQ-alert cues are detected renderer-side by 
 
 ---
 
+## Tutorial
+
+A guided sandbox for first-time players. Launch it from the **main menu** via the **TUTORIAL** entry (or press **T**); the selected faction carries in. `?tutorial=1` deep-links straight into it (skips the menu).
+
+The sandbox is a calm, deterministic scenario — generous starting energy (400), energy nodes by both home corners, and **no enemy AI** (the opponent HQ sits passively in the far corner). Nothing here touches the deterministic sim's hash; the tutorial is a renderer-side layer that reads state and never writes it.
+
+**Guided phase.** A coach bubble with a looping ghost-cursor demonstrates each gesture and only advances once you perform it: (1) select your HQ, (2) train a worker, (3) move it (right-click), (4) assign it to harvest (left-click a node), (5) read the charge meter (acknowledge), (6) build a work pod, (7) research auto-resume.
+
+**Graduation phase.** An objectives panel (top-left) then tracks three completion goals:
+
+| Goal | Target | Teaches |
+|---|---|---|
+| **Energy** | energy balance ≥ **300** | sustained harvesting |
+| **Workers** | **15** alive workers | training + capacity (cap starts at 5, +5 per operational pod → needs ~2 pods) |
+| **Find the enemy HQ** | enemy HQ tile uncovered | scouting (move a worker across the map) |
+
+Meeting all three shows **TUTORIAL COMPLETE** and returns you to the menu. **SKIP TUTORIAL** (top-right) exits at any time. Goal targets are tunable (`GOAL_THRESHOLDS` in `src/render/tutorial/tutorial-steps.ts`).
+
+A normal match shows a one-line **first-action nudge** ("select your HQ") on entry, which clears once you select the HQ or after ~12 s. Committing from the menu (match or tutorial) plays a short wash/fade transition instead of an instant cut.
+
+---
+
 ## AI behaviour
 
 The AI ticks once every 10 sim ticks (0.5 s at 20 Hz) and does, in order:
@@ -206,7 +228,7 @@ The AI does not yet research auto-resume on its own. That's a player decision fo
 
 ## Current map
 
-Single hardcoded map, defined in `src/main.ts`.
+Single hardcoded match map, defined in `src/main.ts` (the **Tutorial** uses its own generous sandbox spec, `TUTORIAL_SPEC`, in the same file).
 
 - **Grid:** 32×32 tiles.
 - **HQ positions:** faction 0 at (4, 4), faction 1 at (27, 27) — opposite corners.

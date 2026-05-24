@@ -37,9 +37,13 @@ import {
   type FactionTheme,
 } from '../factions/theme';
 
+// Phase C.6: the menu can launch either a normal match or the tutorial
+// sandbox. The selected faction applies to both.
+export type MenuMode = 'match' | 'tutorial';
+
 export interface MainMenuOptions {
   audio: AudioManager;
-  onCommit(picked: FactionId): void;
+  onCommit(picked: FactionId, mode: MenuMode): void;
 }
 
 interface TileRefs {
@@ -62,6 +66,7 @@ export class MainMenu {
   private readonly ambientNear: HTMLDivElement;
   private readonly wordmark: HTMLDivElement;
   private readonly footer: HTMLDivElement;
+  private readonly tutorialBtn: HTMLButtonElement;
   private readonly washLayer: HTMLDivElement;
   private washGradient!: HTMLDivElement;
   private washBar!: HTMLDivElement;
@@ -171,6 +176,25 @@ export class MainMenu {
     ].join(';');
     this.root.appendChild(this.footer);
 
+    // Phase C.6: Tutorial entry — a third launch path alongside the two
+    // faction START RUN buttons. Uses the currently-selected faction; opens
+    // the guided sandbox instead of a normal match.
+    this.tutorialBtn = document.createElement('button');
+    this.tutorialBtn.textContent = 'TUTORIAL  ▸';
+    this.tutorialBtn.style.cssText = [
+      'position:absolute', 'left:50%', 'bottom:58px', 'transform:translateX(-50%)',
+      'z-index:55', 'background:transparent',
+      'padding:9px 26px', 'font-family:inherit', 'font-size:11px',
+      'cursor:pointer',
+      'transition:color 250ms ease, border-color 250ms ease, box-shadow 250ms ease',
+    ].join(';');
+    this.tutorialBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (this.animating || this.committed) return;
+      this.commit('tutorial');
+    });
+    this.root.appendChild(this.tutorialBtn);
+
     // Wash overlay — only visible during a transition. The handover's
     // wash is a vertical 6px white neon bar that *translates* across
     // the screen (not a static gradient that fades): direction depends
@@ -275,7 +299,7 @@ export class MainMenu {
     root.addEventListener('click', () => {
       if (this.animating || this.committed) return;
       if (this.selected === id) {
-        this.commit();
+        this.commit('match');
       } else {
         this.switchTo(id);
       }
@@ -334,7 +358,7 @@ export class MainMenu {
     startBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       if (this.animating || this.committed) return;
-      this.commit();
+      this.commit('match');
     });
     root.appendChild(startBtn);
 
@@ -365,7 +389,14 @@ export class MainMenu {
 
     // Footer copy.
     this.footer.textContent =
-      `ENEMY  AI  =  ${enemy.name}  ·  [SPACE] START  ·  [A/D] SWITCH FACTION`;
+      `ENEMY  AI  =  ${enemy.name}  ·  [SPACE] START  ·  [A/D] SWITCH  ·  [T] TUTORIAL`;
+
+    // Tutorial button re-tints to the selected faction.
+    this.tutorialBtn.style.color = f.bright;
+    this.tutorialBtn.style.border = `1px solid ${f.dim}`;
+    this.tutorialBtn.style.borderRadius = `${f.radius}px`;
+    this.tutorialBtn.style.letterSpacing = f.bodyTrack;
+    this.tutorialBtn.style.boxShadow = `0 0 10px ${f.glowSoft}`;
 
     // Corner chrome — re-paint inline by querying the existing nodes.
     this.root.querySelectorAll<HTMLDivElement>('.vy-corner').forEach((node) => {
@@ -601,7 +632,10 @@ export class MainMenu {
       if (this.selected !== 'siege') this.switchTo('siege');
     } else if (k === ' ' || k === 'Enter') {
       ev.preventDefault();
-      this.commit();
+      this.commit('match');
+    } else if (k === 't' || k === 'T') {
+      ev.preventDefault();
+      this.commit('tutorial');
     }
   }
 
@@ -620,12 +654,18 @@ export class MainMenu {
     window.setTimeout(() => { this.animating = false; }, 420);
   }
 
-  private commit(): void {
+  private commit(mode: MenuMode): void {
     if (this.committed) return;
     this.committed = true;
     saveFactionId(this.selected);
     this.opts.audio.click();
-    this.opts.onCommit(this.selected);
+    // Phase C.6: a short wash + fade into the match so menu → game isn't a
+    // jarring cut. Applies to both a normal match and the tutorial. The
+    // caller hides the menu inside onCommit; we just resolve after the fade.
+    this.triggerWash(this.selected);
+    this.root.style.transition = 'opacity 420ms ease';
+    requestAnimationFrame(() => { this.root.style.opacity = '0'; });
+    window.setTimeout(() => this.opts.onCommit(this.selected, mode), 460);
   }
 }
 
