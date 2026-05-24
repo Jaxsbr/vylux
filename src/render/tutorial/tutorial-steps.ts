@@ -22,6 +22,7 @@
 export type TutorialStepId =
   | 'selectHq'
   | 'trainToCap'
+  | 'selectWorker'
   | 'buildPod'
   | 'harvest'
   | 'navigate'
@@ -68,9 +69,16 @@ export const GUIDED_STEPS: readonly TutorialStep[] = [
     gesture: 'leftClick',
   },
   {
+    id: 'selectWorker',
+    title: 'SELECT A WORKER',
+    body: 'Click one of the workers ringing your HQ to select it (its portrait appears bottom-left). One worker builds; the rest keep working.',
+    anchor: { kind: 'world', target: 'firstWorker' },
+    gesture: 'leftClick',
+  },
+  {
     id: 'buildPod',
     title: 'RAISE YOUR CAP — BUILD A POD',
-    body: "You're capped at 5/5 (flashing, top). A Work Pod adds +5 cap AND recharges nearby workers. Select a worker, click BUILD WORK POD, then click a tile.",
+    body: "You're capped at 5/5 (flashing, top). With your worker selected, click BUILD WORK POD then click a tile. Pods add +5 cap AND recharge nearby workers.",
     anchor: { kind: 'screen', region: 'commandCard' },
     gesture: 'leftClick',
   },
@@ -124,7 +132,8 @@ export const GUIDED_STEPS: readonly TutorialStep[] = [
 export interface TutorialCtx {
   // step gates
   hqSelected: boolean;
-  atSupplyCap: boolean; // worker cap reached (queued + alive ≥ cap) with ≥1 alive
+  atSupplyCap: boolean; // worker cap reached (supplyUsed ≥ cap)
+  workerSelected: boolean; // ≥1 friendly worker is the current selection
   podExists: boolean; // any alive friendly structure (building or operational)
   podSelected: boolean; // a friendly alive work pod is the current selection
   researchActiveOrDone: boolean;
@@ -146,6 +155,8 @@ export function isStepDone(id: TutorialStepId, ctx: TutorialCtx): boolean {
       return ctx.hqSelected;
     case 'trainToCap':
       return ctx.atSupplyCap;
+    case 'selectWorker':
+      return ctx.workerSelected;
     case 'buildPod':
       return ctx.podExists;
     case 'harvest':

@@ -14,7 +14,7 @@
 import type { Camera } from 'three';
 import { toFloat } from '../../sim/fixed';
 import type { Sim } from '../../sim/sim';
-import { findStructure } from '../../sim/state';
+import { findStructure, findUnit } from '../../sim/state';
 import type { Faction } from '../../sim/types';
 import type { AudioManager } from '../../audio/audio-manager';
 import type { Exploration } from '../exploration';
@@ -214,6 +214,15 @@ export class TutorialController {
     const state = sim.state;
     const fs = state.factions[playerFaction];
 
+    let workerSelected = false;
+    for (const id of input.getSelectedUnitIds()) {
+      const u = findUnit(state, id);
+      if (u && u.alive && u.kind === 'worker' && u.faction === playerFaction) {
+        workerSelected = true;
+        break;
+      }
+    }
+
     const podExists = state.structures.some((s) => s.alive && s.faction === playerFaction);
 
     // A friendly work pod is the current selection (the gate for the "select
@@ -239,6 +248,7 @@ export class TutorialController {
     return {
       hqSelected: input.getSelectedHqFaction() === playerFaction,
       atSupplyCap,
+      workerSelected,
       podExists,
       podSelected,
       researchActiveOrDone: fs.researchingKind === 'autoResume' || fs.autoResumeResearched,

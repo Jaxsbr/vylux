@@ -403,14 +403,16 @@ harvest shows a left-click on a node. Reuses the menu's ghost-cursor idiom (ring
 + dot + CSS keyframes, `main-menu.ts`). Each step is **gated on the player
 actually doing the thing** before the next bubble appears. Order (playtest-tuned
 2026-05-24): (1) select HQ → (2) train workers **to the supply cap (5/5)** →
-(3) build a work pod to raise the cap → (4) harvest → (5) camera controls
-(zoom / pan / minimap, ack) → (6) scout a worker toward the enemy corner →
-(7) read the charge meter (ack) → (8) select the work pod → (9) research
-auto-resume. Train-to-cap precedes building so the build step always has a
-freshly-charged worker (no greyed-button wait) and the capacity wall motivates
-the pod; the supply pill **pulses red/white at the cap**; scouting points at a
-tile toward the enemy HQ to seed the find-the-enemy goal; selecting the pod is
-its own step so "research lives on the pod, not the worker" is explicit.
+(3) select a worker → (4) build a work pod to raise the cap → (5) harvest →
+(6) camera controls (zoom / pan / minimap, ack) → (7) scout a worker toward the
+enemy corner → (8) read the charge meter (ack) → (9) select the work pod →
+(10) research auto-resume. Train-to-cap precedes building so the build step
+always has a freshly-charged worker (no greyed-button wait) and the capacity
+wall motivates the pod; the supply pill **pulses red/white at the cap**;
+**select-a-worker and select-the-pod are their own steps** (the ghost points at
+an actual worker / pod) so the build + research instructions aren't ambiguous
+once five workers are on the field; scouting points at a tile toward the enemy
+HQ to seed the find-the-enemy goal.
 
 **Graduation phase — completion goals.** Once the gestures are taught, a small
 persistent objectives panel shows three goals; reaching all three completes the

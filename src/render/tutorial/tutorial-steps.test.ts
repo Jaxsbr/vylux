@@ -12,6 +12,7 @@ function ctx(over: Partial<TutorialCtx> = {}): TutorialCtx {
   return {
     hqSelected: false,
     atSupplyCap: false,
+    workerSelected: false,
     podExists: false,
     podSelected: false,
     researchActiveOrDone: false,
@@ -25,10 +26,11 @@ function ctx(over: Partial<TutorialCtx> = {}): TutorialCtx {
 }
 
 describe('guided step sequence', () => {
-  it('teaches the gestures in the playtest-tuned order (train → build before harvest)', () => {
+  it('teaches the gestures in the playtest-tuned order (train → select → build before harvest)', () => {
     expect(GUIDED_STEPS.map((s) => s.id)).toEqual([
       'selectHq',
       'trainToCap',
+      'selectWorker',
       'buildPod',
       'harvest',
       'navigate',
@@ -37,6 +39,11 @@ describe('guided step sequence', () => {
       'selectPod',
       'research',
     ]);
+  });
+
+  it('makes worker-selection its own step right before building', () => {
+    const ids = GUIDED_STEPS.map((s) => s.id);
+    expect(ids[ids.indexOf('buildPod') - 1]).toBe('selectWorker');
   });
 
   it('marks navigate + readCharge as acknowledge steps', () => {
@@ -59,6 +66,11 @@ describe('isStepDone', () => {
   it('trainToCap gates on the supply cap being reached', () => {
     expect(isStepDone('trainToCap', ctx())).toBe(false);
     expect(isStepDone('trainToCap', ctx({ atSupplyCap: true }))).toBe(true);
+  });
+
+  it('selectWorker gates on a friendly worker being selected', () => {
+    expect(isStepDone('selectWorker', ctx())).toBe(false);
+    expect(isStepDone('selectWorker', ctx({ workerSelected: true }))).toBe(true);
   });
 
   it('buildPod gates on a friendly pod existing', () => {
