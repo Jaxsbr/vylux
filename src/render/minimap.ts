@@ -1,6 +1,7 @@
 // Phase C.2 — minimap (SC2 command-card model: bottom-right region).
 //
-// A fixed-footprint top-down map of the 32×32 arena. Entity blips are drawn
+// A fixed-footprint top-down map of the arena (64×64 since C.6.5; scale is
+// derived from GRID_CONSTANTS, not hard-coded). Entity blips are drawn
 // only when the entity's 3D mesh is visible, so the minimap mirrors the fog
 // exactly without re-deriving vision here. Click anywhere on it to recentre
 // the camera there.

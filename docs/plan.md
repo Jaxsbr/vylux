@@ -1,6 +1,6 @@
 # Vylux — Plan
 
-> **Last updated:** 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change.
+> **Last updated:** 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change. Map work inserted as **C.6.5** ahead of the economy depth by owner direction (2026-05-24): double the grid to 64², ~16 seeded random nodes with low/med/high values + brightness, fully-random (not mirrored), placement barred from HQ / HQ-adjacent / edge tiles and guaranteed ≥1 node in each HQ's vision; the tutorial keeps its hand-placed layout.
 > **Visual north star:** [`concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`](concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png) — dense glowing Tron city, cyan/red grid lines pulsing through the world, lit vertical structures, purposeful silhouettes.
 > **Mindset:** the game must be fun. A good game loop matters more than feature count. Strip down to the minimum that's already fun, polish until it sings, *then* layer more on.
 
@@ -134,6 +134,7 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | C.4 | Game-feel: motion & world life          | FEEL          | ✅ landed (entity-driven; grid pulse deferred) |
 | C.5 | Worker silhouette redesign              | FEEL, CLARITY | ✅ landed (hovering hex courier) |
 | C.6 | Onboarding & tutorial sandbox           | ONBOARD       | spec refined 2026-05-24 |
+| C.6.5 | **Map: bigger arena + randomised energy field** | new scope | ✅ landed 2026-05-24 |
 | C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
 | C.8 | Research depth — worker + HQ trees      | (was C.2)     | deferred             |
 
@@ -458,6 +459,151 @@ field).
 graduation goals (energy, 15 workers, enemy HQ found) unaided; "TUTORIAL
 COMPLETE" returns them to the menu; menu → game has a transition; verify gate
 green.
+
+#### Phase C.6.5 — Map: bigger arena + randomised energy field · [new — owner-inserted 2026-05-24]
+
+> **Inserted ahead of C.7 by owner direction (2026-05-24).** Jaco wants a
+> larger, less hand-authored arena *before* the economy depth lands: double the
+> map, more energy nodes, scattered randomly with randomised values, and a
+> visible low/med/high tier read. Sequenced as the next sub-phase after C.6 —
+> before the deferred economy (C.7) and research (C.8) work, not after the C
+> phases.
+
+Make every normal match's arena bigger and freshly-seeded instead of the six
+fixed `energy: 200` nodes. The tutorial keeps its hand-authored layout (below).
+
+**Map size.**
+- Double the grid: `GRID_SIZE` 32 → **64** in `src/grid.ts` (≈4× play area —
+  owner chose the linear double, not an area double). The floor, dividers,
+  extended out-of-play grid, minimap, fog overlay, exploration, and
+  `tileToWorld` bounds all derive from `GRID_CONSTANTS`, so they scale for
+  free — but **verify** each: camera pan/zoom limits (`camera-controller.ts`)
+  must let the player see and reach the far corner; the minimap blip scale
+  stays readable; the extended-grid radial-fade radii
+  (`extendedFadeInner/Outer`) likely need re-tuning against the new
+  `worldExtent`.
+- Reposition the two HQs to the new corners, keeping the anti-diagonal layout
+  (player bottom-left, AI top-right), off the edge ring, with the same
+  home-patch feel — e.g. ~(8, 55) and (55, 8), tunable.
+
+**Randomised energy field (normal `SPEC` only).** Replace the fixed `nodes`
+array with a **seeded** generator:
+- **Count:** more than today's six — target **~16** on the 64² map (tune in
+  playtest); a single tunable constant.
+- **Random placement**, subject to these hard constraints:
+  - never on an HQ tile;
+  - never on any tile **directly adjacent** (the 8 neighbours) to either HQ;
+  - never on a **map-edge** tile (the outer ring — tile index 0 or 63 on
+    either axis);
+  - no two nodes share a tile (suggest a small minimum inter-node spacing too,
+    so they don't clump into one pile — tunable);
+  - **≥ 1 node within `HQ_VISION_RADIUS` of *each* HQ.** This is a correctness
+    constraint, not a fairness one: `initialHqDiscovery` only reveals nodes in
+    HQ vision, and the AI auto-routes workers to *discovered* nodes — if a
+    faction starts with zero discoverable nodes it never harvests and the
+    bootstrap deadlocks (the exact case `state.ts` already guards against with
+    the fixed layout).
+- **Fully random, not mirrored** (owner decision 2026-05-24): each side's
+  layout is drawn independently, so matches can be lopsided. Accepted. The
+  ≥1-near-HQ rule above is the only floor — do **not** sneak symmetry back in.
+- **Randomised values — low / med / high tiers**, drawn per node from the
+  seeded RNG. Center the tiers on today's 200, e.g. low ≈ 120 / med ≈ 220 /
+  high ≈ 360 energy, with a weighted draw (more low+med than high, so a high
+  node is worth contesting) — all tunable.
+
+**Determinism (hard requirement).** Placement and tier draws **must** use the
+deterministic sim RNG seeded from `spec.seed` — never `Math.random` — so
+replays reproduce. Cleanest seam: generate inside `createInitialState` (it
+already builds `new Rng(spec.seed)`); to avoid perturbing the gameplay RNG
+stream, draw map-gen from a **derived/dedicated** sub-seed before gameplay
+draws begin. Node layout + values change, so **regenerate the golden fixtures**
+(`RECORD_GOLDEN=1 npm test`) and bump `REPLAY_VERSION` if the replay's
+seed-consumption shape changes. Confirm `hash.test` / `replay.test` /
+`golden.test` are green after regen.
+
+**Tier visuals — "brighter the higher" (`energy-node.ts`).** A node's tier
+sets its **neutral/base** look (a *slight* shift per the brief — not a
+recolour):
+- rim emissive intensity scales with tier (e.g. low ≈ 0.16 / med ≈ 0.28 /
+  high ≈ 0.45 vs today's flat 0.25), plus a subtle hue lift toward a brighter
+  near-white cyan on `high`;
+- the tier base is what the rim **restores to** after a harvest tint clears
+  (`setHarvestingTint(null)`) and after regen crosses back above the
+  re-eligible threshold (`tickRegen`) — today those snap to the single flat
+  `NEUTRAL_RIM`; they must now snap to the node's tier base instead;
+- tier does **not** override the faction-hold tint, the active-harvest tint,
+  or the exhausted (dead-grey) state — those are unchanged. Tier only colours
+  the at-rest neutral read;
+- the render node must learn its tier / max-energy from sim state
+  (`node.remaining` at spawn) rather than the hard-coded `RESERVE_DEFAULT`, so
+  the visual tier matches the actual reserve.
+
+**Tutorial is exempt.** `TUTORIAL_SPEC` keeps **hand-placed, non-random** nodes
+clustered near both corners — the coach ghost-cursor + harvest step depend on a
+known layout. Re-fit its HQ + node coordinates to the new 64² bounds (they
+currently top out at 27 on the 32 grid), keep the clustered home patches, and
+leave the far-corner enemy HQ for the "find the enemy" goal. The bigger map
+lengthens the scout step slightly — acceptable; sanity-check it still
+completes.
+
+**Tests.** Unit-test the generator as a pure, seeded function: same seed →
+same layout; all constraints hold (no HQ / adjacent / edge tiles, no
+duplicates, ≥1 within HQ vision of each HQ); tier distribution lands in range.
+`tsc` + unit + e2e green; e2e smoke that a normal match still boots and the AI
+harvests (deadlock guard). Golden fixtures regenerated. Update `docs/manual.md`
+(map size, node count, the low/med/high tiers + their meaning) when it lands.
+
+Out of scope: Matter / cost-split (still C.7); node regen-rate changes; biome
+or terrain variety; symmetric / mirrored layouts (explicitly rejected this pass).
+
+**Exit:** a normal match opens on a 64² arena with ~16 randomly-placed,
+randomly-tiered energy nodes that obey every placement constraint and never
+deadlock the AI; low / med / high nodes read as progressively brighter at rest;
+the tutorial still runs on its fixed layout; replays reproduce and the verify
+gate (incl. regenerated goldens) is green.
+
+**What landed (2026-05-24).** `GRID_SIZE` 32 → 64 (`src/grid.ts`; the floor,
+minimap, fog, exploration, and camera pan-limit scale off `GRID_CONSTANTS` for
+free — `ZOOM_MAX` bumped 0.68 → 0.85 in `scene.ts` so the far corner is
+reachable by zoom-out). New seeded generator `src/sim/map-gen.ts`
+(`generateEnergyField` + `ENERGY_TIERS` + `classifyTier`, 13 unit tests):
+16 nodes, fully-random placement honouring every constraint (no HQ / adjacent /
+edge tile, ≥3-tile spacing, ≥1 within each HQ's vision), weighted low/med/high
+energy (120/220/360). HQs repositioned to (8,55)/(55,8); `TUTORIAL_SPEC`
+re-fitted to 64² with its hand-placed clusters; AI pod-placement clamp 31 → 63
+(`ai.ts`). Tier brightness lives in `meshes.ts` (`buildNodeMesh` takes the
+node's reserve → scales the gold silhouette + rim emissive, and thus bloom,
+brighter the higher, with a slight white lift on high). A fresh per-launch seed
+randomises the field for PvA/observe (baked into the spec → replay); lockstep
+keeps the fixed seed so peers agree.
+
+**Determinism — lighter than the spec feared.** The generation seam is in
+`main.ts` (the field is built into `spec.nodes`, which the replay already
+serialises and `playReplay` reconstructs), **not** inside `createInitialState`
+or the step loop. The sim is grid-size agnostic and `InitialMatchSpec`'s shape
+is unchanged, so the golden fixtures (which use `scripted-match.ts`'s own specs)
+were **untouched — no regen, and no `REPLAY_VERSION` bump.** Verify gate green:
+`tsc`, 197 unit (incl. the unchanged golden gate + new `map-gen` tests), 10 e2e
+(incl. AI-vs-AI smoke proving no harvest deadlock, and lockstep determinism).
+
+**Playtest follow-ups (2026-05-24).** Two adjustments after playing the bigger
+map:
+- **Zoom re-tuned** (`scene.ts`): `DEFAULT_HALF_HEIGHT` scales with the grid, so
+  the old range showed ~2× the tiles on the 64² map — too far out, not close
+  enough in. New range: `ZOOM_MIN` 0.25 → 0.13 (deeper zoom-in, ~10 tiles tall),
+  `ZOOM_MAX` 0.85 → 0.55 (tighter zoom-out, ~42 tiles; minimap + pan cover
+  whole-map awareness), `DEFAULT_ZOOM_SCALE` decoupled to 0.25 for a good
+  HQ-framed opening. Also fixed an orthographic **clip bug** the bigger map
+  exposed: near/far were hard-coded ±100, but the camera distance scales with
+  `worldExtent`, so the far half of the 64² grid (incl. the look-at target) was
+  clipped — near/far now scale as `worldExtent · 4`.
+- **Siege flattened to Swarm** (`units-config.ts`): the C.1 worker asymmetry
+  (Siege slower 0.045 / costlier 60 / tougher hp 60 / faster harvest 17) made
+  Siege strictly worse to play, so its worker stats + harvest interval are set
+  equal to Swarm's. The override blocks stay as the divergence hook; real
+  asymmetry returns with combat units (Phase D). A **sim-behaviour change** →
+  `REPLAY_VERSION` 24 → 25 and all three golden fixtures regenerated (each
+  exercises the faction-1 = Siege worker).
 
 #### Phase C.7 — Economy depth: Matter + cost split  (was C.2)
 

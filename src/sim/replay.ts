@@ -205,7 +205,18 @@ import type { InitialMatchSpec } from './state';
 // from the per-faction stats (Swarm 30 / Siege 60, not a flat 40) and
 // TrainUnit charges the per-faction trainCost (40 / 60, not a flat 50).
 // Golden fixtures regenerated.
-export const REPLAY_VERSION = 24;
+// Phase C.6.5 follow-up bumps to v25 (2026-05-24). Faction balance: the Siege
+// worker's stat overrides are flattened to Swarm's (speed 0.055 / trainCost 40
+// / maxHp 30) and Siege's harvest interval matches Swarm's (harvestTicks 23) —
+// the slower + costlier Siege worker made the faction strictly worse, so the
+// asymmetry is parked until combat units return (Phase D). Sim STATE shape is
+// unchanged — only per-faction stat VALUES move — but per the version contract
+// any pre-bump v24 replay no longer loads (parseReplay + playReplay reject any
+// version ≠ the current one). Golden fixtures regenerated. (The
+// C.6.5 map work itself — 64² grid + randomised energy field — needed no bump:
+// it's render + spec-builder only, and the golden fixtures use their own
+// scripted-match specs.)
+export const REPLAY_VERSION = 25;
 
 export interface ReplayLog {
   version: number;
