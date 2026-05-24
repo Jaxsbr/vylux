@@ -1,6 +1,6 @@
 # Vylux — Plan
 
-> **Last updated:** 2026-05-23 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands.
+> **Last updated:** 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change.
 > **Visual north star:** [`concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`](concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png) — dense glowing Tron city, cyan/red grid lines pulsing through the world, lit vertical structures, purposeful silhouettes.
 > **Mindset:** the game must be fun. A good game loop matters more than feature count. Strip down to the minimum that's already fun, polish until it sings, *then* layer more on.
 
@@ -133,7 +133,7 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | C.3 | Game-feel: audio (synth ambient + SFX)  | FEEL          | ✅ landed             |
 | C.4 | Game-feel: motion & world life          | FEEL          | ✅ landed (entity-driven; grid pulse deferred) |
 | C.5 | Worker silhouette redesign              | FEEL, CLARITY | ✅ landed (hovering hex courier) |
-| C.6 | Onboarding & tutorial sandbox           | ONBOARD       | —                    |
+| C.6 | Onboarding & tutorial sandbox           | ONBOARD       | spec refined 2026-05-24 |
 | C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
 | C.8 | Research depth — worker + HQ trees      | (was C.2)     | deferred             |
 
@@ -379,28 +379,85 @@ Teach the basics; remove the "discovered by guessing" wall. Lands **after**
 C.2–C.5 so it teaches a HUD worth pointing at and actions that already feel good
 — don't build it earlier.
 
-Deliverables:
-- **Main-menu Tutorial entry** (alongside the faction picks) → a fixed sandbox
-  scenario (deterministic seed, no enemy pressure, generous energy).
+**Shape (refined 2026-05-24).** Two phases inside one sandbox scenario. A
+**guided phase** walks the player through each gesture with an animated
+demonstration; a **graduation phase** then turns them loose on three completion
+goals. Reaching all three → a "TUTORIAL COMPLETE" overlay → back to the main
+menu.
+
+**Sandbox scenario:**
+- A fixed `TUTORIAL_SPEC` match (deterministic seed, generous starting energy,
+  energy nodes clustered near the player HQ, the enemy HQ in the far corner just
+  as in a normal match). **No enemy pressure** — faction 1's AI command path is
+  not run, so its HQ sits passively for the "find the enemy" goal.
+- New **Tutorial entry** on the main menu (alongside the faction picks) launches
+  it. A `?tutorial=1` deep-link enters it directly (for e2e + share links),
+  mirroring the existing `?menu=skip`.
+
+**Guided phase — instructional bubbles.** A new DOM "coach" overlay anchors a
+callout to the relevant target — a HUD region, or a world entity projected to
+screen via `camera.project()` — and loops a **ghost-cursor animation that
+demonstrates the gesture**: e.g. a ghost cursor glides over the HQ, plays a click
+pulse, and the HQ selects; move shows the cursor travelling + a right-click ring;
+harvest shows a left-click on a node. Reuses the menu's ghost-cursor idiom (ring
++ dot + CSS keyframes, `main-menu.ts`). Each step is **gated on the player
+actually doing the thing** before the next bubble appears. Order (playtest-tuned
+2026-05-24): (1) select HQ → (2) train workers **to the supply cap (5/5)** →
+(3) select a worker → (4) build a work pod to raise the cap → (5) harvest →
+(6) camera controls (zoom / pan / minimap, ack) → (7) scout a worker toward the
+enemy corner → (8) read the charge meter (ack) → (9) select the work pod →
+(10) research auto-resume. Train-to-cap precedes building so the build step
+always has a freshly-charged worker (no greyed-button wait) and the capacity
+wall motivates the pod; the supply pill **pulses red/white at the cap**;
+**select-a-worker and select-the-pod are their own steps** (the ghost points at
+an actual worker / pod) so the build + research instructions aren't ambiguous
+once five workers are on the field; scouting points at a tile toward the enemy
+HQ to seed the find-the-enemy goal.
+
+**Graduation phase — completion goals.** Once the gestures are taught, a small
+persistent objectives panel shows three goals; reaching all three completes the
+tutorial:
+- **Energy:** current energy balance ≥ N (~300, tune in playtest). Pure read of
+  `factions[player].energy` — the value the resource bar already shows. **No sim
+  change, no golden-fixture regen.**
+- **Workers:** ≥ 15 alive workers (`factions[player].supplyUsed`). Supply cap
+  starts at 5 and grows +5 per operational pod, so this goal *forces* the player
+  to build pods — it reinforces build + capacity without a separate gate.
+- **Find the enemy HQ:** the enemy HQ tile becomes explored (render-side
+  `Exploration` read) — the player scouts a worker across the map to uncover it.
+
+**Always-on bits (apply to normal play too):**
 - **Menu → game transition:** a short fade / wash into the match (reuse the
-  menu's wash-gradient idiom) so entry isn't a jarring cut — applies to normal
-  play too.
-- **Guided step sequence** with contextual visual + textual cues, each gated on
-  the player doing the thing: (1) select HQ, (2) train a worker, (3) select +
-  move it (right-click), (4) assign harvest (left-click a node), (5) read the
-  charge meter + understand charge mode, (6) build a work pod (capacity), (7)
-  research auto-resume and see the visible result. Cues point at the relevant
-  HUD region / world target.
-- **First-action nudge** on normal match start too (a single "select your HQ")
-  so even non-tutorial entry has a clue.
-- Skip / exit-to-menu at any time; completion → a normal match or back to menu.
-- Tests: e2e that the tutorial launches, advances on the gating action, and is
-  skippable; `tsc` / unit green. Update the manual (controls + a Tutorial line).
+  menu's wash-gradient idiom) so entry isn't a jarring cut.
+- **First-action nudge** on a normal match start (a single "select your HQ") so
+  even non-tutorial entry has a clue.
+- **Skip / exit-to-menu** at any time; completion or skip → reload back to the
+  menu (the existing match-end reset — `player-input.ts` already reloads to
+  re-show the menu).
 
-Out of scope: branching / adaptive tutorial; voice; multi-scenario campaign.
+**Where it lives (implementation sketch):**
+- `src/render/tutorial/` — a step machine (`tutorial-controller.ts`) polled from
+  the rAF loop; a coach overlay (`coach-overlay.ts`: callout + looping
+  ghost-cursor + pointer-to-target); and the goal tracker / objectives panel. All
+  render-side — the tutorial *reads* sim + exploration state but never mutates the
+  deterministic sim, so the hash stays clean.
+- `TUTORIAL_SPEC` beside the other match specs; bootstrap branches on the menu's
+  tutorial pick to load it and skip the AI command path.
 
-**Exit:** a first-time player completes the sandbox and can then move, harvest,
-build, and research unaided; menu → game has a transition; verify gate green.
+**Tests:** e2e that the tutorial launches (menu entry + `?tutorial=1`), advances
+on the gating action, surfaces the completion overlay when the three goals are
+met, and is skippable; the goal predicates + step-advancement logic as unit tests
+(pure functions); `tsc` / unit green. Update the manual (controls + a Tutorial
+line + the three completion goals).
+
+Out of scope: branching / adaptive tutorial; voice; multi-scenario campaign; any
+sim-state change (the energy goal is a balance read, not a new harvested-total
+field).
+
+**Exit:** a first-time player completes the guided steps, then reaches all three
+graduation goals (energy, 15 workers, enemy HQ found) unaided; "TUTORIAL
+COMPLETE" returns them to the menu; menu → game has a transition; verify gate
+green.
 
 #### Phase C.7 — Economy depth: Matter + cost split  (was C.2)
 

@@ -16,6 +16,7 @@ export default defineConfig({
         'smoke.spec.ts',
         'mouse.spec.ts',
         'select.spec.ts',
+        'tutorial.spec.ts',
         'lockstep.spec.ts',
         'lockstep-webrtc.spec.ts',
         'lockstep-desync.spec.ts',

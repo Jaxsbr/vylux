@@ -58,7 +58,9 @@ import { FogOverlay } from './render/fog-overlay';
 import { Exploration } from './render/exploration';
 import { AudioManager } from './audio/audio-manager';
 import { GameEventDetector } from './render/event-detector';
-import { MainMenu } from './render/menu/main-menu';
+import { MainMenu, type MenuMode } from './render/menu/main-menu';
+import { TutorialController } from './render/tutorial/tutorial-controller';
+import { FirstActionNudge } from './render/tutorial/first-action-nudge';
 import { loadFactionId } from './render/factions/persistence';
 import { factionFromId, RESOURCE_COLOR, themeForFaction, type FactionId } from './render/factions/theme';
 import { LockstepChannel, type BroadcastChannelLike } from './net/lockstep-channel';
@@ -101,6 +103,31 @@ const SPEC: InitialMatchSpec = {
     { x: 20, y: 11, energy: 200 },
   ],
   initialEnergy: 200,
+  hqMaxHp: 250,
+};
+
+// Phase C.6: the tutorial sandbox. Deterministic seed, generous starting
+// energy, and energy nodes clustered near BOTH corners so the player's home
+// patch is rich whichever faction (corner) they picked. The enemy HQ sits in
+// the far corner exactly as in a normal match — but tutorial mode does not run
+// the AI command path, so it stays passive for the "find the enemy HQ" goal.
+const TUTORIAL_SPEC: InitialMatchSpec = {
+  seed: 7,
+  hqs: {
+    faction0: { x: 4, y: 27 },
+    faction1: { x: 27, y: 4 },
+  },
+  nodes: [
+    // faction-0 corner (bottom-left)
+    { x: 7, y: 27, energy: 500 },
+    { x: 4, y: 24, energy: 500 },
+    { x: 9, y: 25, energy: 500 },
+    // faction-1 corner (top-right)
+    { x: 24, y: 4, energy: 500 },
+    { x: 27, y: 7, energy: 500 },
+    { x: 22, y: 6, energy: 500 },
+  ],
+  initialEnergy: 400,
   hqMaxHp: 250,
 };
 
@@ -275,19 +302,26 @@ async function bootstrap(): Promise<void> {
   // already encode intent in the URL and skip the menu. `?menu=skip`
   // short-circuits the await for e2e tests + any future share-link
   // flow — the persisted pick is honoured in that case.
-  const skipMenu = new URLSearchParams(window.location.search).get('menu') === 'skip';
+  const bootParams = new URLSearchParams(window.location.search);
+  const skipMenu = bootParams.get('menu') === 'skip';
+  // Phase C.6: ?tutorial=1 deep-links straight into the sandbox (e2e + share
+  // links), mirroring ?menu=skip. Otherwise the menu's Tutorial entry sets it.
+  let runTutorial = bootParams.get('tutorial') === '1';
   let pickedFactionId: FactionId = loadFactionId();
-  if (mode.kind === 'pva' && !skipMenu) {
-    pickedFactionId = await new Promise<FactionId>((resolve) => {
+  if (mode.kind === 'pva' && !skipMenu && !runTutorial) {
+    const picked = await new Promise<{ id: FactionId; mode: MenuMode }>((resolve) => {
       const menu = new MainMenu({
         audio,
-        onCommit: (picked) => {
+        onCommit: (id, m) => {
           menu.hide();
-          resolve(picked);
+          resolve({ id, mode: m });
         },
       });
     });
+    pickedFactionId = picked.id;
+    if (picked.mode === 'tutorial') runTutorial = true;
   }
+  const isTutorial = runTutorial && mode.kind === 'pva';
 
   const playerFaction: Faction = mode.kind === 'pva' || mode.kind === 'observe-local'
     ? factionFromId(pickedFactionId)
@@ -333,7 +367,7 @@ async function bootstrap(): Promise<void> {
     : 'swarm';
   const factionId1: FactionId = factionId0 === 'swarm' ? 'siege' : 'swarm';
   const matchSpec: InitialMatchSpec = {
-    ...SPEC,
+    ...(isTutorial ? TUTORIAL_SPEC : SPEC),
     factionIds: { faction0: factionId0, faction1: factionId1 },
   };
   const match = new Match(matchSpec);
@@ -377,6 +411,12 @@ async function bootstrap(): Promise<void> {
         }
       });
 
+  // Phase C.6: tutorial controller + first-action nudge. Declared here so the
+  // input feedback hooks (constructed just below) can notify the controller of
+  // move / harvest orders; both are assigned once the camera is positioned.
+  let tutorial: TutorialController | null = null;
+  let firstNudge: FirstActionNudge | null = null;
+
   // Observer view: no input, no buildables panel. The DOWNLOAD REPLAY
   // path still works (an observer can save its own replay log too —
   // the input frames it received are the same the players sent), so
@@ -394,8 +434,8 @@ async function bootstrap(): Promise<void> {
       // Phase C.3: each committed command fires its synth cue alongside
       // the existing visual feedback. move = downward swish, harvest =
       // upward chirp (opposite gestures), select = soft rising ping.
-      onMoveOrder: (x, y, f) => { audio.moveAssign(); feedback.spawnMovePing(x, y, f); },
-      onAssignToNode: (x, y) => { audio.harvestAssign(); feedback.spawnAssignPulse(x, y); },
+      onMoveOrder: (x, y, f) => { audio.moveAssign(); feedback.spawnMovePing(x, y, f); tutorial?.notifyMove(); },
+      onAssignToNode: (x, y) => { audio.harvestAssign(); feedback.spawnAssignPulse(x, y); tutorial?.notifyAssignHarvest(); },
       onPlacement: (x, y) => feedback.spawnPlacementBurst(x, y),
       onSelect: () => audio.select(),
       // Phase C.1: blocked command on a charge-mode worker → trigger
@@ -485,6 +525,10 @@ async function bootstrap(): Promise<void> {
   const commandsCallback = (m: Match): Command[] | null => {
     if (observerLoop !== null) return observerLoop.next(m);
     if (lockstepLoop !== null) return lockstepLoop.next(m);
+    // Phase C.6: the tutorial sandbox runs no enemy AI — faction 1's HQ
+    // sits passively so the "find the enemy HQ" goal is a calm scouting
+    // exercise, not a race against an attacker.
+    if (isTutorial) return input!.takeQueued();
     // Single-player vs AI. Phase 3.9.2: no autoAssign for the player.
     // The AI's tickAi handles its own auto-assign internally.
     return [
@@ -529,6 +573,30 @@ async function bootstrap(): Promise<void> {
     ? null
     : new Minimap(playerFaction, document.body, (x, z) => cameraController.centerOn(x, z));
 
+  // Phase C.6: launch the tutorial controller (sandbox) or, for a normal
+  // match, the one-shot first-action nudge. Both read sim + input + the
+  // now-positioned camera, and run from tickHud each frame.
+  if (input !== null) {
+    if (isTutorial) {
+      tutorial = new TutorialController({
+        sim: match.sim,
+        input,
+        exploration,
+        playerFaction,
+        camera: scene.camera,
+        canvas,
+        audio,
+        // Freeze the sim + silence audio the moment the tutorial completes, so
+        // nothing keeps working behind the TUTORIAL COMPLETE overlay. (A normal
+        // match stops itself on `winner`; the tutorial has none.)
+        onComplete: () => { driver.stop(); audio.setMuted(true); },
+        onExit: () => { window.location.href = window.location.pathname; },
+      });
+    } else if (mode.kind === 'pva') {
+      firstNudge = new FirstActionNudge(match.sim, input, playerFaction, scene.camera, canvas);
+    }
+  }
+
   // Phase 3.10.9 — focused resource bar (top-centre).
   //
   // The pre-pivot HUD was a dense monospace text dump (tick / winner /
@@ -555,6 +623,18 @@ async function bootstrap(): Promise<void> {
     'pointer-events:none', 'z-index:30',
   ].join(';');
   document.body.appendChild(resourceBar);
+
+  // Supply-at-cap pulse: when supply is full the count flashes red↔white so
+  // "you're capped — do something about it" reads at a glance (it's the cue
+  // the tutorial's build-a-pod step points at, and useful in any match).
+  if (document.getElementById('vy-cap-pulse-kf') === null) {
+    const kf = document.createElement('style');
+    kf.id = 'vy-cap-pulse-kf';
+    kf.textContent =
+      '@keyframes vyCapPulse{0%,100%{color:#ff5577}50%{color:#ffffff}}' +
+      '.vy-cap-pulse{animation:vyCapPulse 1.05s ease-in-out infinite}';
+    document.head.appendChild(kf);
+  }
 
   // Phase 3.11a: faction colour comes from the shared theme so menu /
   // HUD / end-screen all read from one palette source.
@@ -622,6 +702,8 @@ async function bootstrap(): Promise<void> {
     feedback?.update(dtMs);
     fog.update();
     eventDetector?.update();
+    tutorial?.update(dtMs);
+    firstNudge?.update(dtMs);
     const s = match.sim.state;
 
     // TEST-ONLY corruption injection. When ?desync-test=N is in the
@@ -654,7 +736,14 @@ async function bootstrap(): Promise<void> {
     supplyCard.value.textContent = `${me.supplyUsed}/${me.supplyCap}`;
     const blocked = me.supplyUsed >= me.supplyCap;
     supplyCard.root.style.borderColor = blocked ? '#ff5577' : '#234';
-    supplyCard.value.style.color = blocked ? '#ff5577' : '#cde';
+    if (blocked) {
+      // Let the pulse keyframe own the colour while capped.
+      supplyCard.value.classList.add('vy-cap-pulse');
+      supplyCard.value.style.color = '';
+    } else {
+      supplyCard.value.classList.remove('vy-cap-pulse');
+      supplyCard.value.style.color = '#cde';
+    }
 
     // Debug panel. Only built if ?debug=1, but cheap to update — the
     // textContent assignment is a no-op when the panel is display:none
@@ -743,6 +832,12 @@ async function bootstrap(): Promise<void> {
       selectStructure: (id: number) => input.selectStructureProgrammatic(id),
       selectAllOwnWorkers: () => input.selectAllOwnWorkersProgrammatic(),
       sim: match.sim,
+      // Phase C.6: tutorial introspection for the e2e spec.
+      tutorial: {
+        phase: () => tutorial?.getPhase() ?? null,
+        step: () => tutorial?.getStepId() ?? null,
+        goals: () => tutorial?.getGoalState() ?? null,
+      },
     };
   }
 
