@@ -1,31 +1,28 @@
 # Vylux
 
-A Tron-inspired isometric real-time strategy game — **single-player, PvE, wave-defense + roguelike-run shape**. Hold the grid against escalating raider waves; pick tech upgrades between waves; survive the run.
+A Tron-inspired isometric real-time strategy game — a single-player **PvAI duel** on a deterministic simulation. You and an AI opponent each hold an HQ on a neon grid; grow an economy and (eventually) destroy the other HQ.
 
-> **2026-05-07 — direction pivot.** Vylux was originally aimed at a competitive 1v1 ranked-ladder Steam release with esport hooks (Phases 0–3 were built against that goal). It has been repointed to single-player PvE. The deterministic sim, Tron aesthetic, and most of the catalog (units / structures / resources / fog / supply / action bar) carry over unchanged. The lockstep / WebRTC / observer multiplayer code under `src/net/` is **dormant — preserved for optionality, not on the active surface**. Don't add esport / ladder / spectator scaffolding without re-pitching the pivot. See `docs/product/PRD.md` for the new vision and `docs/investigation/04-phase-3-faction-and-map-depth.md` for the repointed sub-phases 3.11–3.14.
+> **Where the project is.** Vylux was once aimed at competitive 1v1 multiplayer (Phases 0–3 were built against that goal), then repointed to single-player. The current effort is a deliberate **strip-and-polish**: the surface was cut back to its fun core — **HQ + Worker + Energy** — to be polished until the opening minutes are genuinely fun, after which combat units and the deeper economy return through a tech tree. The deterministic sim, Tron aesthetic, and renderer architecture all carry over. The lockstep / WebRTC / observer multiplayer code under `src/net/` is **dormant** — preserved for optionality, not on the active surface; don't extend it without re-pitching.
+>
+> The full direction and phase plan live in [`docs/plan.md`](docs/plan.md) — the single planning anchor.
 
 ## Picking up work in a new session
 
-Read these in order:
+Read these three, in order:
 
-1. **`docs/product/PRD.md`** — vision, pillars, phases 0–5 (4 + 5 are now PvE: run-loop & meta-progression, then content + Steam stretch). The product anchor.
-2. **`docs/manual.md`** — the current shipped catalog: units, structures, resources, tech, controls, current map. "What is in the game right now" vs the PRD's "what we're building toward."
-3. **`AGENTS.md`** — current module layout, the determinism contract, what's load-bearing in the code. Note `src/net/` is dormant.
-4. **The latest investigation doc** — what's currently being worked on. `docs/investigation/` is numbered chronologically; the highest-numbered open one is the current frontier. Each doc owns scope, sub-phases, exit criteria, decision log, and (after closing) the lessons learned.
+1. **[`docs/plan.md`](docs/plan.md)** — the product direction and phase plan. The single planning doc: why the strip-and-polish, what each phase delivers, and the current sub-phase status. (Replaces the retired PRD + per-phase investigation series.)
+2. **[`docs/manual.md`](docs/manual.md)** — the live catalog: every unit, structure, resource, research, control, and the current map, exactly as they exist in the build right now.
+3. **[`AGENTS.md`](AGENTS.md)** — module layout, the determinism contract, and what's load-bearing in the code.
 
-The convention: **every PRD phase gets one investigation doc** when it starts. Phase 3+ stays at PRD §8 detail until its phase opens.
+## Where we are
 
-## Phase status
+The phase ladder (detail in [`docs/plan.md`](docs/plan.md)):
 
-| Phase | Status | Doc |
-|---|---|---|
-| 0 — Determinism Spike | ✅ Closed | [`docs/investigation/00-determinism-and-netcode.md`](docs/investigation/00-determinism-and-netcode.md) |
-| 0 audit (sub-investigation) | ✅ Closed | [`docs/investigation/01-nondeterminism-audit.md`](docs/investigation/01-nondeterminism-audit.md) |
-| 1 — Sim Rewrite | ✅ Closed | [`docs/investigation/02-phase-1-sim-rewrite.md`](docs/investigation/02-phase-1-sim-rewrite.md) — includes Lessons section |
-| 2 — Multiplayer Alpha | ✅ Closed (pre-pivot); now **dormant** — code preserved, not on the active surface | [`docs/investigation/03-phase-2-multiplayer-alpha.md`](docs/investigation/03-phase-2-multiplayer-alpha.md) |
-| **3 — Faction & Map Depth (repointed PvE)** | **▶ Active — 3.0–3.10 closed; 3.11–3.14 repointed (enemy-AI faction → seedable maps → PvE win conditions → run-loop playtest)** | [`docs/investigation/04-phase-3-faction-and-map-depth.md`](docs/investigation/04-phase-3-faction-and-map-depth.md) |
-| 4 — Run loop & meta-progression (PvE) | Future (PRD §8) | n/a |
-| 5 — Content + optional Steam release | Future (PRD §8) | n/a |
+- **A — Strip & Stabilise** ✅ — cut to HQ + Worker + Energy; HQ destruction is the only win.
+- **B — Visual Reset** ✅ — the live build reads like the Tron concept art.
+- **C — HQ + Worker Depth** ▶ — make the opening five minutes fun before any combat unit exists. Landed: the SC2-style HUD, synthesised audio, motion & world-life, the worker silhouette, the onboarding tutorial, and a bigger randomised map. Queued: sim-side obstacle avoidance, AI behaviour, the Matter economy + cost split, a resource depot, and research depth.
+- **D — First Combat Unit** — introduce one combat unit, designed against the new tech tree.
+- **E — Loop Closure** — the fun gate: enough matches that "start another?" lands as yes.
 
 ## Quick start
 
@@ -47,34 +44,36 @@ npm run preview    # http://localhost:5181/
 npx tsc --noEmit && npm run test && npm run test:e2e
 ```
 
-Same gate used locally and in CI. The cross-OS determinism workflow (`.github/workflows/determinism.yml`) runs the same `npm test` on Linux + macOS + Windows on every push and validates against the committed golden hash fixtures in `tests/determinism/`. Determinism remains useful post-pivot for save/load, replays-as-bug-reports, scripted scenarios, and reproducible AI testing — see PRD §3.1.
+Same gate used locally and in CI. The cross-OS determinism workflow (`.github/workflows/determinism.yml`) runs `npm test` on Linux + macOS + Windows on every push and validates against the committed golden hash fixtures in `tests/determinism/`. Determinism is no longer load-bearing for the product, but it stays useful for save/load, replays-as-bug-reports, scripted scenarios, and reproducible AI testing — see [`AGENTS.md`](AGENTS.md).
 
 ## What runs today
 
-The dev build is a 1v1 RTS playable mouse-only against the scripted AI on the deterministic sim. Until the Phase 3.11–3.14 PvE repoint lands, the live build still presents as "you vs an AI faction on a single hardcoded map" — i.e. the existing skirmish loop, not yet the wave-defense + roguelike-run shape the PRD now commits to.
+A mouse-driven 1v1 RTS against a scripted AI on the deterministic sim. A Tron-styled main menu opens first: pick a faction (Swarm / Siege) to start a duel against the AI, or open the **TUTORIAL** sandbox.
 
-- A Tron-styled main menu opens first; click **PLAY VS AI** to start a match.
-- The action bar at the bottom is selection-driven: click your **HQ** for `TRAIN WORKER`; click a **worker** for `BUILD FORGE / SPIRE / PYLON` + `DUMP`; click a **Forge** for combat units; click a **Spire** for `RESEARCH TIER 2 / TRAIL+`. Workers stay idle on spawn until commanded.
-- Workers build buildings — select a worker, pick `BUILD FORGE`, click a tile; the worker walks to the site and constructs it (visible "rising from the ground" + scaffolding ring while in build). Right-click an in-progress structure with workers selected to assign more builders.
-- Click your own worker(s) → click a live energy / flux / colour node → all selected workers go harvest. Selection persists across orders; only an empty-space left-click clears it.
-- Right-click on empty ground moves selected units. Faction-coloured ping at the target confirms the order; cursor changes to a crosshair while in placement mode.
-- Fog of war shows the world as dark; your vision uncovers the bright Tron grid where you can see, mid-darkening it where you've explored but lost sight.
-- Sound: UI click, train-complete, build-complete, attack-hit, HQ-alert. **M** toggles mute (top-right HUD indicator).
-- WASD / arrow keys pan the camera; middle-mouse drag pans; scroll wheel zooms.
-- Press **R** to download the current replay as JSON — useful for capturing bug-report material before a match ends. The match-end overlay also has a `DOWNLOAD REPLAY` button.
-- Match ends on HQ destruction or 100-point threshold; VICTORY/DEFEAT overlay with Play Again + Download Replay.
+- Your **HQ** trains **workers** (`W`), up to a supply cap and through a short production queue.
+- Workers **harvest energy** — select a worker, then left-click an energy node; they gather, return, and deposit at the HQ.
+- Workers **build work pods** (`B`) — a structure that raises the worker cap, recharges workers faster than the HQ, and hosts research.
+- Each worker runs on an internal **charge** meter (one charge per task); at zero it walks to a pod (or HQ) to recharge and ignores commands until full.
+- A work pod hosts the one current **research**, **Auto-Resume** (`R`) — charged workers then resume their last harvest target on their own.
+- An SC2-style **command HUD**: resource bar (top); portrait, command card, and minimap (bottom). Fog of war hides the enemy until scouted; the minimap respects it and recentres the camera on click.
+- Fully synthesised **audio** — an ambient bed plus a distinct cue per action; **M** mutes everything.
+- Camera: **WASD** / arrow keys or middle-mouse drag to pan, scroll wheel to zoom.
+- Press **R** (when nothing consumes it) or use the match-end overlay to **download the current replay** as JSON.
+- A match ends on **HQ destruction** (or Resign). No combat units are in the active sim yet, so that path isn't reachable through normal play — it's the canonical win condition combat units route to once Phase D reintroduces them.
 
-Replays exist (`src/sim/replay.ts`) and can be played headless via `npx vite-node tools/replay.ts <replay.json>`.
+The current map is a 64×64 grid with a seeded, randomised energy field (~16 low/med/high-tier nodes). Full catalog + controls in [`docs/manual.md`](docs/manual.md).
+
+Replays live in `src/sim/replay.ts` and can be played headless via `npx vite-node tools/replay.ts <replay.json>`.
 
 ### Dormant multiplayer modes
 
-The Phase 2 lockstep / WebRTC / observer code still works and is exercised by tests, but it is **not the product direction**. Do not extend it without re-pitching the pivot.
+The Phase 2 lockstep / WebRTC / observer code still compiles and is exercised by tests, but it is **not the product direction**. Don't extend it without re-pitching the pivot.
 
 - Two-tab lockstep: `?lockstep=host` / `?lockstep=join` over `BroadcastChannel`.
 - WebRTC peer-to-peer: `npm run signaling`, then `?lockstep=host&room=ABCDEF` / `?lockstep=join&room=ABCDEF`.
 - Observer prototype: `?lockstep=observe` while two players are running.
 
-Details in `AGENTS.md` and the Phase 2 investigation doc.
+Details in [`AGENTS.md`](AGENTS.md).
 
 ## Aesthetic references
 
