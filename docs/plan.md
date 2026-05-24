@@ -786,13 +786,45 @@ green incl. regenerated goldens.
 
 #### Phase C.8 — Research depth: worker + HQ trees  (was C.2)
 
-- Worker-upgrade research hosted at work pods; the **energy-trail** mechanic
-  returns here as one upgrade-tree option.
+- **Worker-upgrade research, hosted at any operational work pod.** The first
+  concrete worker-tree items beside the C.1 auto-resume validator. Each is a
+  one-time, faction-level upgrade (the auto-resume single-active-research rule
+  holds — at most one research mid-flight at a time), and each is **deliberately
+  expensive** (well above auto-resume's 80 E) so it reads as a real economic
+  commitment, not a default pickup:
+  - **Harvest Speed** — cuts the worker harvest interval (`harvestTicks`, today
+    23) by ~30% (≈16 ticks), so each parked worker gathers faster. Faction-level
+    flag, mirroring `autoResumeResearched`. Cost ≈ **200 E / 200 ticks** (tune in
+    playtest).
+  - **Move Speed** — raises worker move speed (`speed`, today 0.055) by ~30%
+    (≈0.072 tiles/tick), so transit + redeploy is quicker. Faction-level flag.
+    Cost ≈ **250 E / 250 ticks** (tune).
+  - The two together are a straight economy accelerant: `FactionConfig` notes
+    that harvest interval normally pairs *inversely* with speed (fast workers
+    harvest slower per tick), so buying both deliberately breaks that trade-off.
+    That's the intent — the high price is what balances it.
+  - The **energy-trail** mechanic also returns here as a further upgrade-tree
+    option.
+- **Determinism + HUD for the worker tree.** New `ResearchKind` values
+  (`harvestSpeed`, `moveSpeed`) + matching `*Researched` flags on `FactionState`;
+  the harvest-tick and move-speed reads consult the flags (a multiplier applied
+  in `step.ts`'s harvest loop + movement, or surfaced through `factionConfigFor` /
+  `unitStatsFor` taking the researched flags). New hashed fields + changed
+  movement/harvest math → **regenerate the golden fixtures and bump
+  `REPLAY_VERSION`**. The pod command card shows **one** research tile today; with
+  three items it must become a small fixed grid of research tiles (auto-resume +
+  the two speed upgrades) with per-item cost / disabled / in-progress / done
+  states (the C.2 command-card model).
 - HQ research track (vision aura, storage cap, auto-defence beam, …).
 - Every research result must change something **visible** on the HQ or worker —
-  research the player can't see doesn't reinforce the loop. (C.3 / C.4 now make
+  research the player can't see doesn't reinforce the loop. Move Speed is
+  inherently visible (workers visibly quicker); Harvest Speed reads via a faster /
+  brighter work-beam pulse plus the C.4 research-complete ripple. (C.3 / C.4 make
   "visible + audible" real.)
-- Tests + manual updated.
+- Tests + manual updated: add the two rows to the manual's Tech table + the
+  multi-item pod-research note; regenerate the golden fixtures; unit-test that a
+  researched flag actually applies its multiplier (deterministically); e2e that
+  every research tile renders with the correct state.
 
 **Phase C exit (the fun gate):** ≥3 internal sessions per faction-pick where the
 player spends 5 minutes building economy + researching, and reports the time as
