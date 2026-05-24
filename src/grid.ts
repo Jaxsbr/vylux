@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 
-// Phase 3.4 bumped gridSize from 20 to 32. The map is bigger to make
-// room for the catalog still landing in 3.5+ (faction-locked colour
-// nodes, Pylons, more contested zones). worldExtent is derived from
+// Phase 3.4 bumped gridSize from 20 to 32. Phase C.6.5 bumped it again,
+// 32 → 64: a bigger arena for the randomised energy field (more nodes,
+// scattered with room to spread). worldExtent is derived from
 // gridSize * tileSize so the divider math + tile-to-world projection
-// stay consistent if the constant moves again.
-const GRID_SIZE = 32;
+// stay consistent if the constant moves again. The sim is grid-size
+// agnostic (no import of this module); only render + spec coords care.
+const GRID_SIZE = 64;
 const TILE_SIZE = 1;
 
 export const GRID_CONSTANTS = {

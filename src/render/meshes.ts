@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import type { Faction, ResourceKind, UnitKind } from '../sim/types';
+import { classifyTier } from '../sim/map-gen';
 import { buildHQ as legacyBuildHQ } from './legacy/hq';
 import { buildWorker as legacyBuildWorker } from './legacy/worker';
 import { buildEnergyNode as legacyBuildEnergyNode } from './legacy/energy-node';
@@ -533,18 +534,44 @@ const NODE_SPIN_SPEED = 0.6;
 const NODE_BREATHE_AMP = 0.3;
 const NODE_PULSE_PERIOD_S = 2.6;
 
-export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind = 'energy'): NodeVisual {
+// Phase C.6.5 — tier brightness. Nodes now carry randomised low/med/high
+// energy (see sim/map-gen.ts); the tier scales the node's at-rest emissive
+// (and thus its bloom) so a richer node reads as brighter at a glance.
+// Indices line up with classifyTier: 0 = low … 2 = high.
+const NODE_TIER_BRIGHTNESS = [0.78, 1.0, 1.35] as const;
+
+// A slight per-tier hue shift on top of the brightness scale: low nodes sit a
+// touch deeper/dimmer, high nodes lift toward white so they read as the hot
+// prize. Kept subtle — the brightness multiplier does most of the talking.
+function nodeTierColour(base: number, tier: number): number {
+  const c = new THREE.Color(base);
+  if (tier <= 0) c.multiplyScalar(0.85);
+  else if (tier >= 2) c.lerp(new THREE.Color(0xffffff), 0.3);
+  return c.getHex();
+}
+
+// `maxEnergy` is the node's full reserve (its tier); omit it and the node
+// renders at the mid tier so callers that don't plumb energy look unchanged.
+export function buildNodeMesh(
+  tileX: number,
+  tileY: number,
+  kind: ResourceKind = 'energy',
+  maxEnergy?: number,
+): NodeVisual {
   const b = legacyBuildEnergyNode(tileX, tileY);
-  const colour = NODE_PALETTE[kind];
+  const tier = maxEnergy === undefined ? 1 : classifyTier(maxEnergy);
+  const brightness = NODE_TIER_BRIGHTNESS[tier];
+  const colour = nodeTierColour(NODE_PALETTE[kind], tier);
 
   // Tint the legacy hex-base rim per kind so the disc reads as the
   // right resource even before the silhouette is in view. The rim
   // itself stays dark (outlined-and-shaded idiom) — kind colour lives
-  // on its emissive shade + the bright edge lines.
+  // on its emissive shade + the bright edge lines. Tier scales the rim glow.
   b.group.traverse((obj) => {
     if (obj.name === 'node-rim' && obj instanceof THREE.Mesh) {
       const m = obj.material as THREE.MeshStandardMaterial;
       m.emissive.set(colour);
+      m.emissiveIntensity *= brightness;
     } else if (obj.name === 'node-rim-edge' && obj instanceof LineSegments2) {
       const m = obj.material as LineMaterial;
       m.color.set(colour);
@@ -580,7 +607,8 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
       // narrow to preserve the outlined-and-shaded look (a full-bright
       // body would compete with the building emissive palette).
       const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
-      const intensity = 0.05 + 0.25 * ratio;
+      // Tier brightness scales the silhouette glow (and the bloom it feeds).
+      const intensity = (0.05 + 0.25 * ratio) * brightness;
       silhouette.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           const m = child.material as THREE.MeshStandardMaterial;
@@ -593,8 +621,9 @@ export function buildNodeMesh(tileX: number, tileY: number, kind: ResourceKind =
       // Slow spin of the energy core — the strongest "this is live" read.
       silhouette.rotation.y += dt * NODE_SPIN_SPEED;
       // Gentle emissive breathe on top of the remaining-driven base (set by
-      // setRemaining, which runs first each frame).
-      const add = breathe(lifeClock, NODE_BREATHE_AMP, NODE_PULSE_PERIOD_S);
+      // setRemaining, which runs first each frame). Scaled by tier so the
+      // richer nodes breathe a touch harder too.
+      const add = breathe(lifeClock, NODE_BREATHE_AMP * brightness, NODE_PULSE_PERIOD_S);
       for (const m of silhouetteMats) m.emissiveIntensity += add;
     },
   };

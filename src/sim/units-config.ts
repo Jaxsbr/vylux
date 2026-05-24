@@ -161,12 +161,14 @@ const SWARM_UNIT_OVERRIDES: UnitOverrides = {
 };
 
 const SIEGE_UNIT_OVERRIDES: UnitOverrides = {
-  // Phase C.1 first-cut asymmetry: costlier + slower but tougher.
-  worker: {
-    speed: fromFloat(0.045), // existing move-speed split
-    trainCost: fromInt(60),  // costlier
-    maxHp: fromInt(60),      // tougher
-  },
+  // Flattened to Swarm's worker stats (owner direction 2026-05-24). The C.1
+  // first-cut asymmetry (Siege slower 0.045 / costlier 60 / tougher hp 60)
+  // made Siege strictly worse to play — the speed + cost penalty outweighed
+  // the toughness, so the faction "just sucks". Until real asymmetry returns
+  // with combat units (Phase D of docs/plan.md), Siege mirrors Swarm. This
+  // block stays as the divergence hook and tracks Swarm by spreading it, so
+  // the two can't drift apart by accident.
+  worker: { ...SWARM_UNIT_OVERRIDES.worker },
 };
 
 function applyOverrides(base: Record<UnitKind, UnitStats>, overrides: UnitOverrides): Record<UnitKind, UnitStats> {
@@ -203,8 +205,11 @@ const SHARED_FACTION_CONFIG: FactionConfig = {
 };
 
 const FACTION_CONFIGS: Record<FactionId, FactionConfig> = {
-  swarm: { ...SHARED_FACTION_CONFIG, harvestTicks: 23 }, // ~13% slower per gain
-  siege: { ...SHARED_FACTION_CONFIG, harvestTicks: 17 }, // ~18% faster per gain
+  swarm: { ...SHARED_FACTION_CONFIG, harvestTicks: 23 },
+  // Flattened to Swarm's harvest rate (owner direction 2026-05-24) — the
+  // harvest split was part of what made Siege feel bad; see
+  // SIEGE_UNIT_OVERRIDES above. Asymmetry returns with combat units.
+  siege: { ...SHARED_FACTION_CONFIG, harvestTicks: 23 },
 };
 
 export function factionConfigFor(factionId: FactionId): FactionConfig {

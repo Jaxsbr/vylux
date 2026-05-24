@@ -68,8 +68,8 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
   // in-flight, can afford the pod, an actionable worker is available,
   // and we haven't hit the AI's pod ceiling. Tile picked off the
   // deterministic AI_POD_OFFSETS table indexed by current pod count;
-  // clamped to grid bounds (the SPEC's 32x32 grid is comfortably
-  // larger than any offset we use).
+  // clamped to grid bounds (the 64×64 grid is comfortably larger than
+  // any offset we use).
   const podStats = STRUCTURE_STATS.workPod;
   const ownedPodCount = countFriendlyPods(state, faction);
   const podInFlight = anyPodBuilding(state, faction);
@@ -203,6 +203,9 @@ function toInt(f: Fixed): number {
 
 function clampTile(t: number): number {
   // Sim doesn't validate tile bounds; clamp here so an out-of-grid
-  // placement doesn't strand a worker. 32×32 grid → valid range [0, 31].
-  return Math.max(0, Math.min(31, t));
+  // placement doesn't strand a worker. 64×64 grid (C.6.5) → valid range
+  // [0, 63]. The sim is grid-size agnostic, so this bound is mirrored
+  // from the render grid (GRID_CONSTANTS.gridSize) by hand rather than
+  // imported — src/sim/ never imports src/render.
+  return Math.max(0, Math.min(63, t));
 }

@@ -317,7 +317,10 @@ export class SimRenderer {
     for (const n of this.sim.state.nodes) {
       let v = this.nodeMeshes.get(n.id);
       if (!v && n.alive) {
-        v = buildNodeMesh(toFloat(n.x), toFloat(n.y), n.kind);
+        // Pass the node's reserve at first build as its tier (full when the
+        // player's own nodes appear; an enemy node drained before first
+        // sighting may read one tier off — cosmetic only). C.6.5.
+        v = buildNodeMesh(toFloat(n.x), toFloat(n.y), n.kind, toFloat(n.remaining));
         v.group.userData.nodeId = n.id;
         this.entitiesGroup.add(v.group);
         this.nodeMeshes.set(n.id, v);

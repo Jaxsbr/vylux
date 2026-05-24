@@ -24,19 +24,21 @@ import { GRID_CONSTANTS, buildGrid, type GridBundle } from '../grid';
 // show on a fresh load with no zoom applied.
 export const DEFAULT_HALF_HEIGHT = (GRID_CONSTANTS.worldExtent / 2) + 6;
 
-// Zoom bounds. Smaller scale = closer in. Picked to keep individual
-// unit meshes legible at the closest zoom and keep the whole map
-// visible at the farthest.
-export const ZOOM_MIN = 0.25;
-// Tightened from 2.0 → 1.0 → 0.68 (≈ four wheel notches in from 1.0
-// at ZOOM_STEP=1.1) so the playable area always fills the frame at
-// the farthest zoom-out.
-export const ZOOM_MAX = 0.68;
+// Zoom bounds. Smaller scale = closer in (halfHeight = DEFAULT_HALF_HEIGHT ·
+// scale). DEFAULT_HALF_HEIGHT scales with the grid, so on the 64² map a given
+// scale shows ~2× the tiles it did on the old 32² one — the C.6.5 playtest
+// read the range as "can't get close enough, and zooms out too far". Re-tuned
+// for the bigger arena: a deeper zoom-in floor (units stay legible — ~10 tiles
+// tall at the closest) and a tighter zoom-out ceiling (~42 tiles; the minimap
+// covers whole-map awareness, and pan / minimap-click reach the far corner).
+export const ZOOM_MIN = 0.13; // closest — ≈ 2 · 38 · 0.13 ≈ 10 tiles tall
+export const ZOOM_MAX = 0.55; // farthest — ≈ 42 tiles tall (≈ ⅔ of the 64² map)
 
-// Initial zoom on match start. Defaults to ZOOM_MIN — the playtest
-// pattern is to crank zoom-in immediately, and starting there avoids
-// the "every match begins with a fistful of wheel scrolls" friction.
-export const DEFAULT_ZOOM_SCALE = ZOOM_MIN;
+// Initial zoom on match start — frames the player HQ corner plus a ring of
+// surroundings (~19 tiles), leaving room to crank in (to ZOOM_MIN) or pull
+// back (to ZOOM_MAX). Decoupled from ZOOM_MIN now that C.6.5 lowered the floor
+// below a comfortable opening framing.
+export const DEFAULT_ZOOM_SCALE = 0.25;
 
 // Camera offset from the look-at target — the iso angle. Held constant
 // so panning translates the camera-and-target together without rotating
@@ -119,10 +121,17 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
   const aspect = canvas.clientWidth / canvas.clientHeight;
   let currentHalfHeight = DEFAULT_HALF_HEIGHT * DEFAULT_ZOOM_SCALE;
   const halfWidth = currentHalfHeight * aspect;
+  // Ortho near/far must scale with the world. The camera sits ~1.68·worldExtent
+  // from its target (see cameraOffset below), so a fixed ±100 slab clipped the
+  // far half of the 64² grid — the look-at target itself sat past the old far
+  // plane, leaving only a near wedge visible. 4·worldExtent gives generous
+  // head-room around the whole grid + entity heights at every zoom level (zoom
+  // changes the frustum size, not the camera distance, so this stays valid).
+  const clipDepth = GRID_CONSTANTS.worldExtent * 4;
   const camera = new THREE.OrthographicCamera(
     -halfWidth, halfWidth,
     currentHalfHeight, -currentHalfHeight,
-    -100, 100,
+    -clipDepth, clipDepth,
   );
   const cameraOffset = new THREE.Vector3(
     GRID_CONSTANTS.worldExtent * CAMERA_OFFSET_RATIO.x,

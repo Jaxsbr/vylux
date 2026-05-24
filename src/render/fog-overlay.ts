@@ -26,9 +26,11 @@ import { GRID_CONSTANTS } from '../grid';
 import type { Sim } from '../sim/sim';
 import type { Exploration } from './exploration';
 
-// Sub-tile resolution multiplier for the canvas. 2× = 64×64 for the
-// 32×32 grid — enough that LinearFilter smooths cell boundaries into
-// a continuous gradient. Higher buys little visual + more cost.
+// Sub-tile resolution multiplier for the canvas. 2× the gridSize (now
+// 128×128 for the 64×64 grid) — enough that LinearFilter smooths cell
+// boundaries into a continuous gradient. Higher buys little visual + more
+// cost. Resolution is derived from GRID_CONSTANTS.gridSize, so it scales
+// with the grid automatically.
 const CANVAS_OVERSAMPLE = 2;
 
 // Uniform reveal: every tile the player has explored renders at the

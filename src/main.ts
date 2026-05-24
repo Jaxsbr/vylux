@@ -43,6 +43,8 @@ import type { Command } from './sim/commands';
 import { Match, serialiseReplay } from './sim/replay';
 import type { InitialMatchSpec } from './sim/state';
 import type { Faction } from './sim/types';
+import { generateEnergyField } from './sim/map-gen';
+import { GRID_CONSTANTS } from './grid';
 import { createScene, tileFloatToWorld } from './render/scene';
 import { toFloat } from './sim/fixed';
 import { SimRenderer } from './render/sim-renderer';
@@ -70,62 +72,69 @@ import { ObserverLoop } from './net/observer-loop';
 import { WebRtcTransport } from './net/webrtc-transport';
 import { isValidRoomCode } from './net/signaling-protocol';
 
-// Phase 3.4 re-tuned for the 32×32 grid. HQs in opposite corners with
-// real travel distance between them; Energy nodes near each HQ + a pair
-// of mid-distance "second base" nodes; one contested Flux node at the
-// dead centre, equidistant between HQs (PRD §6.6's "geographically
-// committal third base").
+// Phase C.6.5 — bigger arena (64×64) with a randomised energy field.
 //
-// Phase 3.5 adds two faction-locked colour nodes per side (blue near
-// F0 HQ, red near F1 HQ). Positioned in the home patch so the owning
-// faction can hold them with light defence, but reachable from the
-// open midfield so a determined raid can deny them — the lockout-by-
-// denial mechanic only matters if the colour nodes are denyable.
+// HQs sit in opposite corners with real travel distance between them
+// (anti-diagonal layout: F0/player bottom-left, F1/AI top-right as the camera
+// reads it — world +X is screen-right, +Z is screen-down at this iso angle, so
+// (8, 55) lands bottom-left). The energy nodes are no longer hand-placed: a
+// seeded generator scatters ~16 of them with randomised low/med/high values,
+// off the HQ/edge tiles, with ≥1 node guaranteed in each HQ's vision. See
+// docs/plan.md "Phase C.6.5" + src/sim/map-gen.ts.
+const HQ_F0 = { x: 8, y: 55 }; // player — bottom-left
+const HQ_F1 = { x: 55, y: 8 }; // AI — top-right
+const NODE_COUNT = 16;
+// HQ vision is 8 tiles (units-config HQ_VISION_RADIUS = fromInt(8)); the
+// generator uses it to guarantee each HQ starts with a discoverable node.
+const HQ_VISION_TILES = 8;
+const DEFAULT_MAP_SEED = 42;
+
+// Build the energy field for a normal match from a seed. Pure + seeded, so the
+// same seed always yields the same layout; the chosen seed is baked into the
+// spec and serialised into the replay, so the map reproduces on replay.
+function buildEnergyField(seed: number): InitialMatchSpec['nodes'] {
+  return generateEnergyField({
+    seed,
+    gridSize: GRID_CONSTANTS.gridSize,
+    hqs: [HQ_F0, HQ_F1],
+    count: NODE_COUNT,
+    hqVisionRadiusTiles: HQ_VISION_TILES,
+  });
+}
+
 const SPEC: InitialMatchSpec = {
-  seed: 42,
-  hqs: {
-    // Anti-diagonal layout: F0 (player) bottom-left, F1 (AI) top-right
-    // as the camera reads it. World +X is screen-right and world +Z is
-    // screen-down at this iso angle, so (4, 27) lands bottom-left.
-    faction0: { x: 4, y: 27 },
-    faction1: { x: 27, y: 4 },
-  },
-  nodes: [
-    // Faction 0 home patch (bottom-left corner).
-    { x: 7, y: 27, energy: 200 },
-    { x: 4, y: 24, energy: 200 },
-    // Faction 1 home patch (top-right corner).
-    { x: 24, y: 4, energy: 200 },
-    { x: 27, y: 7, energy: 200 },
-    // Mid-distance "second base" nodes on the HQ-to-HQ diagonal
-    // (x + y = 31).
-    { x: 11, y: 20, energy: 200 },
-    { x: 20, y: 11, energy: 200 },
-  ],
+  seed: DEFAULT_MAP_SEED,
+  hqs: { faction0: HQ_F0, faction1: HQ_F1 },
+  // Default field from the fixed seed. PvA / observe matches override this
+  // with a fresh per-launch seed (see the matchSpec construction below);
+  // lockstep keeps this fixed layout so both peers agree (no desync).
+  nodes: buildEnergyField(DEFAULT_MAP_SEED),
   initialEnergy: 200,
   hqMaxHp: 250,
 };
 
 // Phase C.6: the tutorial sandbox. Deterministic seed, generous starting
-// energy, and energy nodes clustered near BOTH corners so the player's home
-// patch is rich whichever faction (corner) they picked. The enemy HQ sits in
-// the far corner exactly as in a normal match — but tutorial mode does not run
-// the AI command path, so it stays passive for the "find the enemy HQ" goal.
+// energy, and energy nodes HAND-PLACED (not randomised) clustered near BOTH
+// corners so the player's home patch is rich whichever faction (corner) they
+// picked — the coach ghost-cursor + harvest step depend on a known layout. The
+// enemy HQ sits in the far corner exactly as in a normal match, but tutorial
+// mode does not run the AI command path, so it stays passive for the "find the
+// enemy HQ" goal. Coordinates re-fitted to the 64×64 grid (C.6.5).
 const TUTORIAL_SPEC: InitialMatchSpec = {
   seed: 7,
   hqs: {
-    faction0: { x: 4, y: 27 },
-    faction1: { x: 27, y: 4 },
+    faction0: HQ_F0,
+    faction1: HQ_F1,
   },
   nodes: [
-    // faction-0 corner (bottom-left)
-    { x: 7, y: 27, energy: 500 },
-    { x: 4, y: 24, energy: 500 },
-    { x: 9, y: 25, energy: 500 },
-    // faction-1 corner (top-right)
-    { x: 24, y: 4, energy: 500 },
-    { x: 27, y: 7, energy: 500 },
-    { x: 22, y: 6, energy: 500 },
+    // faction-0 corner (bottom-left, near HQ (8,55))
+    { x: 12, y: 55, energy: 500 },
+    { x: 8, y: 51, energy: 500 },
+    { x: 13, y: 52, energy: 500 },
+    // faction-1 corner (top-right, near HQ (55,8))
+    { x: 51, y: 8, energy: 500 },
+    { x: 55, y: 12, energy: 500 },
+    { x: 52, y: 13, energy: 500 },
   ],
   initialEnergy: 400,
   hqMaxHp: 250,
@@ -366,8 +375,18 @@ async function bootstrap(): Promise<void> {
     ? (playerFaction === 0 ? pickedFactionId : (pickedFactionId === 'swarm' ? 'siege' : 'swarm'))
     : 'swarm';
   const factionId1: FactionId = factionId0 === 'swarm' ? 'siege' : 'swarm';
+  // Phase C.6.5: a fresh random energy field per PvA / observe match (the
+  // menu-owned surfaces). The chosen seed is baked into the spec and
+  // serialised into the replay, so the layout reproduces. Lockstep modes keep
+  // SPEC's fixed seed + field so both peers generate the same map (no desync),
+  // and the tutorial keeps its hand-placed nodes.
+  const isLockstep = mode.kind === 'lockstep-local' || mode.kind === 'lockstep-webrtc';
+  const randomiseMap = !isTutorial && !isLockstep;
+  const baseSpec = isTutorial ? TUTORIAL_SPEC : SPEC;
+  const mapSeed = randomiseMap ? (Math.floor(Math.random() * 0x1_0000_0000) >>> 0) : (baseSpec.seed as number);
   const matchSpec: InitialMatchSpec = {
-    ...(isTutorial ? TUTORIAL_SPEC : SPEC),
+    ...baseSpec,
+    ...(randomiseMap ? { seed: mapSeed, nodes: buildEnergyField(mapSeed) } : {}),
     factionIds: { faction0: factionId0, faction1: factionId1 },
   };
   const match = new Match(matchSpec);
