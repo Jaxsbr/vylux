@@ -86,12 +86,16 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
     // energy nodes (C.6.6 keep-out, else the sim rejects the build) and not
     // already taken by a friendly pod. Scanning (rather than indexing straight
     // by pod count) keeps the AI from spinning forever on an offset that
-    // happens to sit next to a node. When nothing is blocked this picks the
-    // same tiles in the same order as the old index-by-count.
+    // happens to sit next to a node. While no pod has died it picks the same
+    // tiles in the same order as the old index-by-count (pods occupy 0..n-1).
+    // Limitations deferred to C.6.7 (AI-behaviour overhaul): if ALL offsets are
+    // node-blocked the AI builds no pod (rare on the random map; C.6.7 adds
+    // cluster-aware placement), and once pod death exists (Phase D) the scan
+    // refills the lowest free offset rather than tracking by count.
     for (let i = 0; i < AI_POD_OFFSETS.length; i++) {
       const offset = AI_POD_OFFSETS[i];
-      const tx = clampTile(toInt(fs.hqX) + offset.dx);
-      const ty = clampTile(toInt(fs.hqY) + offset.dy);
+      const tx = clampTile(toInt(fs.hqX) + offset.dx, state.gridSize);
+      const ty = clampTile(toInt(fs.hqY) + offset.dy, state.gridSize);
       if (isPodTileBlockedByNode(state, tx, ty)) continue;
       if (friendlyPodOnTile(state, faction, tx, ty)) continue;
       commands.push({
@@ -226,11 +230,10 @@ function toInt(f: Fixed): number {
   return Math.round(f / fromInt(1));
 }
 
-function clampTile(t: number): number {
-  // Sim doesn't validate tile bounds; clamp here so an out-of-grid
-  // placement doesn't strand a worker. 64×64 grid (C.6.5) → valid range
-  // [0, 63]. The sim is grid-size agnostic, so this bound is mirrored
-  // from the render grid (GRID_CONSTANTS.gridSize) by hand rather than
-  // imported — src/sim/ never imports src/render.
-  return Math.max(0, Math.min(63, t));
+function clampTile(t: number, gridSize: number): number {
+  // Sim doesn't validate tile bounds; clamp here so an out-of-grid placement
+  // doesn't strand a worker. Bound is derived from the match's gridSize (now a
+  // configurable spec field — was hard-coded 63 assuming a 64² grid, which
+  // stranded the AI's builder on any non-64 grid).
+  return Math.max(0, Math.min(gridSize - 1, t));
 }

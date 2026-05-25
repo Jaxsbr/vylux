@@ -415,6 +415,10 @@ export class InputController {
         if (tile !== null) {
           const valid = !isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y);
           this.opts.feedback?.onPlacementHover?.(tile.x, tile.y, valid);
+        } else {
+          // Cursor left the playable grid (off-grid / over HUD) — hide the
+          // preview instead of leaving a stale marker frozen on-grid.
+          this.opts.feedback?.onPlacementHoverEnd?.();
         }
       }
       // Phase 3.9.1: hover-driven cursor state. Only updated when NOT

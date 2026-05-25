@@ -164,6 +164,35 @@ describe('Sim — worker routes around 1-tile pods (A* regression)', () => {
     expect(r.maxXDeviation).toBeGreaterThan(1); // detoured around the wall end
   });
 
+  it('invalidates the cached path on retarget (no stale-route reuse)', () => {
+    // Regression: navigate() caches on the destination tile alone. A retarget
+    // whose new goal rounds to the SAME tile as a stale cache must still
+    // replan. Simulate a stale cache (a bogus far waypoint + a pathGoalTile
+    // equal to the node-centre tile), then assign the worker to that node.
+    const sim = new Sim({
+      seed: 7,
+      hqs: { faction0: { x: 10, y: 10 }, faction1: { x: 50, y: 50 } },
+      nodes: [{ x: 10, y: 16, energy: 1000 }],
+      initialEnergy: 10000,
+    });
+    const w = spawnUnit(sim.state, 'worker', 0, fromInt(10), fromInt(12));
+    if (w.kind !== 'worker') throw new Error('expected worker');
+    w.path = [packTile(20, 20, GRID)];          // stale waypoint far to the +x
+    w.pathGoalTile = packTile(10, 16, GRID);     // coincides with the node tile
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.AssignWorkerToNode, workerId: w.id, nodeId: 1 }],
+    });
+    let maxX = toFloat(w.x);
+    for (let t = 0; t < 120; t++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+      maxX = Math.max(maxX, toFloat(w.x));
+    }
+    // Stale reuse would chase (20,20) — x climbing well past 11. A fresh plan
+    // keeps the worker in the node/HQ column (x ~10).
+    expect(maxX).toBeLessThan(11);
+  });
+
   it('walks the gap between two pods left a tile apart (no longer a wall)', () => {
     // Two pods two tiles apart leave a free centre tile — a real, passable gap
     // now that footprints are 1 tile, so the worker need not detour far.

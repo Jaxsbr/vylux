@@ -301,6 +301,12 @@ export function applyCommand(state: SimState, cmd: Command): void {
       // The player issued an explicit harvest — that's the new "previous
       // task" for auto-resume purposes (replacing any older one).
       u.previousNodeId = n.id;
+      // Phase C.6.6: drop the cached A* route — the destination changed, and
+      // navigate() keys its cache on the destination TILE alone, so a retarget
+      // that happens to round to the same tile (or with a different exempt
+      // blocker) would otherwise reuse a stale/drained path.
+      u.path.length = 0;
+      u.pathGoalTile = -1;
       return;
     }
     case CommandKind.TrainUnit: {
@@ -358,6 +364,10 @@ export function applyCommand(state: SimState, cmd: Command): void {
         u.targetNodeSlot = 0;
         u.harvestTicksRemaining = 0;
         u.targetStructureId = 0;
+        // Phase C.6.6: invalidate the cached A* route on retarget (see the
+        // AssignWorkerToNode note — navigate caches on destination tile only).
+        u.path.length = 0;
+        u.pathGoalTile = -1;
         // Explicit move overrides any auto-resume memory — the player
         // is reposting this worker, don't second-guess them later.
         u.previousNodeId = 0;
@@ -403,6 +413,9 @@ export function applyCommand(state: SimState, cmd: Command): void {
       w.targetStructureId = newStructure.id;
       // Build supersedes any auto-resume memory.
       w.previousNodeId = 0;
+      // Phase C.6.6: invalidate the cached A* route on retarget.
+      w.path.length = 0;
+      w.pathGoalTile = -1;
       return;
     }
     case CommandKind.Resign: {
