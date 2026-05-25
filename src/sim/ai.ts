@@ -20,6 +20,7 @@ import { distSq, fromInt, type Fixed } from './fixed';
 import { type Faction, type ResourceNode, type SimState } from './types';
 import { MAX_TRAIN_QUEUE, STRUCTURE_STATS, unitStatsFor } from './units-config';
 import { isInChargeMode } from './step';
+import { isPodTileBlockedByNode } from './state';
 
 export const AI_TICK_INTERVAL = 10;
 
@@ -81,19 +82,43 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
     && fs.energy >= podStats.buildCost
     && builder !== 0
   ) {
-    const offset = AI_POD_OFFSETS[ownedPodCount % AI_POD_OFFSETS.length];
-    const tx = clampTile(toInt(fs.hqX) + offset.dx);
-    const ty = clampTile(toInt(fs.hqY) + offset.dy);
-    commands.push({
-      kind: CommandKind.BuildStructureByWorker,
-      workerId: builder,
-      structureKind: 'workPod',
-      x: tx,
-      y: ty,
-    });
+    // Pick the first deterministic offset whose tile is buildable — clear of
+    // energy nodes (C.6.6 keep-out, else the sim rejects the build) and not
+    // already taken by a friendly pod. Scanning (rather than indexing straight
+    // by pod count) keeps the AI from spinning forever on an offset that
+    // happens to sit next to a node. When nothing is blocked this picks the
+    // same tiles in the same order as the old index-by-count.
+    for (let i = 0; i < AI_POD_OFFSETS.length; i++) {
+      const offset = AI_POD_OFFSETS[i];
+      const tx = clampTile(toInt(fs.hqX) + offset.dx);
+      const ty = clampTile(toInt(fs.hqY) + offset.dy);
+      if (isPodTileBlockedByNode(state, tx, ty)) continue;
+      if (friendlyPodOnTile(state, faction, tx, ty)) continue;
+      commands.push({
+        kind: CommandKind.BuildStructureByWorker,
+        workerId: builder,
+        structureKind: 'workPod',
+        x: tx,
+        y: ty,
+      });
+      break;
+    }
   }
 
   return commands;
+}
+
+// Is a friendly work pod already sitting on tile (tileX, tileY)? Used so the
+// AI's offset scan doesn't re-pick a tile it already built on.
+function friendlyPodOnTile(state: SimState, faction: Faction, tileX: number, tileY: number): boolean {
+  for (let i = 0; i < state.structures.length; i++) {
+    const s = state.structures[i];
+    if (!s.alive) continue;
+    if (s.faction !== faction) continue;
+    if (s.kind !== 'workPod') continue;
+    if (toInt(s.x) === tileX && toInt(s.y) === tileY) return true;
+  }
+  return false;
 }
 
 // Point every idle worker (phase==='idle' with no node target and no

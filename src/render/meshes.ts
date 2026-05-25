@@ -412,7 +412,11 @@ const WORK_POD_DIMS = {
   capRadius: 0.32,
   capHeight: 0.1,
 } as const;
-const WORK_POD_SCALE = 1.6;
+// Scale 1.0 keeps the body (0.85 wide) inside a single 1.0 tile so two pods on
+// adjacent tiles never overlap — matching the 1-tile A* footprint
+// (POD_PATH_BLOCK_SQ in step.ts). Was 1.6 (≈1.36 wide), which spilled into
+// neighbouring tiles and created the overlapping-footprint pathing pockets.
+const WORK_POD_SCALE = 1.0;
 
 export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number): WorkPodVisual {
   const fid = factionToId(faction);

@@ -135,7 +135,7 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | C.5 | Worker silhouette redesign              | FEEL, CLARITY | ✅ landed (hovering hex courier) |
 | C.6 | Onboarding & tutorial sandbox           | ONBOARD       | ✅ landed 2026-05-24 (#17) |
 | C.6.5 | **Map: bigger arena + randomised energy field** | new scope | ✅ landed 2026-05-24 |
-| C.6.6 | **Sim-side obstacle avoidance (worker pathing)** | new scope | spec'd 2026-05-24 |
+| C.6.6 | **Sim-side obstacle avoidance — grid A\* (worker pathing)** | new scope | ✅ landed 2026-05-26 (pure A\*, waypoint-only; hybrid attempt reverted first) |
 | C.6.7 | **AI behaviour — scout, expand-harvest, grow** | new scope | spec'd 2026-05-25 |
 | C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
 | C.7.5 | **Resource Depot — collection building + research** | new scope | spec'd 2026-05-24 |
@@ -652,6 +652,106 @@ combat units yet); moving-obstacle avoidance.
 
 **Exit:** a worker visibly routes around the HQ / pods / depots / energy nodes
 instead of clipping through them; verify gate green incl. regenerated goldens.
+
+> ### Landed via PURE A\* — after a hybrid attempt was reverted (2026-05-25 → 26)
+>
+> **First attempt (reverted): A\* + local steering hybrid.** Global A\* for the
+> route plus a per-tick tangential *steering* layer for smoothing / final
+> approach. Reverted for two reasons:
+> - **Frame jitter.** The steering layer ran per-tick for every moving worker
+>   (tangential math + a route/line-of-sight re-check), and replanned A\*
+>   whenever that check tripped — unbounded per-tick work that showed as jitter.
+> - **Oscillation.** Memoryless steering *bounces* in concave pockets (two pods
+>   side by side); when an exemption bug let A\* hand a "clear" route to the
+>   steering fallback, the worker bounced instead of routing around. The
+>   steering layer is the only part that can physically oscillate.
+> - That attempt is preserved in a **git stash** (`DEFERRED: vylux …`) for
+>   reference; it is not the landed code.
+>
+> **What landed: pure grid A\*, waypoint-only, cached.** The insight (owner's):
+> A\* itself can't oscillate — it returns open tiles or nothing — so the fix is
+> to *drop the steering layer entirely* and accept blockier movement.
+> - `src/sim/pathfind.ts` — deterministic tile A\* (8-connected, integer octile
+>   costs, binary heap tie-broken by `(f, tile)`, no corner-cutting, integer
+>   Bresenham LoS for string-pulling). Tiles are blocked per blocker footprint:
+>   **HQ 1.95** (genuine 3×3 mesh), **node 0.95** (one tile), **pod 0.7** (one
+>   tile — see the pod-resize note below). The destination blocker is exempt
+>   **by key** (identity), never by proximity — so a pod next to the target node
+>   stays solid.
+> - `step.ts` `navigate()` walks the cached waypoint route with a **plain
+>   straight step** (`moveTowards`), no steering. It **plans to the blocker
+>   centre** (always reachable) and **settles on the actual slot** with the
+>   final straight hop. The path is recomputed **only when the destination tile
+>   changes** — no per-tick LoS, no per-tick replan. When A\* finds no route the
+>   straight fallback simply clips through (the old cosmetic gap) — it never
+>   oscillates or stalls.
+> - Determinism: workers gained two hashed fields (`path`, `pathGoalTile`);
+>   `REPLAY_VERSION` 25 → 26; all three goldens regenerated. `gridSize` added to
+>   `SimState` (from the render's `GRID_CONSTANTS` via the spec); not hashed.
+>
+> **Why this resolves the failure modes:**
+> - **No jitter.** Per-tick pathing cost is O(1) when the target is unchanged
+>   (tile compare + waypoint pop + straight step); A\* fires only on (re)
+>   assignment. Measured headless: **~24 µs/tick** for a 6000-tick AI-vs-AI
+>   match — ~2000× under the 50 ms (20 Hz) per-tick budget. No render-side cost
+>   added.
+> - **No oscillation, no stuck.** The bouncing came from the steering layer,
+>   which no longer exists.
+>
+> **Tradeoff accepted:** movement is blockier (8-direction, turns at waypoint
+> corners) — functional, not silky. Smooth path-following (and dynamic
+> unit-vs-unit avoidance) can layer on in Phase D if it's ever worth it.
+>
+> **Tests:** `pathfind.test.ts` — pure A\*/determinism + the "exempts only the
+> keyed destination" check + **three end-to-end regressions** (worker routes
+> around a single pod on its line; around an adjacent-pod *wall*; and walks the
+> passable gap between two spaced pods). `tsc` + 207 unit + 10 e2e green.
+>
+> **Follow-up — pod resized to one tile (2026-05-26).** Owner direction after
+> playtesting the A\* build: the work-pod mesh was 0.85 × **1.6** scale ≈ 1.36
+> units wide — wider than a 1.0 tile — so two pods spilled into each other and
+> their *inflated* (radius-1.2, 5-tile plus-shape) A\* footprints merged into
+> awkward pockets. Fixed by shrinking the pod to **one tile**: mesh scale 1.6 →
+> **1.0** (`meshes.ts`, body 0.85 wide, render-only) and `POD_PATH_BLOCK_SQ`
+> radius 1.2 → **0.7** (`step.ts`, blocks only its own tile). Now pods can't
+> overlap; adjacent pods form a clean wall, spaced pods leave a real gap. This
+> is a sim-behaviour tuning change, but it left the golden fixtures **unchanged**
+> — in the AI-vs-AI fixture no worker's route actually crossed a pod tile under
+> either radius, so the hashes were identical (no regen, still on the same
+> uncommitted `REPLAY_VERSION` 26).
+>
+> **Follow-up — node keep-out for pod placement (2026-05-26).** Even with 1-tile
+> pods, a pod built *directly adjacent* to a node still clipped: A* delivers the
+> worker to the node centre, but the **final hop to the harvest slot is a blind
+> straight line** (no steering), and each worker's slot is a different hex point
+> around the node — so workers whose slot faced the adjacent pod skimmed its
+> tile, while others approached clean (the "sometimes clips" report). Rather than
+> re-add obstacle-awareness to the final hop, the fix is at *placement*: work
+> pods may not be built within **1 tile (Chebyshev)** of a live energy node
+> (`POD_NODE_KEEPOUT_TILES`, `isPodTileBlockedByNode` in `state.ts`). One shared
+> predicate enforces it in three places — the authoritative build reject
+> (`applyCommand`), the AI's pod-tile pick (`ai.ts` now *scans* offsets for the
+> first buildable one instead of indexing blindly, so it can't spin on a
+> forbidden tile), and the render placement preview (a green/red tile marker
+> under the cursor in build mode; an invalid click is blocked and keeps the
+> player in placement mode). Keeps the node's slot ring + approach corridor pod-
+> free, so the blind final hop is always clear. Goldens unchanged (the AI's
+> home-patch offsets don't land next to nodes in the fixture); `REPLAY_VERSION`
+> stays 26.
+>
+> **Follow-up — line-of-sight was cutting pod corners (2026-05-26).** Workers
+> still walked *diagonally through* pods. Cause: A* expansion forbids
+> corner-cutting (a diagonal needs both orthogonal neighbours clear), but the
+> `losClear` used by the clear-shot short-circuit **and** string-pulling was
+> plain Bresenham, which samples one tile per step and slips past a blocked tile
+> at its corner — reporting "clear" for a diagonal that actually grazes the pod,
+> so the worker walked straight through it. Fixed by making `losClear`
+> **corner-conservative**: at each diagonal crossing it also rejects if either
+> tile sharing that corner is blocked, matching A*'s rule. Now the clear-shot
+> and the smoothed waypoints never graze a pod corner. This shifts some paths
+> (corner crossings near *any* blocker, incl. nodes), so **all three goldens
+> regenerated** (still uncommitted `REPLAY_VERSION` 26). New unit test asserts a
+> diagonal route can't cut a pod corner.
 
 #### Phase C.6.7 — AI behaviour: scout, expand-harvest, grow · [new — owner-inserted 2026-05-25]
 

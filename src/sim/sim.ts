@@ -152,6 +152,11 @@ function hashUnit(h: Hasher, u: Unit): void {
       // Phase C.1 charge-slot allocation: slot index at the chosen
       // charge spot. Cleared (= 0) when not in charge mode.
       h.writeU32(u.chargeSlot);
+      // Phase C.6.6: cached A* waypoint path + the tile it was planned for.
+      // Both feed future steps, so both are hashed (length-prefixed array
+      // makes different-length paths hash distinctly).
+      h.writeI32Array(u.path);
+      h.writeI32(u.pathGoalTile);
       return;
   }
 }

@@ -18,10 +18,11 @@ import type {
   WorkPod,
 } from './types';
 import type { Fixed } from './fixed';
-import { distSq, fromInt, rangeSq } from './fixed';
+import { distSq, fromInt, rangeSq, toInt } from './fixed';
 import {
   HQ_SUPPLY_CAP_INITIAL,
   HQ_VISION_RADIUS,
+  POD_NODE_KEEPOUT_TILES,
   STRUCTURE_STATS,
   WORKER_DEFAULT_MAX_CHARGE,
   unitStatsFor,
@@ -29,6 +30,11 @@ import {
 
 export interface InitialMatchSpec {
   seed: number | bigint;
+  // Phase C.6.6: square grid extent (tiles per side) for A* pathfinding.
+  // Defaults to 64 (the live arena) so existing callers — tests, scripted
+  // matches whose coords sit well within 64 — need no change. The render
+  // passes GRID_CONSTANTS.gridSize so sim + render agree.
+  gridSize?: number;
   hqs: { faction0: { x: number; y: number }; faction1: { x: number; y: number } };
   // Which faction-id each slot plays. Defaults to swarm/siege so legacy
   // callers (tests + headless cli) don't have to spell it out.
@@ -97,6 +103,7 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
   const state: SimState = {
     tick: 0,
     rngState: rng.snapshot(),
+    gridSize: spec.gridSize ?? 64,
     factions,
     units: [],
     nodes,
@@ -145,6 +152,23 @@ export function findNode(state: SimState, id: number): ResourceNode | null {
     if (n.id === id && n.alive) return n;
   }
   return null;
+}
+
+// Phase C.6.6: is tile (tileX, tileY) too close to a live energy node to build
+// a work pod on? True when within POD_NODE_KEEPOUT_TILES (Chebyshev) of any
+// alive node. Shared by the authoritative build reject (step.ts), the AI's pod
+// tile pick (ai.ts), and the render placement preview — one source of truth so
+// the preview can't disagree with what the sim accepts. Tile coords are
+// integers; node coords sit on integer tiles, so toInt recovers the node tile.
+export function isPodTileBlockedByNode(state: SimState, tileX: number, tileY: number): boolean {
+  for (let i = 0; i < state.nodes.length; i++) {
+    const n = state.nodes[i];
+    if (!n.alive) continue;
+    const dx = Math.abs(tileX - toInt(n.x));
+    const dy = Math.abs(tileY - toInt(n.y));
+    if (dx <= POD_NODE_KEEPOUT_TILES && dy <= POD_NODE_KEEPOUT_TILES) return true;
+  }
+  return false;
 }
 
 export function findStructure(state: SimState, id: number): Structure | null {
@@ -216,6 +240,8 @@ export function spawnUnit(
     chargeTicksAccrued: 0,
     previousNodeId: 0,
     chargeSlot: 0,
+    path: [],
+    pathGoalTile: -1,
   };
   state.units.push(w);
   return w;
