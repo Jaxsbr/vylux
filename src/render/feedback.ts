@@ -57,14 +57,50 @@ interface Ping {
   endScale: number;
 }
 
+// Placement-preview colours: where a work pod MAY be built vs where it's
+// blocked (too close to a node — see isPodTileBlockedByNode).
+const PLACE_OK_COLOR = 0x33ff88;   // green — valid
+const PLACE_BAD_COLOR = 0xff3344;  // red — blocked
+
 export class FeedbackOverlay {
   private readonly group: THREE.Group;
   private readonly pings: Ping[] = [];
+  // Phase C.6.6: persistent (not a ping) build-placement preview — a flat tile
+  // marker that follows the cursor while in work-pod placement mode, green on a
+  // valid tile, red where the node keep-out forbids it. Lazily created.
+  private placementPreview: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; geo: THREE.BufferGeometry } | null = null;
 
   constructor(parent: THREE.Group) {
     this.group = new THREE.Group();
     this.group.name = 'feedback';
     parent.add(this.group);
+  }
+
+  // Show / move the build-placement preview at a tile, coloured by validity.
+  showPlacementPreview(tileX: number, tileY: number, valid: boolean): void {
+    if (this.placementPreview === null) {
+      const geo = new THREE.PlaneGeometry(0.9, 0.9);
+      const mat = new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0.32,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.renderOrder = CUE_RENDER_ORDER;
+      this.group.add(mesh);
+      this.placementPreview = { mesh, mat, geo };
+    }
+    const p = this.placementPreview;
+    const w = tileFloatToWorld(tileX, tileY);
+    p.mesh.position.set(w.x, CUE_Y, w.z);
+    p.mat.color.setHex(valid ? PLACE_OK_COLOR : PLACE_BAD_COLOR);
+    p.mesh.visible = true;
+  }
+
+  hidePlacementPreview(): void {
+    if (this.placementPreview !== null) this.placementPreview.mesh.visible = false;
   }
 
   // Fired by the input controller when the player commits a MoveUnit.
@@ -255,6 +291,12 @@ export class FeedbackOverlay {
       for (const m of p.materials) m.dispose();
     }
     this.pings.length = 0;
+    if (this.placementPreview !== null) {
+      this.group.remove(this.placementPreview.mesh);
+      this.placementPreview.geo.dispose();
+      this.placementPreview.mat.dispose();
+      this.placementPreview = null;
+    }
     this.group.parent?.remove(this.group);
   }
 }

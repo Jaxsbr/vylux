@@ -216,7 +216,14 @@ import type { InitialMatchSpec } from './state';
 // C.6.5 map work itself — 64² grid + randomised energy field — needed no bump:
 // it's render + spec-builder only, and the golden fixtures use their own
 // scripted-match specs.)
-export const REPLAY_VERSION = 25;
+// Phase C.6.6 bumps to v26 (2026-05-26). Workers gained **grid A* pathfinding**
+// (`pathfind.ts`): a cached waypoint route planned around inflated tile
+// footprints, walked with a plain straight step (no steering layer — an
+// earlier A*+steering hybrid was reverted for frame jitter + oscillation).
+// Workers gained two hashed fields (`path` + `pathGoalTile`), so the state
+// shape — and every per-tick hash — changes; all three golden fixtures
+// regenerated. `gridSize` is static config and is NOT hashed.
+export const REPLAY_VERSION = 26;
 
 export interface ReplayLog {
   version: number;

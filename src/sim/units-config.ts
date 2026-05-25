@@ -135,6 +135,12 @@ export const WORK_POD_BUILD_REACH_SQ: Fixed = rangeSq(fromFloat(1.2));
 export const HQ_SUPPLY_CAP_INITIAL = 5;
 export const WORK_POD_CAP_BONUS = 5;
 
+// Phase C.6.6: work pods may not be built within this Chebyshev TILE distance
+// of any live energy node. 1 = the node tile + its 8 neighbours are off-limits,
+// keeping the node's harvest-slot ring + approach corridor clear of pod
+// footprints so a worker's final hop to a slot never crosses a pod.
+export const POD_NODE_KEEPOUT_TILES = 1;
+
 // Energy cost per task. Set to 1 universally — every task is "one unit
 // of work".
 export const ENERGY_COST_PER_TASK = 1;

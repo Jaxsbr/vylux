@@ -72,6 +72,7 @@ per-faction override blocks in `units-config.ts` stay as the divergence hooks.
 ### Behaviour
 
 - **Worker** — gathers from any live energy node, builds work pods, runs on its own internal charge meter. Cannot fight. Carrying is lost on death.
+- **Pathfinding (Phase C.6.6)** — workers route around static blockers (both HQs, operational work pods, live energy nodes) using grid **A\***: a waypoint path computed when the destination is set, cached, and walked in a straight line leg-to-leg. Each work pod and node occupies **exactly one tile**, so pods on adjacent tiles form a wall the worker routes around, while pods left a tile apart leave a genuine, passable gap. A worker heading *to* a blocker (its node, build site, charge spot, HQ) goes straight in. Movement is deliberately **blocky** (no smoothing layer — an earlier smoothed/steering version was reverted for performance + getting stuck); if a target is fully walled off the worker falls back to a straight line (may clip) rather than freezing.
 
 ---
 
@@ -80,13 +81,13 @@ per-faction override blocks in `units-config.ts` stay as the divergence hooks.
 | Structure | HP | Cost | Build time | Role |
 |---|---|---|---|---|
 | **HQ** | 250 (configurable per match) | — | — (placed at match start) | Trains workers. Losing it ends the match. Acts as a fallback charge spot at half the pod rate. Provides 5 worker cap. |
-| **Work Pod** | 100 | 60 E | 30 ticks (1.5 s) | Built by a worker. While operational: +5 worker cap, and acts as a primary charge spot (faster than HQ). Hosts (future) worker-upgrade research — slot reserved, no upgrades yet. |
+| **Work Pod** | 100 | 60 E | 30 ticks (1.5 s) | Built by a worker. Occupies a single tile (no overlap with neighbours). While operational: +5 worker cap, and acts as a primary charge spot (faster than HQ). Hosts (future) worker-upgrade research — slot reserved, no upgrades yet. |
 
 ### Build flow (Work Pod)
 
 1. Select one or more workers.
-2. Click **BUILD WORK POD** on the action bar (hotkey **B**) — the cursor switches to crosshair.
-3. Left-click a tile to commit the placement. The lowest-ID actionable worker is dispatched: it pays 1 charge, the faction pays 60 Energy, the pod spawns with full `buildTicksRemaining`.
+2. Click **BUILD WORK POD** on the action bar (hotkey **B**) — the cursor switches to crosshair, and a tile preview follows the cursor: **green** where a pod may be built, **red** where it's blocked.
+3. Left-click a **valid** tile to commit the placement. The lowest-ID actionable worker is dispatched: it pays 1 charge, the faction pays 60 Energy, the pod spawns with full `buildTicksRemaining`. Pods may **not** be built within 1 tile of an energy node (Phase C.6.6 — keeps the node's harvest approach clear for pathing); clicking a red tile is ignored and placement mode stays active. Right-click / Esc cancels.
 4. The worker walks to the site (`movingToBuildSite`), arrives (`building`), and ticks the structure down (1 tick per sim tick while on site). At 0 ticks the pod becomes operational.
 5. Build aborted (worker redirected, worker killed): the pod stays under construction; another worker can be dispatched to finish it (in C.1 only one worker constructs at a time — multi-worker construction lands in a follow-up).
 

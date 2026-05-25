@@ -31,6 +31,7 @@ import {
   findNode,
   findStructure,
   findUnit,
+  isPodTileBlockedByNode,
   spawnStructure,
   spawnUnit,
 } from './state';
@@ -42,6 +43,7 @@ import {
   type Worker,
 } from './types';
 import { add, distSq, fromFloat, fromInt, rangeSq, sub, type Fixed } from './fixed';
+import { findPath, tileAxis, tileCenter, packTile, NO_EXEMPT, type PathBlocker } from './pathfind';
 import {
   CHARGE_TICKS_PER_UNIT_HQ,
   CHARGE_TICKS_PER_UNIT_POD,
@@ -299,6 +301,12 @@ export function applyCommand(state: SimState, cmd: Command): void {
       // The player issued an explicit harvest — that's the new "previous
       // task" for auto-resume purposes (replacing any older one).
       u.previousNodeId = n.id;
+      // Phase C.6.6: drop the cached A* route — the destination changed, and
+      // navigate() keys its cache on the destination TILE alone, so a retarget
+      // that happens to round to the same tile (or with a different exempt
+      // blocker) would otherwise reuse a stale/drained path.
+      u.path.length = 0;
+      u.pathGoalTile = -1;
       return;
     }
     case CommandKind.TrainUnit: {
@@ -356,6 +364,10 @@ export function applyCommand(state: SimState, cmd: Command): void {
         u.targetNodeSlot = 0;
         u.harvestTicksRemaining = 0;
         u.targetStructureId = 0;
+        // Phase C.6.6: invalidate the cached A* route on retarget (see the
+        // AssignWorkerToNode note — navigate caches on destination tile only).
+        u.path.length = 0;
+        u.pathGoalTile = -1;
         // Explicit move overrides any auto-resume memory — the player
         // is reposting this worker, don't second-guess them later.
         u.previousNodeId = 0;
@@ -370,6 +382,10 @@ export function applyCommand(state: SimState, cmd: Command): void {
       if (w === null || !w.alive || w.kind !== 'worker') return;
       if (isInChargeMode(w)) return;
       if (w.charge < ENERGY_COST_PER_TASK) return;
+      // Phase C.6.6: keep work pods out of a node's immediate ring so the
+      // node's harvest-slot approach stays clear (the worker's blind final
+      // hop to a slot would otherwise clip a pod glued to the node).
+      if (cmd.structureKind === 'workPod' && isPodTileBlockedByNode(state, cmd.x, cmd.y)) return;
       const fs = state.factions[w.faction];
       const stats = STRUCTURE_STATS[cmd.structureKind];
       if (fs.energy < stats.buildCost) return;
@@ -397,6 +413,9 @@ export function applyCommand(state: SimState, cmd: Command): void {
       w.targetStructureId = newStructure.id;
       // Build supersedes any auto-resume memory.
       w.previousNodeId = 0;
+      // Phase C.6.6: invalidate the cached A* route on retarget.
+      w.path.length = 0;
+      w.pathGoalTile = -1;
       return;
     }
     case CommandKind.Resign: {
@@ -539,7 +558,119 @@ function moveTowards(
   return { x: add(curX, clampStep(dx, speed)), y: add(curY, clampStep(dy, speed)) };
 }
 
-function advanceWorker(state: SimState, w: Worker): void {
+// Phase C.6.6 — A* tile-blocking radii (squared), all < the spacing that would
+// catch a neighbouring tile, so each blocker occupies exactly its own tile(s):
+//   - work pod: 0.7 → its single tile only. The pod mesh is now 0.85 wide on a
+//     1.0 tile (WORK_POD_SCALE in meshes.ts), so it can't overlap a neighbour;
+//     two pods on adjacent tiles form a genuine 2-tile wall A* routes around,
+//     and two pods left a tile apart leave a real, passable gap.
+//   - energy node: 0.95 → its single tile.
+//   - HQ: 1.95 → its 3×3 footprint (the HQ mesh genuinely spans several tiles).
+const HQ_PATH_BLOCK_SQ: Fixed = rangeSq(fromFloat(1.95));
+const POD_PATH_BLOCK_SQ: Fixed = rangeSq(fromFloat(0.7));
+const NODE_PATH_BLOCK_SQ: Fixed = rangeSq(fromFloat(0.95));
+
+// Blocker key for a faction's HQ (HQs aren't entities in any array, so they
+// can't use an entity id). Negative to never collide with positive ids / 0.
+function hqKey(faction: 0 | 1): number {
+  return -(faction + 1);
+}
+
+// Gather the static blockers a worker must route around: both HQs, every
+// operational work pod, and every alive energy node. Built once per tick and
+// shared across the unit-advance pass. Each carries a stable `key` so a
+// worker's own destination can be exempted by identity. Order is deterministic
+// (HQ0, HQ1, structures, nodes — array order).
+function collectBlockers(state: SimState): PathBlocker[] {
+  const blockers: PathBlocker[] = [
+    { x: state.factions[0].hqX, y: state.factions[0].hqY, pathRadiusSq: HQ_PATH_BLOCK_SQ, key: hqKey(0) },
+    { x: state.factions[1].hqX, y: state.factions[1].hqY, pathRadiusSq: HQ_PATH_BLOCK_SQ, key: hqKey(1) },
+  ];
+  for (let i = 0; i < state.structures.length; i++) {
+    const s = state.structures[i];
+    if (!s.alive || s.kind !== 'workPod' || s.buildTicksRemaining > 0) continue; // operational pods only
+    blockers.push({ x: s.x, y: s.y, pathRadiusSq: POD_PATH_BLOCK_SQ, key: s.id });
+  }
+  for (let i = 0; i < state.nodes.length; i++) {
+    const n = state.nodes[i];
+    if (!n.alive) continue;
+    blockers.push({ x: n.x, y: n.y, pathRadiusSq: NODE_PATH_BLOCK_SQ, key: n.id });
+  }
+  return blockers;
+}
+
+// The blocker key the worker is allowed to walk into — its current destination
+// (the node it harvests, the HQ it deposits at, the pod/HQ it charges at, the
+// structure it builds). Exemption is by identity so a *different* blocker next
+// to the destination still blocks the route. A plain idle move targets a free
+// tile → nothing exempt.
+function targetExemptKey(w: Worker): number {
+  switch (w.phase) {
+    case 'movingToNode':
+    case 'harvesting':
+      return w.targetNodeId;
+    case 'returning':
+      return hqKey(w.faction);
+    case 'movingToBuildSite':
+    case 'building':
+      return w.targetStructureId;
+    case 'walkingToCharge':
+    case 'charging':
+      return w.chargeTargetStructureId !== 0 ? w.chargeTargetStructureId : hqKey(w.faction);
+    case 'idle':
+      return NO_EXEMPT;
+  }
+}
+
+// Distance² at which a worker is "at" a path waypoint and pops it.
+const WAYPOINT_REACH_SQ: Fixed = rangeSq(fromFloat(0.3));
+
+// Pure-A* navigation: follow a cached waypoint route, no steering.
+//
+// Two targets are passed:
+//   - (planX,planY): the route target A* plans to — the destination blocker's
+//     CENTRE (exempt by key, so always reachable). The raw harvest/charge SLOT
+//     can sit on a tile an adjacent pod blocks, which A* couldn't reach, so we
+//     never plan straight to it.
+//   - (steerX,steerY): the precise sub-tile point the worker finally settles
+//     on — walked to directly (plain straight step) once the route is done.
+// For a plain move (and HQ / build, where slot == centre) the two coincide.
+//
+// The path is cached on the worker and recomputed ONLY when the destination
+// tile changes (no per-tick revalidation) — cheap, and A* fires only on (re)
+// assignment / phase transition. The final straight step has no obstacle
+// awareness: it may clip a footprint on the last sub-tile hop, but it never
+// oscillates or stalls. Deterministic: a pure function of hashed state.
+function navigate(
+  state: SimState,
+  w: Worker,
+  planX: Fixed,
+  planY: Fixed,
+  steerX: Fixed,
+  steerY: Fixed,
+  speed: Fixed,
+  blockers: ReadonlyArray<PathBlocker>,
+): { x: Fixed; y: Fixed } {
+  const g = state.gridSize;
+  const goalTile = packTile(tileAxis(planX, g), tileAxis(planY, g), g);
+  if (w.pathGoalTile !== goalTile) {
+    w.path = findPath(w.x, w.y, planX, planY, g, blockers, targetExemptKey(w));
+    w.pathGoalTile = goalTile;
+  }
+  // Drop reached waypoints, then step toward the next one — or the real
+  // sub-tile target on the final leg once the path is exhausted.
+  while (w.path.length > 0) {
+    const c = tileCenter(w.path[0], g);
+    if (distSq(w.x, w.y, c.x, c.y) <= WAYPOINT_REACH_SQ) {
+      w.path.shift();
+    } else {
+      return moveTowards(w.x, w.y, c.x, c.y, speed);
+    }
+  }
+  return moveTowards(w.x, w.y, steerX, steerY, speed);
+}
+
+function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathBlocker>): void {
   const factionId = state.factions[w.faction].factionId;
   const speed = unitStatsFor(factionId, 'worker').speed;
   const harvestInterval = factionConfigFor(factionId).harvestTicks;
@@ -565,7 +696,8 @@ function advanceWorker(state: SimState, w: Worker): void {
           w.y = tgt.y;
           return;
         }
-        const next = moveTowards(w.x, w.y, tgt.x, tgt.y, speed);
+        // Plain move to a free tile — plan and steer coincide.
+        const next = navigate(state, w, tgt.x, tgt.y, tgt.x, tgt.y, speed, blockers);
         w.x = next.x;
         w.y = next.y;
       }
@@ -585,7 +717,8 @@ function advanceWorker(state: SimState, w: Worker): void {
       const slot = HARVEST_SLOT_OFFSETS[w.targetNodeSlot % HARVEST_SLOT_COUNT];
       const slotX = add(node.x, slot.dx);
       const slotY = add(node.y, slot.dy);
-      const next = moveTowards(w.x, w.y, slotX, slotY, speed);
+      // Plan to the node centre (exempt, always reachable); settle on the slot.
+      const next = navigate(state, w, node.x, node.y, slotX, slotY, speed, blockers);
       w.x = next.x;
       w.y = next.y;
       if (distSq(w.x, w.y, slotX, slotY) <= WORKER_REACH_SQ) {
@@ -629,7 +762,7 @@ function advanceWorker(state: SimState, w: Worker): void {
 
     case 'returning': {
       const hq = state.factions[w.faction];
-      const nextRet = moveTowards(w.x, w.y, hq.hqX, hq.hqY, speed);
+      const nextRet = navigate(state, w, hq.hqX, hq.hqY, hq.hqX, hq.hqY, speed, blockers);
       w.x = nextRet.x;
       w.y = nextRet.y;
       if (distSq(w.x, w.y, hq.hqX, hq.hqY) <= HQ_DEPOSIT_REACH_SQ) {
@@ -674,7 +807,7 @@ function advanceWorker(state: SimState, w: Worker): void {
         maybeEnterChargeMode(state, w);
         return;
       }
-      const next = moveTowards(w.x, w.y, s.x, s.y, speed);
+      const next = navigate(state, w, s.x, s.y, s.x, s.y, speed, blockers);
       w.x = next.x;
       w.y = next.y;
       if (distSq(w.x, w.y, s.x, s.y) <= WORK_POD_BUILD_REACH_SQ) {
@@ -713,7 +846,8 @@ function advanceWorker(state: SimState, w: Worker): void {
         w.chargeSlot = pickChargeSlot(state, w.faction, target.structureId, w.id);
       }
       const slotPos = chargeSlotPosition(target.x, target.y, target.structureId, w.chargeSlot);
-      const next = moveTowards(w.x, w.y, slotPos.x, slotPos.y, speed);
+      // Plan to the charge-spot centre (exempt); settle on the charge slot.
+      const next = navigate(state, w, target.x, target.y, slotPos.x, slotPos.y, speed, blockers);
       w.x = next.x;
       w.y = next.y;
       if (distSq(w.x, w.y, slotPos.x, slotPos.y) <= WORKER_REACH_SQ) {
@@ -765,9 +899,9 @@ function advanceWorker(state: SimState, w: Worker): void {
   }
 }
 
-function advanceUnit(state: SimState, u: Unit): void {
+function advanceUnit(state: SimState, u: Unit, blockers: ReadonlyArray<PathBlocker>): void {
   if (!u.alive) return;
-  advanceWorker(state, u);
+  advanceWorker(state, u, blockers);
 }
 
 // Phase C.1: structure advance. Build-phase progress is on the worker
@@ -856,8 +990,12 @@ export function step(state: SimState, rng: Rng, frame: InputFrame): void {
     // this tick's iteration (idle, no-op) and the end-of-step supply
     // recompute.
     advanceProduction(state);
+    // Phase C.6.6: snapshot the static blockers once per tick so every worker
+    // plans against the same set (a pod completing build this tick becomes a
+    // blocker next tick — its builder targets it, so it's exempt anyway).
+    const blockers = collectBlockers(state);
     for (let i = 0; i < state.units.length; i++) {
-      advanceUnit(state, state.units[i]);
+      advanceUnit(state, state.units[i], blockers);
     }
     for (let i = 0; i < state.structures.length; i++) {
       advanceStructure(state, state.structures[i]);

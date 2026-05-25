@@ -184,6 +184,16 @@ export interface Worker extends UnitBase {
   // the same point while charging. Cleared (back to 0) when the
   // worker exits charge mode.
   chargeSlot: number;
+  // Phase C.6.6: cached A* route to the current movement target — smoothed
+  // intermediate waypoint tiles (packed `tileY*gridSize+tileX`, endpoints
+  // excluded), nearest-first. Empty = go straight (route clear, or no plan).
+  // Consumed as the worker reaches each waypoint; recomputed only when the
+  // destination tile changes. Hashed sim state (the plan is deterministic).
+  path: number[];
+  // The destination tile the cached `path` was planned for (packed; -1 = no
+  // plan). When the worker's current target tile differs, the path is stale
+  // and gets replanned.
+  pathGoalTile: number;
 }
 
 export type Unit = Worker;
@@ -229,6 +239,10 @@ export type Structure = WorkPod;
 export interface SimState {
   tick: number;
   rngState: bigint; // mirror of Rng.snapshot() — owned-but-mirrored for hash
+  // Phase C.6.6: square grid extent (tiles per side) the A* pathfinder plans
+  // over. Sourced from the render's GRID_CONSTANTS via the match spec so sim +
+  // render agree; constant per match — NOT hashed (static config).
+  gridSize: number;
   factions: [FactionState, FactionState];
   units: Unit[];
   nodes: ResourceNode[];

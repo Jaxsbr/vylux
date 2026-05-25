@@ -25,7 +25,7 @@
 import * as THREE from 'three';
 import { CommandKind, type Command } from '../sim/commands';
 import type { Sim } from '../sim/sim';
-import { findNode, findStructure, findUnit } from '../sim/state';
+import { findNode, findStructure, findUnit, isPodTileBlockedByNode } from '../sim/state';
 import { isInChargeMode } from '../sim/step';
 import { ENERGY_COST_PER_TASK } from '../sim/units-config';
 import type { Faction, UnitKind } from '../sim/types';
@@ -63,6 +63,12 @@ export interface InputFeedbackHooks {
   // worker is in charge mode (or at 0 charge). Renderer plays the
   // floating-lightning cue on the named worker.
   onEnergyBlocked?(workerId: number): void;
+  // Phase C.6.6: while in work-pod placement mode, fired on cursor move with
+  // the hovered tile + whether a pod may be built there (false = too close to
+  // a node). Drives the green/red placement preview. onPlacementHoverEnd
+  // fires when placement mode exits (commit or cancel) to hide the preview.
+  onPlacementHover?(tileX: number, tileY: number, valid: boolean): void;
+  onPlacementHoverEnd?(): void;
 }
 
 export interface InputControllerOptions {
@@ -287,6 +293,13 @@ export class InputController {
       if (this.pendingPlacement === 'workPod') {
         const tile = this.pickGroundTile(e);
         if (tile !== null) {
+          // Phase C.6.6: block placement on a node-adjacent tile (the sim
+          // would reject it anyway). Stay in placement mode + keep the red
+          // preview so the player can pick a valid tile; right-click / Esc
+          // to cancel.
+          if (isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y)) {
+            return;
+          }
           const builder = this.firstActionableWorker();
           if (builder !== null) {
             this.queue.push({
@@ -301,6 +314,7 @@ export class InputController {
         }
       }
       this.pendingPlacement = null;
+      this.opts.feedback?.onPlacementHoverEnd?.();
       this.refreshCursor(e);
       return;
     }
@@ -394,6 +408,19 @@ export class InputController {
 
   private handlePointerMove(e: PointerEvent): void {
     if (this.drag === null) {
+      // Phase C.6.6: in work-pod placement mode, drive the green/red tile
+      // preview off the hovered tile + the node keep-out rule.
+      if (this.pendingPlacement === 'workPod') {
+        const tile = this.pickGroundTile(e);
+        if (tile !== null) {
+          const valid = !isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y);
+          this.opts.feedback?.onPlacementHover?.(tile.x, tile.y, valid);
+        } else {
+          // Cursor left the playable grid (off-grid / over HUD) — hide the
+          // preview instead of leaving a stale marker frozen on-grid.
+          this.opts.feedback?.onPlacementHoverEnd?.();
+        }
+      }
       // Phase 3.9.1: hover-driven cursor state. Only updated when NOT
       // mid-drag — during a drag the cursor stays as it was at down so
       // the player isn't visually tracked through stale hover states.
@@ -472,6 +499,7 @@ export class InputController {
     // convention "abort current action"), regardless of selection.
     if (this.pendingPlacement !== null) {
       this.pendingPlacement = null;
+      this.opts.feedback?.onPlacementHoverEnd?.();
       this.refreshCursor(e);
       return;
     }
@@ -507,7 +535,10 @@ export class InputController {
     if (e.target instanceof HTMLInputElement) return;
     if (e.key === 'Escape') {
       this.clearSelection();
-      this.pendingPlacement = null;
+      if (this.pendingPlacement !== null) {
+        this.pendingPlacement = null;
+        this.opts.feedback?.onPlacementHoverEnd?.();
+      }
       this.applyCursor('auto');
       return;
     }

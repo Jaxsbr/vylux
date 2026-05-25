@@ -104,6 +104,9 @@ function buildEnergyField(seed: number): InitialMatchSpec['nodes'] {
 
 const SPEC: InitialMatchSpec = {
   seed: DEFAULT_MAP_SEED,
+  // Phase C.6.6: hand the A* pathfinder the live grid extent (sim is otherwise
+  // grid-size agnostic).
+  gridSize: GRID_CONSTANTS.gridSize,
   hqs: { faction0: HQ_F0, faction1: HQ_F1 },
   // Default field from the fixed seed. PvA / observe matches override this
   // with a fresh per-launch seed (see the matchSpec construction below);
@@ -122,6 +125,7 @@ const SPEC: InitialMatchSpec = {
 // enemy HQ" goal. Coordinates re-fitted to the 64×64 grid (C.6.5).
 const TUTORIAL_SPEC: InitialMatchSpec = {
   seed: 7,
+  gridSize: GRID_CONSTANTS.gridSize,
   hqs: {
     faction0: HQ_F0,
     faction1: HQ_F1,
@@ -459,6 +463,8 @@ async function bootstrap(): Promise<void> {
       onMoveOrder: (x, y, f) => { audio.moveAssign(); feedback.spawnMovePing(x, y, f); tutorial?.notifyMove(); },
       onAssignToNode: (x, y) => { audio.harvestAssign(); feedback.spawnAssignPulse(x, y); tutorial?.notifyAssignHarvest(); },
       onPlacement: (x, y) => feedback.spawnPlacementBurst(x, y),
+      onPlacementHover: (x, y, valid) => feedback.showPlacementPreview(x, y, valid),
+      onPlacementHoverEnd: () => feedback.hidePlacementPreview(),
       onSelect: () => audio.select(),
       // Phase C.1: blocked command on a charge-mode worker → trigger
       // the lightning cue at the worker's position via sim-renderer.

@@ -360,8 +360,10 @@ describe('Sim — work pod build flow', () => {
         kind: CommandKind.BuildStructureByWorker,
         workerId: w.id,
         structureKind: 'workPod',
-        x: 6,
-        y: 6,
+        // (8,8): clear of the node at (5,5) — C.6.6 forbids pods within 1 tile
+        // of a node (was (6,6), now node-adjacent and rejected).
+        x: 8,
+        y: 8,
       }],
     });
     expect(sim.state.factions[0].energy).toBeLessThan(startEnergy);
