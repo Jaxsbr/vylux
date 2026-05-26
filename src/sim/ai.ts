@@ -278,6 +278,10 @@ function pickActionableWorker(
     if (u.kind !== 'worker') continue;
     if (isInChargeMode(u)) continue;
     if (u.charge < 1) continue;
+    // Don't pull a worker already out scouting (prior tick) back into a pod
+    // build — let it finish exploring. (`exclude` covers scouts dispatched
+    // THIS frame, which are still phase 'idle' until the command applies.)
+    if (u.phase === 'scouting') continue;
     if (exclude !== undefined && exclude.has(u.id)) continue;
     if (best === 0 || u.id < best) best = u.id;
   }
