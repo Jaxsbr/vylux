@@ -19,7 +19,8 @@ export type HudIconName =
   | 'move'
   | 'harvest'
   | 'charge'
-  | 'build';
+  | 'build'
+  | 'scout';
 
 // Inner SVG per glyph. Strokes inherit `currentColor`; solid fills opt in
 // explicitly with fill="currentColor" stroke="none".
@@ -58,6 +59,11 @@ const GLYPHS: Record<HudIconName, string> = {
   build:
     '<path d="M4 18.5 L7 9 L17 9 L20 18.5 Z"/>'
     + '<path d="M9.5 18.5 V12 H14.5 V18.5"/>',
+  // Scout — an eye (reveal / vision): lens outline + lit pupil. Reads as
+  // "look out into the fog".
+  scout:
+    '<path d="M2 12 C5 7 19 7 22 12 C19 17 5 17 2 12 Z"/>'
+    + '<circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/>',
 };
 
 export function hudIconSvg(name: HudIconName, sizePx: number): string {
@@ -76,6 +82,7 @@ export function workerPhaseIcon(phase: string): HudIconName {
     case 'harvesting': return 'harvest';
     case 'charging': return 'charge';
     case 'building': return 'build';
+    case 'scouting': return 'scout';
     case 'movingToNode':
     case 'movingToBuildSite':
     case 'walkingToCharge':

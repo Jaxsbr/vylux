@@ -223,7 +223,40 @@ import type { InitialMatchSpec } from './state';
 // Workers gained two hashed fields (`path` + `pathGoalTile`), so the state
 // shape — and every per-tick hash — changes; all three golden fixtures
 // regenerated. `gridSize` is static config and is NOT hashed.
-export const REPLAY_VERSION = 26;
+// Phase C.6.7 bumps to v27 (2026-05-26). Fog foundation: SimState gains a
+// per-faction explored-TILE set (`explored: [Uint8Array, Uint8Array]`, one
+// byte per tile, length gridSize²), seeded by an initial-HQ exploration
+// sweep and advanced each tick by a new `advanceExploration` pass (same
+// vision sources as advanceDiscovery — HQ + units + operational pods — but
+// marking tiles, using the pathfind tile convention so the fog aligns with
+// the A* grid). The set is folded into the canonical hash (a compact 32-bit
+// checksum per bitmap via Hasher.writeBytes, not a per-byte BigInt mix), so
+// the per-tick hash changes and all three golden fixtures regenerate. Node
+// `discoveredBy` is unchanged → AI behaviour is byte-identical; this is a
+// pure additive-state refactor. The render `Exploration` now reads this set
+// instead of recomputing its own (one source of truth). `gridSize` stays
+// static config (NOT hashed); only the bitmap contents are.
+// Phase C.6.8 bumps to v28 (2026-05-26). Scout order: WorkerPhase gains
+// 'scouting' (a new hashed enum VALUE, not a new field) and the wire format
+// gains CommandKind.ScoutWorker = 15. On apply the worker auto-targets the
+// nearest unexplored tile (from the faction's explored set — no node peeking),
+// reuses the existing `moveTarget` field to walk there, reveals fog en route,
+// and re-picks the frontier until the map is fully revealed (then drops to
+// idle). No new STATE field — the 'scouting' phase rides the existing
+// workerPhaseToInt slot and moveTarget — so the golden fixtures DON'T move
+// (the scripted + AI-vs-AI matches never issue a scout; AI scouting lands in
+// C.6.10). The version still bumps because the command set expanded: a v27
+// binary replaying a log containing a ScoutWorker would silently drop it.
+// Phase C.6.10 bumps to v29 (2026-05-26). AI scouting. Worker gains a hashed
+// `idleTicks` counter (consecutive stalled-idle ticks), maintained by a new
+// `updateIdleTimers` step pass; the AI (`dispatchScouts` in ai.ts) reads it to
+// send stalled workers — idle past AI_IDLE_SCOUT_TICKS with no discovered live
+// node to harvest — scouting, scaling the scout count with the stall (≈ half,
+// capped at AI_MAX_SCOUTS) and never scouting a fully-revealed map. The new
+// field changes the per-tick hash (idle workers tick it every frame) AND the
+// AI now plays differently once its home patch depletes, so all three golden
+// fixtures regenerate.
+export const REPLAY_VERSION = 29;
 
 export interface ReplayLog {
   version: number;

@@ -100,14 +100,17 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
     discoveredBy: [false, false] as [boolean, boolean],
   }));
 
+  const gridSize = spec.gridSize ?? 64;
+  const tileCount = gridSize * gridSize;
   const state: SimState = {
     tick: 0,
     rngState: rng.snapshot(),
-    gridSize: spec.gridSize ?? 64,
+    gridSize,
     factions,
     units: [],
     nodes,
     structures: [],
+    explored: [new Uint8Array(tileCount), new Uint8Array(tileCount)],
     nextEntityId: nodes.length + 1,
     winner: null,
   };
@@ -118,6 +121,12 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
   // where the AI can't auto-route workers (no nodes are discovered) so
   // it never moves anything (so no nodes ever get discovered).
   initialHqDiscovery(state);
+
+  // Phase C.6.7: same bootstrap for the tile-level explored set — seed
+  // each faction's fog with the area its HQ already sees, so the home
+  // patch isn't fogged at match start (mirrors initialHqDiscovery, but
+  // for tiles rather than nodes).
+  initialHqExploration(state);
 
   return { state, rng };
 }
@@ -130,6 +139,47 @@ function initialHqDiscovery(state: SimState): void {
       const dSq = distSq(node.x, node.y, fs.hqX, fs.hqY);
       if (dSq <= rSq) node.discoveredBy[f] = true;
     }
+  }
+}
+
+// Phase C.6.7: mark every tile whose centre falls within `r` of (cx, cy)
+// as explored in `explored`. Tile centres sit on integer sim coords
+// (fromInt(tile)) — the pathfind convention (pathfind.ts tileCenter) —
+// so the explored set aligns with the grid workers path on. Permanent:
+// a tile already set is left alone (the early-out also bounds the work).
+// Deterministic: integer box bounds + exact Fixed distSq, no floats.
+export function markExploredCircle(
+  explored: Uint8Array,
+  gridSize: number,
+  cx: Fixed,
+  cy: Fixed,
+  r: Fixed,
+): void {
+  const rSq = rangeSq(r);
+  // +1 tile of slack on the integer bounding box so the exact distSq
+  // filter inside never misses a qualifying tile at the rim.
+  const reach = toInt(r) + 1;
+  const cxi = toInt(cx);
+  const cyi = toInt(cy);
+  const txMin = Math.max(0, cxi - reach);
+  const txMax = Math.min(gridSize - 1, cxi + reach);
+  const tyMin = Math.max(0, cyi - reach);
+  const tyMax = Math.min(gridSize - 1, cyi + reach);
+  for (let ty = tyMin; ty <= tyMax; ty++) {
+    const rowBase = ty * gridSize;
+    const tcy = fromInt(ty);
+    for (let tx = txMin; tx <= txMax; tx++) {
+      const idx = rowBase + tx;
+      if (explored[idx] === 1) continue;
+      if (distSq(fromInt(tx), tcy, cx, cy) <= rSq) explored[idx] = 1;
+    }
+  }
+}
+
+function initialHqExploration(state: SimState): void {
+  for (const f of [0, 1] as const) {
+    const fs = state.factions[f];
+    markExploredCircle(state.explored[f], state.gridSize, fs.hqX, fs.hqY, HQ_VISION_RADIUS);
   }
 }
 
@@ -169,6 +219,18 @@ export function isPodTileBlockedByNode(state: SimState, tileX: number, tileY: nu
     if (dx <= POD_NODE_KEEPOUT_TILES && dy <= POD_NODE_KEEPOUT_TILES) return true;
   }
   return false;
+}
+
+// Phase C.6.8/9: has `faction` explored every tile on the map? Drives the
+// Scout button's enabled state (nothing left to scout once true) and the
+// AI's decision to stop dispatching scouts. Cheap full scan of the bitmap;
+// early-outs on the first unexplored tile.
+export function isFullyExplored(state: SimState, faction: 0 | 1): boolean {
+  const e = state.explored[faction];
+  for (let i = 0; i < e.length; i++) {
+    if (e[i] === 0) return false;
+  }
+  return true;
 }
 
 export function findStructure(state: SimState, id: number): Structure | null {
@@ -242,6 +304,7 @@ export function spawnUnit(
     chargeSlot: 0,
     path: [],
     pathGoalTile: -1,
+    idleTicks: 0,
   };
   state.units.push(w);
   return w;

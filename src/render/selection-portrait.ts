@@ -313,6 +313,7 @@ function workerActionText(sim: Sim, w: Worker): string {
     case 'idle': return 'IDLE';
     case 'movingToNode': return 'MOVING';
     case 'movingToBuildSite': return 'MOVING';
+    case 'scouting': return 'SCOUTING';
     case 'walkingToCharge': return 'TO CHARGE';
     case 'returning': return 'RETURNING';
     case 'harvesting': {

@@ -109,6 +109,10 @@ export interface FactionState {
 // uninterruptible. Player commands targeting a worker in charge mode are
 // silently rejected; the renderer surfaces a floating "needs energy"
 // lightning cue on the worker.
+// Phase C.6.8 adds one more:
+//   scouting — heading toward the nearest unexplored frontier tile to
+//   reveal fog (re-picks the frontier as it goes; drops to idle when the
+//   faction's map is fully revealed). Interruptible by any player command.
 export type WorkerPhase =
   | 'idle'
   | 'movingToNode'
@@ -117,7 +121,8 @@ export type WorkerPhase =
   | 'movingToBuildSite'
   | 'building'
   | 'walkingToCharge'
-  | 'charging';
+  | 'charging'
+  | 'scouting';
 
 // Common fields on every unit. attackCooldown is kept on the base for
 // hash-stability and forward-compat (combat units return in Phase D);
@@ -194,6 +199,15 @@ export interface Worker extends UnitBase {
   // plan). When the worker's current target tile differs, the path is stale
   // and gets replanned.
   pathGoalTile: number;
+  // Phase C.6.10: consecutive ticks this worker has been STALLED — parked at
+  // `idle` with no pending move (moveTarget === null). Any active phase or a
+  // pending move resets it to 0 (see updateIdleTimers). The AI reads it to
+  // decide when a worker has gone idle long enough to be worth sending
+  // scouting (it only auto-assigns to *discovered* nodes, so a worker that
+  // sits idle past the threshold has nothing to harvest → scout to find more).
+  // Hashed (it feeds AI command decisions, so it's part of the determinism
+  // contract).
+  idleTicks: number;
 }
 
 export type Unit = Worker;
@@ -249,6 +263,17 @@ export interface SimState {
   // Phase C.1: structures array re-introduced (scoped to WorkPod).
   // Same array-with-tombstones discipline as units.
   structures: Structure[];
+  // Phase C.6.7: per-faction explored-tile set — 1 byte per tile (0/1),
+  // row-major `ty*gridSize+tx`, length gridSize². Permanent: a tile set
+  // once never clears (same "no fog rediscovery" rule as node
+  // discoveredBy). Seeded by the initial HQ vision sweep; advanced each
+  // tick by advanceExploration from HQ + unit + operational-pod vision
+  // radii, using the pathfind tile convention (tile centre = fromInt(tile))
+  // so the fog lines up with the grid workers actually path on. This is
+  // the deterministic per-faction fog the AI reads to scout toward the
+  // frontier (C.6.8+) and the render reads to paint the human's overlay —
+  // one source of truth. Hashed (folded compactly; see sim.ts).
+  explored: [Uint8Array, Uint8Array];
   nextEntityId: number;
   // Set when a faction's HQ is destroyed (the OTHER faction wins) or
   // when the OTHER faction issues a Resign command.

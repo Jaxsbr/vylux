@@ -107,6 +107,13 @@ export class Sim {
       hashStructure(h, s.structures[i]);
     }
 
+    // Phase C.6.7: per-faction explored-tile set, folded compactly (a
+    // 32-bit checksum per bitmap rather than a BigInt mix per byte — the
+    // bitmaps are gridSize² bytes each and hash every tick). Fixed length
+    // 2, fixed faction order.
+    h.writeBytes(s.explored[0]);
+    h.writeBytes(s.explored[1]);
+
     return h.digestHex();
   }
 }
@@ -157,6 +164,8 @@ function hashUnit(h: Hasher, u: Unit): void {
       // makes different-length paths hash distinctly).
       h.writeI32Array(u.path);
       h.writeI32(u.pathGoalTile);
+      // Phase C.6.10: stalled-idle tick counter (feeds the AI scout trigger).
+      h.writeU32(u.idleTicks);
       return;
   }
 }
@@ -204,5 +213,6 @@ function workerPhaseToInt(phase: WorkerPhase): number {
     case 'building': return 5;
     case 'walkingToCharge': return 6;
     case 'charging': return 7;
+    case 'scouting': return 8;
   }
 }

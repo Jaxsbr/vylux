@@ -12,7 +12,7 @@ import type { Faction, UnitKind } from '../sim/types';
 import type { Sim } from '../sim/sim';
 import { toFloat, type Fixed } from '../sim/fixed';
 import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, STRUCTURE_STATS, unitStatsFor } from '../sim/units-config';
-import { findStructure, findUnit } from '../sim/state';
+import { findStructure, findUnit, isFullyExplored } from '../sim/state';
 import { isInChargeMode } from '../sim/step';
 import { themeForFaction } from './factions/theme';
 import { hudIconSvg, type HudIconName } from './hud-icons';
@@ -49,6 +49,9 @@ export interface ActionBarDelegate {
   // selected work pod. The input controller turns the selection +
   // delegate call into a StartResearchAtPod command for the sim.
   onResearchAutoResumeSelected(): void;
+  // Phase C.6.9: send the selected worker(s) scouting — reveal fog toward
+  // the nearest frontier. Auto-targets in the sim; no placement step.
+  onScoutSelected(): void;
 }
 
 interface ButtonSpec {
@@ -289,26 +292,43 @@ export class ActionBar {
       if (!isInChargeMode(u) && u.charge >= 1) workerActionable = true;
     }
     if (workerSelected) {
+      const specs: ButtonSpec[] = [];
+
+      // Build work pod.
       const podStats = STRUCTURE_STATS.workPod;
-      const energyOk = fs.energy >= podStats.buildCost;
-      const enabled = energyOk && workerActionable;
-      let reason: string | undefined;
-      if (!workerActionable) reason = 'worker needs charge';
-      else if (!energyOk) reason = 'no energy';
-      return {
-        hint: 'WORKER',
-        specs: [{
-          id: 'build-work-pod',
-          label: 'BUILD WORK POD',
-          icon: 'pod',
-          hotkey: 'B',
-          costEnergy: displayCost(podStats.buildCost),
-          enabled,
-          disabledReason: reason,
-          onClick: () => this.delegate.onBuildWorkPodSelected(),
-        }],
-        queue: null,
-      };
+      const podEnergyOk = fs.energy >= podStats.buildCost;
+      let podReason: string | undefined;
+      if (!workerActionable) podReason = 'worker needs charge';
+      else if (!podEnergyOk) podReason = 'no energy';
+      specs.push({
+        id: 'build-work-pod',
+        label: 'BUILD WORK POD',
+        icon: 'pod',
+        hotkey: 'B',
+        costEnergy: displayCost(podStats.buildCost),
+        enabled: podEnergyOk && workerActionable,
+        disabledReason: podReason,
+        onClick: () => this.delegate.onBuildWorkPodSelected(),
+      });
+
+      // Phase C.6.9: scout — reveal fog toward the nearest frontier. Costs
+      // one charge (no energy), so no cost badge. Greys out when the
+      // faction's map is already fully revealed (nothing left to scout).
+      const fullyExplored = isFullyExplored(sim.state, this.faction);
+      let scoutReason: string | undefined;
+      if (!workerActionable) scoutReason = 'worker needs charge';
+      else if (fullyExplored) scoutReason = 'map revealed';
+      specs.push({
+        id: 'scout',
+        label: 'SCOUT',
+        icon: 'scout',
+        hotkey: 'E',
+        enabled: workerActionable && !fullyExplored,
+        disabledReason: scoutReason,
+        onClick: () => this.delegate.onScoutSelected(),
+      });
+
+      return { hint: 'WORKER', specs, queue: null };
     }
 
     return { hint: 'SELECT  YOUR  HQ  OR  A  WORKER', specs: [], queue: null };

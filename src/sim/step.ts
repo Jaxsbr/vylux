@@ -10,9 +10,11 @@
 //   4. Recompute supply caps from current operational-pod counts +
 //      alive-worker counts.
 //   5. Discovery sweep — mark nodes inside friendly vision.
-//   6. Win-condition check (HQ destruction); preserves a winner already
+//   6. Exploration sweep — mark the per-faction explored TILE set inside
+//      friendly vision (Phase C.6.7; the fog the AI scouts against).
+//   7. Win-condition check (HQ destruction); preserves a winner already
 //      set by an in-frame Resign command.
-//   7. Bump tick counter, mirror RNG state.
+//   8. Bump tick counter, mirror RNG state.
 //
 // Mutation is in-place. The renderer never sees mid-step state because
 // the renderer pulls from sim only between ticks.
@@ -32,6 +34,7 @@ import {
   findStructure,
   findUnit,
   isPodTileBlockedByNode,
+  markExploredCircle,
   spawnStructure,
   spawnUnit,
 } from './state';
@@ -448,7 +451,69 @@ export function applyCommand(state: SimState, cmd: Command): void {
       fs.researchTicksRemaining = ticks;
       return;
     }
+    case CommandKind.ScoutWorker: {
+      // Phase C.6.8: send a worker to reveal fog. Same charge gate as any
+      // other task — a worker in charge mode (or at 0 charge) silently
+      // rejects. Pick the frontier FIRST: if the faction's map is already
+      // fully revealed there's nothing to scout, so don't spend the charge
+      // or disturb the worker's current task.
+      const w = findUnit(state, cmd.workerId);
+      if (w === null || !w.alive || w.kind !== 'worker') return;
+      if (isInChargeMode(w)) return;
+      if (w.charge < ENERGY_COST_PER_TASK) return;
+      const target = findNearestUnexploredTile(state, w.faction, w.x, w.y);
+      if (target < 0) return; // fully revealed — no-op
+      w.charge -= ENERGY_COST_PER_TASK;
+      const c = tileCenter(target, state.gridSize);
+      w.moveTarget = { x: c.x, y: c.y };
+      w.phase = 'scouting';
+      // Drop any harvest / build assignment — scouting is the new task.
+      // carrying is intentionally left untouched (same as MoveUnit): a
+      // worker scouting mid-haul keeps its cargo to deposit later.
+      w.targetNodeId = 0;
+      w.targetNodeSlot = 0;
+      w.harvestTicksRemaining = 0;
+      w.targetStructureId = 0;
+      // Scouting supersedes any auto-resume memory.
+      w.previousNodeId = 0;
+      // Phase C.6.6: invalidate the cached A* route on retarget.
+      w.path.length = 0;
+      w.pathGoalTile = -1;
+      return;
+    }
   }
+}
+
+// Phase C.6.8: nearest tile NOT yet explored by `faction`, as a packed tile
+// index (ty*gridSize+tx), or -1 if the faction's map is fully revealed.
+// Pure scan of the explored bitmap — never reads node positions, so the AI
+// can't "cheat" toward undiscovered resources; it only knows where the fog
+// is, not what's under it. Deterministic: nearest by squared distance, ties
+// broken by lowest packed index.
+function findNearestUnexploredTile(
+  state: SimState,
+  faction: Faction,
+  x: Fixed,
+  y: Fixed,
+): number {
+  const g = state.gridSize;
+  const explored = state.explored[faction];
+  let best = -1;
+  let bestD: Fixed = 0;
+  for (let ty = 0; ty < g; ty++) {
+    const rowBase = ty * g;
+    const tcy = fromInt(ty);
+    for (let tx = 0; tx < g; tx++) {
+      const idx = rowBase + tx;
+      if (explored[idx] === 1) continue;
+      const d = distSq(x, y, fromInt(tx), tcy);
+      if (best < 0 || d < bestD || (d === bestD && idx < best)) {
+        best = idx;
+        bestD = d;
+      }
+    }
+  }
+  return best;
 }
 
 // Phase C.1 — end-of-step: tick down any in-flight research and flip
@@ -618,6 +683,8 @@ function targetExemptKey(w: Worker): number {
     case 'charging':
       return w.chargeTargetStructureId !== 0 ? w.chargeTargetStructureId : hqKey(w.faction);
     case 'idle':
+    case 'scouting':
+      // Scouting always targets a free, unexplored tile — nothing to exempt.
       return NO_EXEMPT;
   }
 }
@@ -702,6 +769,49 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
         w.y = next.y;
       }
       return;
+
+    case 'scouting': {
+      // Head toward the nearest unexplored tile, revealing fog en route
+      // (advanceExploration marks a vision disc around the worker each
+      // tick). Re-pick whenever the current target has been revealed —
+      // by our own approach or another friendly unit — so the scout
+      // always walks toward live fog and never trudges onto an
+      // already-uncovered tile. When no unexplored tile remains, the
+      // faction's map is fully revealed → the scout's job is done.
+      //
+      // Reachability note: a target the A* can't reach still gets
+      // revealed once the worker closes within vision radius (4 tiles),
+      // which flips it explored and triggers a re-pick — so a single
+      // 1-tile blocker (node/pod) never strands the scout. The only way
+      // to truly trap it is a fog pocket walled off ≥ vision-radius thick
+      // on every side, which the scattered 1-tile blockers on these maps
+      // can't form.
+      const g = state.gridSize;
+      let needPick = w.moveTarget === null;
+      if (!needPick && w.moveTarget !== null) {
+        const tt = packTile(tileAxis(w.moveTarget.x, g), tileAxis(w.moveTarget.y, g), g);
+        if (state.explored[w.faction][tt] === 1) needPick = true;
+      }
+      if (needPick) {
+        const nextTile = findNearestUnexploredTile(state, w.faction, w.x, w.y);
+        if (nextTile < 0) {
+          w.moveTarget = null;
+          w.phase = 'idle';
+          maybeEnterChargeMode(state, w);
+          return;
+        }
+        const c = tileCenter(nextTile, g);
+        w.moveTarget = { x: c.x, y: c.y };
+        w.path.length = 0;
+        w.pathGoalTile = -1;
+      }
+      const tgt = w.moveTarget;
+      if (tgt === null) return; // unreachable given the re-pick above; satisfies the type narrow
+      const next = navigate(state, w, tgt.x, tgt.y, tgt.x, tgt.y, speed, blockers);
+      w.x = next.x;
+      w.y = next.y;
+      return;
+    }
 
     case 'movingToNode': {
       const node = findNode(state, w.targetNodeId);
@@ -904,6 +1014,24 @@ function advanceUnit(state: SimState, u: Unit, blockers: ReadonlyArray<PathBlock
   advanceWorker(state, u, blockers);
 }
 
+// Phase C.6.10: maintain each worker's stalled-idle counter. Runs AFTER the
+// advance pass so it reads each worker's settled phase for this tick. A worker
+// parked at `idle` with nothing pending (no move target) is doing nothing
+// useful → its counter climbs; any active phase or a pending move zeroes it.
+// The AI reads this to decide when an idle worker has waited long enough
+// (with no discovered node to harvest) to be worth dispatching as a scout.
+function updateIdleTimers(state: SimState): void {
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (!u.alive || u.kind !== 'worker') continue;
+    if (u.phase === 'idle' && u.moveTarget === null) {
+      if (u.idleTicks < 0x7fffffff) u.idleTicks += 1;
+    } else {
+      u.idleTicks = 0;
+    }
+  }
+}
+
 // Phase C.1: structure advance. Build-phase progress is on the worker
 // side (`building` phase). This pass is a no-op for now but exists so
 // future per-tick structure activity (combat HP regen, etc.) has a
@@ -970,6 +1098,33 @@ function advanceDiscovery(state: SimState): void {
   }
 }
 
+// Phase C.6.7: tile-level exploration sweep — the same vision sources as
+// advanceDiscovery (HQ + alive units + operational pods), but marking the
+// per-faction explored TILE set rather than node flags. Permanent reveal
+// (markExploredCircle never clears a set tile). This is the deterministic
+// fog the AI scouts against (C.6.8+) and the render paints from. Kept as a
+// separate pass from advanceDiscovery so the node-discovery path the AI
+// already relies on is untouched (additive change → identical behaviour).
+function advanceExploration(state: SimState): void {
+  const g = state.gridSize;
+  for (const f of [0, 1] as const) {
+    const fs = state.factions[f];
+    markExploredCircle(state.explored[f], g, fs.hqX, fs.hqY, HQ_VISION_RADIUS);
+  }
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (!u.alive) continue;
+    markExploredCircle(state.explored[u.faction], g, u.x, u.y, UNIT_STATS[u.kind].visionRadius);
+  }
+  for (let i = 0; i < state.structures.length; i++) {
+    const s = state.structures[i];
+    if (!s.alive) continue;
+    if (s.kind !== 'workPod') continue;
+    if (s.buildTicksRemaining > 0) continue;
+    markExploredCircle(state.explored[s.faction], g, s.x, s.y, STRUCTURE_STATS.workPod.visionRadius);
+  }
+}
+
 function checkWinner(state: SimState): SimState['winner'] {
   if (state.factions[1].hqHp <= 0) return 0;
   if (state.factions[0].hqHp <= 0) return 1;
@@ -997,12 +1152,14 @@ export function step(state: SimState, rng: Rng, frame: InputFrame): void {
     for (let i = 0; i < state.units.length; i++) {
       advanceUnit(state, state.units[i], blockers);
     }
+    updateIdleTimers(state);
     for (let i = 0; i < state.structures.length; i++) {
       advanceStructure(state, state.structures[i]);
     }
     recomputeSupplyCaps(state);
     advanceResearch(state);
     advanceDiscovery(state);
+    advanceExploration(state);
     if (state.winner === null) {
       state.winner = checkWinner(state);
     }

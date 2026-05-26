@@ -258,6 +258,27 @@ export class InputController {
   researchTrailDuration(): void { /* retired in Phase A */ }
   dumpSelectedWorkers(): void { /* retired in Phase A */ }
 
+  // Phase C.6.9: send every selected friendly worker scouting. Same charge
+  // gate as the other worker orders — a worker in charge mode (or at 0
+  // charge) is skipped and fires the energy-blocked cue. The sim auto-picks
+  // each worker's frontier tile; if the faction's map is already fully
+  // revealed the sim rejects the command (no-op). Selection persists,
+  // matching the assign-to-node flow.
+  scoutSelectedWorkers(): void {
+    const state = this.opts.sim.state;
+    for (const id of this.selectedUnitIds) {
+      const u = findUnit(state, id);
+      if (!u) continue;
+      if (u.faction !== this.opts.playerFaction) continue;
+      if (u.kind !== 'worker') continue;
+      if (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK) {
+        this.opts.feedback?.onEnergyBlocked?.(u.id);
+        continue;
+      }
+      this.queue.push({ kind: CommandKind.ScoutWorker, workerId: u.id });
+    }
+  }
+
   // Sim-driver pulls commands here each tick. Clears the queue.
   takeQueued(): Command[] {
     if (this.queue.length === 0) return [];
@@ -542,10 +563,11 @@ export class InputController {
       this.applyCursor('auto');
       return;
     }
-    // Phase 3.7: hotkey 'E' fires the energy dump for every selected
-    // dumpable worker — the same fan-out as the panel button.
+    // Phase C.6.9: hotkey 'E' (Explore) sends every selected actionable
+    // worker scouting — the same fan-out as the command-card SCOUT button.
+    // (Repurposed from the retired Phase-3.7 energy-dump binding.)
     if (e.key === 'e' || e.key === 'E') {
-      this.dumpSelectedWorkers();
+      this.scoutSelectedWorkers();
     }
   }
 

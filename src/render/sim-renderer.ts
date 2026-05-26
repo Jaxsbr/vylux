@@ -474,7 +474,8 @@ export class SimRenderer {
         const moving = u.phase === 'movingToNode'
           || u.phase === 'returning'
           || u.phase === 'movingToBuildSite'
-          || u.phase === 'walkingToCharge';
+          || u.phase === 'walkingToCharge'
+          || u.phase === 'scouting';
         v.setMoveGlow(moving ? 1 : 0, dt);
         // Work-state beam — only for visible workers (no beams through fog).
         if (visible) {

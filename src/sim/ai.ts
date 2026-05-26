@@ -20,7 +20,7 @@ import { distSq, fromInt, type Fixed } from './fixed';
 import { type Faction, type ResourceNode, type SimState } from './types';
 import { MAX_TRAIN_QUEUE, STRUCTURE_STATS, unitStatsFor } from './units-config';
 import { isInChargeMode } from './step';
-import { isPodTileBlockedByNode } from './state';
+import { isFullyExplored, isPodTileBlockedByNode } from './state';
 
 export const AI_TICK_INTERVAL = 10;
 
@@ -28,6 +28,18 @@ export const AI_TICK_INTERVAL = 10;
 // so total worker cap caps out at ~30. More than enough for a single
 // AI to hit while we're still scoping Phase C.
 const AI_MAX_POD_COUNT = 5;
+
+// Phase C.6.10 — scouting tuning.
+// A worker idle (with no discovered live node to harvest) this many ticks is
+// "stalled" and eligible to be dispatched as a scout. Comfortably above
+// AI_TICK_INTERVAL so a worker about to be auto-assigned on the next AI tick
+// isn't sent off prematurely — only a genuinely starved worker crosses it.
+const AI_IDLE_SCOUT_TICKS = 40;
+// Hard ceiling on simultaneous scouts per faction. The AI scales scouts with
+// how many workers are stalled (the discovery-speed vs. harvester-count
+// tradeoff), but never sends the whole army exploring — enough stay home to
+// harvest whatever the scouts uncover.
+const AI_MAX_SCOUTS = 3;
 
 // Deterministic offsets from the AI's HQ for placed pods. Indexed by
 // the current count of friendly pods (alive, any build state). Chosen
@@ -46,6 +58,13 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
   if (state.tick % AI_TICK_INTERVAL !== 0) return [];
 
   const commands: Command[] = autoAssignIdleWorkers(state, faction);
+  // Phase C.6.10: send stalled workers scouting so the AI discovers fresh
+  // nodes instead of stalling once its home patch depletes. autoAssign above
+  // already routes any worker that HAS a discovered live node; dispatchScouts
+  // only takes the genuinely starved ones (idle past the threshold with no
+  // node to harvest), so the two never command the same worker in one frame.
+  const scout = dispatchScouts(state, faction);
+  for (let i = 0; i < scout.commands.length; i++) commands.push(scout.commands[i]);
   const fs = state.factions[faction];
   const workerCount = countOwnedWorkers(state, faction);
   const workerCost = unitStatsFor(fs.factionId, 'worker').trainCost;
@@ -74,7 +93,9 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
   const podStats = STRUCTURE_STATS.workPod;
   const ownedPodCount = countFriendlyPods(state, faction);
   const podInFlight = anyPodBuilding(state, faction);
-  const builder = pickActionableWorker(state, faction);
+  // Exclude any worker we just sent scouting this frame, so a pod build
+  // doesn't yank it back off its scout order in the same input frame.
+  const builder = pickActionableWorker(state, faction, scout.scoutingIds);
   if (
     workerCount >= fs.supplyCap
     && !podInFlight
@@ -149,6 +170,61 @@ export function autoAssignIdleWorkers(state: SimState, faction: Faction): Comman
   return out;
 }
 
+// Phase C.6.10: decide which (if any) stalled workers to send scouting this
+// AI tick. A worker qualifies when it is idle, has been stalled past the
+// threshold, can act (charge + not charging), AND has NO discovered live node
+// to harvest — that last test is the key one: it means autoAssignIdleWorkers
+// produced nothing for this worker, so scouting it can't collide with a
+// harvest order in the same frame, and it scopes scouting to the genuine
+// "home patch exhausted, nothing left to do" stall.
+//
+// The COUNT is the discovery-speed vs. harvester-count tradeoff the AI gets to
+// make: it scales scouts with how many workers are stalled (≈ half of them),
+// capped at AI_MAX_SCOUTS and net of any already out scouting — so a deeply
+// stalled AI explores faster, but always keeps workers home to harvest what
+// the scouts reveal. Returns the commands plus the set of dispatched ids (so
+// the pod-builder pick can avoid double-commanding a fresh scout).
+//
+// Deterministic: candidates are gathered in units-array order (ascending id,
+// since the array never reorders) and taken lowest-id first; the count is
+// integer arithmetic on counts. No RNG.
+function dispatchScouts(
+  state: SimState,
+  faction: Faction,
+): { commands: Command[]; scoutingIds: Set<number> } {
+  const commands: Command[] = [];
+  const scoutingIds = new Set<number>();
+  // Nothing to scout once the faction's map is fully revealed.
+  if (isFullyExplored(state, faction)) return { commands, scoutingIds };
+
+  let activeScouts = 0;
+  const candidates: number[] = [];
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (!u.alive) continue;
+    if (u.faction !== faction) continue;
+    if (u.kind !== 'worker') continue;
+    if (u.phase === 'scouting') { activeScouts += 1; continue; }
+    if (u.phase !== 'idle') continue;
+    if (u.moveTarget !== null) continue;
+    if (isInChargeMode(u)) continue;
+    if (u.charge < 1) continue;
+    if (u.idleTicks < AI_IDLE_SCOUT_TICKS) continue;
+    // Has a node to harvest → autoAssign owns this worker; don't scout it.
+    if (nearestLiveNode(state, faction, u.x, u.y) !== null) continue;
+    candidates.push(u.id);
+  }
+  if (candidates.length === 0) return { commands, scoutingIds };
+
+  const desired = Math.min(AI_MAX_SCOUTS, Math.max(1, Math.ceil(candidates.length / 2)));
+  const toSend = Math.max(0, desired - activeScouts);
+  for (let k = 0; k < toSend && k < candidates.length; k++) {
+    commands.push({ kind: CommandKind.ScoutWorker, workerId: candidates[k] });
+    scoutingIds.add(candidates[k]);
+  }
+  return { commands, scoutingIds };
+}
+
 function countOwnedWorkers(state: SimState, faction: Faction): number {
   let n = 0;
   for (let i = 0; i < state.units.length; i++) {
@@ -189,7 +265,11 @@ function anyPodBuilding(state: SimState, faction: Faction): boolean {
 // 0 = no candidate. Returning a friendly worker that's currently
 // harvesting is fine: the BuildStructureByWorker command supersedes
 // the harvest at apply-time.
-function pickActionableWorker(state: SimState, faction: Faction): number {
+function pickActionableWorker(
+  state: SimState,
+  faction: Faction,
+  exclude?: ReadonlySet<number>,
+): number {
   let best = 0;
   for (let i = 0; i < state.units.length; i++) {
     const u = state.units[i];
@@ -198,6 +278,11 @@ function pickActionableWorker(state: SimState, faction: Faction): number {
     if (u.kind !== 'worker') continue;
     if (isInChargeMode(u)) continue;
     if (u.charge < 1) continue;
+    // Don't pull a worker already out scouting (prior tick) back into a pod
+    // build — let it finish exploring. (`exclude` covers scouts dispatched
+    // THIS frame, which are still phase 'idle' until the command applies.)
+    if (u.phase === 'scouting') continue;
+    if (exclude !== undefined && exclude.has(u.id)) continue;
     if (best === 0 || u.id < best) best = u.id;
   }
   return best;
