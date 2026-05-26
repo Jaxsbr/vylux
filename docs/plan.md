@@ -136,7 +136,12 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | C.6 | Onboarding & tutorial sandbox           | ONBOARD       | ✅ landed 2026-05-24 (#17) |
 | C.6.5 | **Map: bigger arena + randomised energy field** | new scope | ✅ landed 2026-05-24 |
 | C.6.6 | **Sim-side obstacle avoidance — grid A\* (worker pathing)** | new scope | ✅ landed 2026-05-26 (pure A\*, waypoint-only; hybrid attempt reverted first) |
-| C.6.7 | **AI behaviour — scout, expand-harvest, grow** | new scope | spec'd 2026-05-25 |
+| C.6.7 | **Fog foundation — per-faction exploration in the sim** | new scope | spec'd 2026-05-26 |
+| C.6.8 | **Scout order — worker primitive (frontier target + reveal)** | new scope | spec'd 2026-05-26 |
+| C.6.9 | **User Scout button — HUD command card** | new scope | spec'd 2026-05-26 |
+| C.6.10 | **AI scouting — idle-trigger dispatch** | new scope | spec'd 2026-05-26 |
+| C.6.11 | **AI expand-harvest — route to distant discovered nodes** | new scope | deferred |
+| C.6.12 | **AI grow-via-pods — cluster-biased placement** | new scope | deferred |
 | C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
 | C.7.5 | **Resource Depot — collection building + research** | new scope | spec'd 2026-05-24 |
 | C.8 | Research depth — worker + HQ trees      | (was C.2)     | deferred             |
@@ -753,56 +758,85 @@ instead of clipping through them; verify gate green incl. regenerated goldens.
 > regenerated** (still uncommitted `REPLAY_VERSION` 26). New unit test asserts a
 > diagonal route can't cut a pod corner.
 
-#### Phase C.6.7 — AI behaviour: scout, expand-harvest, grow · [new — owner-inserted 2026-05-25]
+#### Phase C.6.7–C.6.12 — Scouting & AI economy, decomposed · [re-split 2026-05-26]
 
-> **Inserted by owner direction (2026-05-25).** C.6.5's 64² map + randomised
-> energy field exposed an economic-AI gap: the AI only **auto-assigns idle workers
-> to already-*discovered* live nodes** and never proactively scouts (`ai.ts` —
-> `autoAssignIdleWorkers` + the train/pod build order; see `manual.md` → AI
-> behaviour). On the small fixed map its home patch was enough; on the big random
-> map, once the AI exhausts the nodes near its HQ it has **no discovered live node
-> left and silently stalls** — it stops harvesting, never expands, and stops being
-> a real opponent. Make the AI a competent economic player on the new map.
+> **Re-split by owner direction (2026-05-26).** The original single C.6.7 ("AI
+> behaviour — scout, expand-harvest, grow") bundled three behaviours into one
+> phase. Scoping it surfaced an architectural split that must be fixed *first*:
+> there are **two unrelated fog systems** today.
+>
+>   - **Node discovery** (`ResourceNode.discoveredBy[faction]` — sim, hashed):
+>     per-faction, permanent, set by `advanceDiscovery` from vision radii. The
+>     **AI** reads this (`nearestLiveNode` skips undiscovered nodes), so it
+>     genuinely can't harvest what it hasn't seen. ✅ already correct.
+>   - **Tile exploration** (`render/exploration.ts` — a `Uint8Array` bitmap,
+>     **render-only**, **player-faction only**, recomputed each frame): drives
+>     the human's fog overlay + enemy-entity visibility. The **AI has no
+>     tile-level explored map at all.**
+>
+> So "scout toward the frontier" and "stop scouting once the map is revealed"
+> are *inexpressible* today — the AI has no notion of *where* it has or hasn't
+> explored. The fix: promote a deterministic, per-faction explored set into the
+> sim, then build the scout behaviour on top, one slice at a time.
+>
+> The C.6.5 stall this addresses: on the 64² randomised map, once the AI
+> exhausts the nodes near its HQ it has no discovered live node left and stalls
+> (stops harvesting, never expands). Scouting is the missing primitive.
 
-**Three behaviours.**
-1. **Scout to uncover fog.** Periodically dispatch a worker to explore unseen tiles
-   (toward the nearest unexplored region / map centre), flipping `discoveredBy`
-   flags so fresh nodes become harvest-eligible. Target selection is deterministic
-   (derived from sim state, **never `Math.random`**). This is the missing primitive —
-   auto-assign already routes to the nearest discovered live node; the gap is
-   *discovery*.
-2. **Expand-harvest when the home patch exhausts.** When the AI has no discovered
-   live node within easy reach, it routes workers to the nearest discovered live
-   node *anywhere*, and if none is discovered, it scouts (behaviour 1) rather than
-   idling. No economic deadlock.
-3. **Grow via pods at the cap.** The cap→pod build already exists (train to cap →
-   build a pod, ≤5, via the fixed HQ offset table). Harden it and bias pod
-   placement *toward discovered node clusters* rather than only hugging the HQ —
-   this is the same expansion instinct the C.7.5 depot-AI note calls for, so the
-   two should share the cluster-targeting helper.
+**C.6.7 — Fog foundation (refactor; no new behaviour).** Add a per-faction
+explored tile set to `SimState` (both factions), seeded by the initial HQ vision
+sweep and advanced each tick by a new `advanceExploration` pass that mirrors the
+existing vision-radius marking (HQ + units + operational pods). Hash it
+(canonical-state contract). The render `Exploration` becomes a *view* of the
+sim's player-faction set instead of its own recompute — one source of truth.
+Node `discoveredBy` is left exactly as-is (additive change, so the AI plays
+identically). **`REPLAY_VERSION` 26→27**; regenerate all three golden fixtures.
+Exit: human fog renders unchanged; sim hash now carries exploration; tsc + unit
++ e2e green.
 
-**Determinism.** AI logic is the pure `tickAi(state, faction)` returning
-`Command[]` — it changes *what the AI does*, not the replay wire format, so **no
-`REPLAY_VERSION` bump**, but the AI now plays differently → the **`ai-vs-ai-3000`
-golden fixture must be regenerated** (`RECORD_GOLDEN=1 npm test`). All scout/expand
-target picks must read deterministic sim state / the seeded RNG.
+**C.6.8 — Scout order (the primitive).** New `ScoutWorker` command (next free
+CommandKind slot) + a `'scouting'` `WorkerPhase`. On apply, the worker picks a
+**deterministic frontier target** from its faction's explored set — nearest
+unexplored tile, biased toward the map interior — **without reading undiscovered
+node coords** (no omniscience). It paths there via the existing A* `navigate()`,
+revealing tiles + nodes en route, and drops back to `idle` on arrival or when no
+unexplored tile remains. Unit-tested as pure functions (same state → same
+target; reveals fog; terminates when fully explored). Replay/hash updated;
+goldens regenerated (no AI/UI trigger wired yet, so AI-vs-AI behaviour is
+unchanged — the new phase/command shape still bumps the hash).
 
-**Tests.** Unit-test the new decision helpers as pure functions (same state → same
-commands; scouts when no discovered live node exists; expands to a distant
-discovered node once the home patch is depleted; still builds a pod at the cap).
-Extend the AI-vs-AI e2e smoke so it asserts **neither faction economically
-deadlocks** over a long match on the 64² randomised map (strengthens C.6.5's
-no-harvest-deadlock guard into a no-*stall* guard). Regenerate the `ai-vs-ai`
-golden; `tsc` + unit + e2e green. Update `docs/manual.md` → AI behaviour.
+**C.6.9 — User Scout button.** A Scout button on the worker command card
+(`action-bar.ts`) → delegate → `input-controller` queues `ScoutWorker` for the
+selected worker(s). One-click auto-explore (worker auto-picks the frontier; no
+targeting mode). Greys out when the player faction's map is fully revealed.
+Render + command wiring only — no sim shape change beyond C.6.8.
 
-Out of scope: autonomous AI research (still deferred — the AI doesn't research
-auto-resume on its own); combat AI (Phase D); difficulty tiers; depot placement
-(C.7.5, but it reuses this phase's cluster-targeting helper).
+**C.6.10 — AI scouting.** The AI dispatches scouts when a worker has been idle
+≥ X (deterministic idle tracking — a per-worker idle-tick counter in sim state,
+a small replay-shape change → bump + golden regen). **The AI decides how many
+scouts to send** (weighing faster discovery vs. fewer harvesters, scaling with
+how stalled it is) rather than a fixed cap. Never scouts a fully-revealed map.
+Extend the AI-vs-AI e2e smoke to assert neither faction economically stalls over
+a long 64² match. Regenerate `ai-vs-ai` golden. Update `docs/manual.md` → AI
+behaviour. **Exit:** on a normal 64² match the AI scouts out from its home patch
+and keeps harvesting after the nearby nodes deplete (no stall).
 
-**Exit:** on a normal 64² match the AI scouts out from its home patch, keeps
-harvesting after the nearby nodes deplete (no economic stall), and grows its
-workforce via pods; an AI-vs-AI smoke proves no deadlock over a long match; verify
-gate green incl. the regenerated `ai-vs-ai` golden.
+**C.6.11 — AI expand-harvest** *(deferred behaviour 2 from the old bundle)*.
+When the AI has no discovered live node within easy reach, route workers to the
+nearest discovered live node *anywhere*; if none is discovered, scout (C.6.10)
+rather than idling. No economic deadlock.
+
+**C.6.12 — AI grow-via-pods** *(deferred behaviour 3)*. Harden the cap→pod build
+and bias pod placement toward discovered node clusters rather than hugging the
+HQ. Shares a cluster-targeting helper with the future C.7.5 depot AI.
+
+**Determinism (all sub-phases).** AI logic stays the pure `tickAi(state,
+faction) → Command[]`; scout/frontier target picks read deterministic sim state
+only, **never `Math.random`**. Each sub-phase that moves the state shape bumps
+`REPLAY_VERSION` and regenerates the affected golden fixtures.
+
+Out of scope (unchanged): autonomous AI research; combat AI (Phase D);
+difficulty tiers; depot placement (C.7.5, which reuses C.6.12's cluster helper).
 
 #### Phase C.7 — Economy depth: Matter + cost split  (was C.2)
 

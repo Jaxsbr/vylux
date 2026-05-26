@@ -54,6 +54,22 @@ export class Hasher {
     }
   }
 
+  // Mix a byte array COMPACTLY: fold it to a 32-bit checksum with Math.imul
+  // (a 32-bit FNV-1a over the bytes — bit-stable across engines, and far
+  // cheaper than one BigInt multiply per byte), then mix the length + that
+  // single word into the main state. Used for the large per-faction explored
+  // bitmaps (gridSize² bytes each, hashed every tick) where a byte-at-a-time
+  // BigInt fold would dominate the per-tick hash cost. Length is mixed first
+  // so different-length arrays hash distinctly.
+  writeBytes(bytes: Uint8Array): void {
+    let c = 0x811c9dc5 | 0; // 32-bit FNV offset basis
+    for (let i = 0; i < bytes.length; i++) {
+      c = Math.imul(c ^ bytes[i], 0x01000193) | 0; // 32-bit FNV prime
+    }
+    this.writeU32(bytes.length);
+    this.writeU32(c >>> 0);
+  }
+
   digest(): bigint {
     return this.state;
   }

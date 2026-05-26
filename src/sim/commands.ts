@@ -28,6 +28,7 @@ export const enum CommandKind {
   AssignWorkerToBuild = 12, // RESERVED — multi-worker construction; out of scope for C.1's single-builder cut.
   Resign = 13, // the named faction concedes; the other faction wins. No-op if a winner is already set.
   StartResearchAtPod = 14, // Phase C.1 (post-2026-05-12): kick off a faction-level research at the named work pod. Single-slot — silently rejected if the faction is already researching or the named kind is already done.
+  ScoutWorker = 15, // Phase C.6.8: send a worker to explore toward the nearest unexplored frontier tile, revealing fog en route. Auto-targets (deterministic, from the faction's explored set — no peeking at undiscovered nodes); usable by player + AI. No-op if the faction's map is fully revealed.
 }
 
 export interface NoopCommand {
@@ -85,6 +86,11 @@ export interface StartResearchAtPodCommand {
   researchKind: ResearchKind;
 }
 
+export interface ScoutWorkerCommand {
+  kind: CommandKind.ScoutWorker;
+  workerId: number;
+}
+
 export type Command =
   | NoopCommand
   | AssignWorkerToNodeCommand
@@ -92,7 +98,8 @@ export type Command =
   | MoveUnitCommand
   | BuildStructureByWorkerCommand
   | ResignCommand
-  | StartResearchAtPodCommand;
+  | StartResearchAtPodCommand
+  | ScoutWorkerCommand;
 
 // One frame's worth of commands across both players. The sim consumes
 // these in the order given, deterministically.

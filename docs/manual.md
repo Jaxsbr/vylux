@@ -49,7 +49,9 @@ Every worker carries an internal `charge` meter (default max **10**, drains **1*
 
 The renderer filters per faction. Friendly units, the friendly HQ, and friendly work pods are always visible; enemy entities are hidden until they enter the player's current vision bubble (no last-known-position memory in v1). Vision radii (in tiles): worker 4, HQ 8, work pod 5.
 
-Resource nodes are discovered persistently — once a friendly unit / HQ / pod comes within vision of a node, the faction's `discoveredBy[node]` flag flips to true and stays true forever (no fog-of-war rediscovery). Each faction's home patch is auto-discovered at tick 0. Right-click-moving a worker is the canonical scouting action. Observer mode bypasses vision entirely (sees both factions' state).
+Resource nodes are discovered persistently — once a friendly unit / HQ / pod comes within vision of a node, the faction's `discoveredBy[node]` flag flips to true and stays true forever (no fog-of-war rediscovery). **Tile exploration** is tracked the same way and (since C.6.7) lives in the deterministic sim as a per-faction explored bitmap (`SimState.explored`): both factions have their own, seeded from each HQ's opening vision and extended every tick by friendly vision. The human fog overlay reads this set directly — one source of truth, the same set the AI scouts against. Each faction's home patch is auto-discovered at tick 0.
+
+**Scouting (C.6.8–C.6.10).** Select a worker and press the **SCOUT** command-card button (hotkey **E**, costs one charge) to send it exploring: it auto-routes to the nearest *unexplored* frontier tile, revealing fog (and any nodes) en route, re-targeting until the faction's map is fully uncovered — then it drops back to idle. The button greys out once everything is revealed. Target selection never reads undiscovered node positions (no peeking under the fog). Right-click-moving a worker is still a manual scouting option. The AI uses the same scout order (see AI behaviour). Observer mode bypasses vision entirely (sees both factions' state).
 
 ---
 
@@ -222,10 +224,11 @@ A normal match shows a one-line **first-action nudge** ("select your HQ") on ent
 The AI ticks once every 10 sim ticks (0.5 s at 20 Hz) and does, in order:
 
 1. **Auto-assign idle workers** to the nearest discovered, live energy node. Skips workers in charge mode or at 0 charge.
-2. **Train workers** up to the current supply cap as long as Energy covers the cost.
-3. **Build a work pod** when at the supply cap AND no pod is mid-construction AND Energy covers the build cost AND it has an actionable worker AND it owns fewer than 5 pods. Tile is picked deterministically from a fixed offset table around the HQ.
+2. **Scout when starved** (C.6.10). A worker that's sat idle ≈2 s (40 ticks) with no discovered live node left to harvest is dispatched to scout. The AI scales the number of scouts with how many workers are stalled — about half of them, capped at 3 — so it uncovers new ground quickly without pulling its whole workforce off harvesting; the scouts reveal fog → fresh nodes → step 1 feeds the remaining workers onto them. The AI never scouts a fully-revealed map. This is what stops the AI stalling on the big randomised map once its home patch runs dry (it used to freeze with no discovered node left).
+3. **Train workers** up to the current supply cap as long as Energy covers the cost.
+4. **Build a work pod** when at the supply cap AND no pod is mid-construction AND Energy covers the build cost AND it has an actionable worker (one not just sent scouting) AND it owns fewer than 5 pods. Tile is picked deterministically from a fixed offset table around the HQ.
 
-The AI does not yet research auto-resume on its own. That's a player decision for now; the AI's autonomous tech progression lands in a follow-up sub-phase.
+The AI does not yet research auto-resume on its own, nor does it yet *prefer* a distant discovered node over scouting / bias pod placement toward node clusters — those refinements (expand-harvest, cluster-aware pods) land in C.6.11–C.6.12. Autonomous tech progression is later still.
 
 ---
 

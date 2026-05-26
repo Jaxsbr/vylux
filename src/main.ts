@@ -489,6 +489,8 @@ async function bootstrap(): Promise<void> {
     // currently-selected pod (action-bar disables the button when not
     // applicable, so this fires only when valid).
     onResearchAutoResumeSelected: () => { audio.click(); input!.researchAutoResume(); },
+    // Phase C.6.9: send the selected worker(s) scouting to reveal fog.
+    onScoutSelected: () => { audio.click(); input!.scoutSelectedWorkers(); },
   }, document.body);
 
   // Bottom-left selection HUD — portrait + name for whatever the player
