@@ -25,7 +25,7 @@ export const enum CommandKind {
   ActivateEnergyDump = 9, // RESERVED — Phase A strip retired the dump ability.
   ResearchTrailDurationAtStructure = 10, // RESERVED — Phase A strip retired research.
   BuildStructureByWorker = 11, // Phase C.1: a worker walks to the named tile and constructs a structure (currently scoped to 'workPod').
-  AssignWorkerToBuild = 12, // RESERVED — multi-worker construction; out of scope for C.1's single-builder cut.
+  AssignWorkerToBuild = 12, // Phase D-prep: assign a worker to FINISH an existing, partially-built structure (no new spawn, no re-paid build cost). Lets an abandoned half-built work pod be completed by any worker.
   Resign = 13, // the named faction concedes; the other faction wins. No-op if a winner is already set.
   StartResearchAtPod = 14, // Phase C.1 (post-2026-05-12): kick off a faction-level research at the named work pod. Single-slot — silently rejected if the faction is already researching or the named kind is already done.
   ScoutWorker = 15, // Phase C.6.8: send a worker to explore toward the nearest unexplored frontier tile, revealing fog en route. Auto-targets (deterministic, from the faction's explored set — no peeking at undiscovered nodes); usable by player + AI. No-op if the faction's map is fully revealed.
@@ -75,6 +75,18 @@ export interface BuildStructureByWorkerCommand {
   y: number;
 }
 
+export interface AssignWorkerToBuildCommand {
+  kind: CommandKind.AssignWorkerToBuild;
+  workerId: number;
+  // The id of an existing, still-under-construction structure (a work pod
+  // with buildTicksRemaining > 0) owned by the worker's faction. The worker
+  // walks to it and ticks its build down on site — the same `building`
+  // path BuildStructureByWorker uses, minus the spawn + the energy build
+  // cost (already paid when the pod was first placed). Silent no-op if the
+  // structure is gone, foreign, or already operational.
+  structureId: number;
+}
+
 export interface ResignCommand {
   kind: CommandKind.Resign;
   faction: Faction;
@@ -97,6 +109,7 @@ export type Command =
   | TrainUnitCommand
   | MoveUnitCommand
   | BuildStructureByWorkerCommand
+  | AssignWorkerToBuildCommand
   | ResignCommand
   | StartResearchAtPodCommand
   | ScoutWorkerCommand;

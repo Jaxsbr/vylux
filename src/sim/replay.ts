@@ -256,7 +256,27 @@ import type { InitialMatchSpec } from './state';
 // field changes the per-tick hash (idle workers tick it every frame) AND the
 // AI now plays differently once its home patch depletes, so all three golden
 // fixtures regenerate.
-export const REPLAY_VERSION = 29;
+// Pre-Phase-D ad-hoc pass bumps to v30 (2026-05-27). Two sim changes: (1)
+// charge-spot picking now chooses the physically NEAREST of {nearest pod, HQ}
+// instead of always preferring a pod — a worker stops trekking across the map
+// past its own HQ to a distant pod (pickChargeTarget rewrite); (2) the
+// previously-reserved CommandKind.AssignWorkerToBuild = 12 is now live — it
+// assigns a worker to FINISH an existing partial build (no spawn, no re-paid
+// Energy), rescuing a half-built pod abandoned by its original builder. State
+// SHAPE is unchanged, but charge-target choice changes worker routing and the
+// command set expands, so all three golden fixtures regenerate (an idle-worker
+// charge near both an HQ and a pod can now land at a different spot).
+// Ad-hoc follow-up bumps to v31 (2026-05-27). Scouting is now FREE: the
+// ScoutWorker command no longer drains a charge (scouting is exploration /
+// movement, not an energy-burning task). It still requires a controllable
+// worker (≥1 charge, not in charge mode) to start, but it spends nothing — so
+// a worker can scout on 1 charge and keep it, fixing the bug where a worker
+// sent to scout with its last charge dropped to 0 and got stranded scouting
+// the fog forever (uncontrollable). State SHAPE is unchanged, but every AI
+// scout now retains the charge it previously spent, so the AI-vs-AI golden
+// fixture moves (the AI scouts in that match); it's regenerated. The two
+// scripted harvest fixtures never scout, so they don't move.
+export const REPLAY_VERSION = 31;
 
 export interface ReplayLog {
   version: number;

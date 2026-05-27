@@ -4,7 +4,7 @@
 
 > **Currency:** this file MUST be updated as part of any change that adds, removes, or re-tunes a unit, structure, resource, tech, or victory condition. If the numbers in this file disagree with `src/sim/units-config.ts`, **the config wins** — patch this doc.
 
-> **Phase C.1 (2026-05-12) landed:** work pods + worker per-unit charge + the first research item (auto-resume). Workers now spend 1 charge per task (harvest cycle or build). At 0 charge a worker enters charge mode (walks to the nearest friendly work pod, falls back to HQ if no pod exists) and refuses player commands until fully recharged. Each operational work pod also raises the worker cap, and hosts the worker auto-resume research. AI actively grows its workforce — it trains workers up to the cap and builds work pods to raise the cap further.
+> **Phase C.1 (2026-05-12) landed:** work pods + worker per-unit charge + the first research item (auto-resume). Workers now spend 1 charge per task (harvest cycle or build). At 0 charge a worker enters charge mode (walks to the nearest charge spot — the closest friendly work pod or its HQ, whichever is actually nearer) and refuses player commands until fully recharged. Each operational work pod also raises the worker cap, and hosts the worker auto-resume research. AI actively grows its workforce — it trains workers up to the cap and builds work pods to raise the cap further.
 
 ---
 
@@ -29,8 +29,9 @@ Every worker carries an internal `charge` meter (default max **10**, drains **1*
 - `MoveUnit` is free while charge > 0 (the worker has fuel to spare).
 
 **Charge-spot picking:**
-- Always prefer the **nearest friendly operational work pod**, regardless of distance.
-- Fall back to the friendly **HQ** only if no operational pod exists.
+- Head to the **physically nearest** charge spot — the closest friendly operational work pod **or** the friendly HQ, whichever the worker is actually nearer to. A worker no longer treks across the map to a distant pod when its own HQ is right next door.
+- If there is no operational pod, the HQ is the only spot.
+- On a tie (equal distance) the pod wins, since it recharges twice as fast.
 
 **Recharge rates:**
 - At a work pod: `+1 charge per 20 ticks` (~10 s to refill a full 10/10 tank).
@@ -51,7 +52,7 @@ The renderer filters per faction. Friendly units, the friendly HQ, and friendly 
 
 Resource nodes are discovered persistently — once a friendly unit / HQ / pod comes within vision of a node, the faction's `discoveredBy[node]` flag flips to true and stays true forever (no fog-of-war rediscovery). **Tile exploration** is tracked the same way and (since C.6.7) lives in the deterministic sim as a per-faction explored bitmap (`SimState.explored`): both factions have their own, seeded from each HQ's opening vision and extended every tick by friendly vision. The human fog overlay reads this set directly — one source of truth, the same set the AI scouts against. Each faction's home patch is auto-discovered at tick 0.
 
-**Scouting (C.6.8–C.6.10).** Select a worker and press the **SCOUT** command-card button (hotkey **E**, costs one charge) to send it exploring: it auto-routes to the nearest *unexplored* frontier tile, revealing fog (and any nodes) en route, re-targeting until the faction's map is fully uncovered — then it drops back to idle. The button greys out once everything is revealed. Target selection never reads undiscovered node positions (no peeking under the fog). Right-click-moving a worker is still a manual scouting option. The AI uses the same scout order (see AI behaviour). Observer mode bypasses vision entirely (sees both factions' state).
+**Scouting (C.6.8–C.6.10).** Select a worker and press the **SCOUT** command-card button (hotkey **E**) to send it exploring. Scouting is **free** — it spends no charge (it's exploration, not an energy-burning task), so a worker can scout on as little as 1 charge and keeps it, staying fully controllable. It still requires a controllable worker: one that needs a charge (0 charge / in charge mode) can't be sent scouting. The scout auto-routes to the nearest *unexplored* frontier tile, revealing fog (and any nodes) en route, re-targeting until the faction's map is fully uncovered — then it drops back to idle. The button greys out once everything is revealed. Target selection never reads undiscovered node positions (no peeking under the fog). Right-click-moving a worker is still a manual scouting option. The AI uses the same scout order (see AI behaviour). Observer mode bypasses vision entirely (sees both factions' state).
 
 ---
 
@@ -82,7 +83,7 @@ per-faction override blocks in `units-config.ts` stay as the divergence hooks.
 
 | Structure | HP | Cost | Build time | Role |
 |---|---|---|---|---|
-| **HQ** | 250 (configurable per match) | — | — (placed at match start) | Trains workers. Losing it ends the match. Acts as a fallback charge spot at half the pod rate. Provides 5 worker cap. |
+| **HQ** | 250 (configurable per match) | — | — (placed at match start) | Trains workers. Losing it ends the match. Acts as a charge spot at half the pod rate — used whenever it's the nearest spot to a depleted worker, or the only one. Provides 5 worker cap. |
 | **Work Pod** | 100 | 60 E | 30 ticks (1.5 s) | Built by a worker. Occupies a single tile (no overlap with neighbours). While operational: +5 worker cap, and acts as a primary charge spot (faster than HQ). Hosts (future) worker-upgrade research — slot reserved, no upgrades yet. |
 
 ### Build flow (Work Pod)
@@ -91,7 +92,7 @@ per-faction override blocks in `units-config.ts` stay as the divergence hooks.
 2. Click **BUILD WORK POD** on the action bar (hotkey **B**) — the cursor switches to crosshair, and a tile preview follows the cursor: **green** where a pod may be built, **red** where it's blocked.
 3. Left-click a **valid** tile to commit the placement. The lowest-ID actionable worker is dispatched: it pays 1 charge, the faction pays 60 Energy, the pod spawns with full `buildTicksRemaining`. Pods may **not** be built within 1 tile of an energy node (Phase C.6.6 — keeps the node's harvest approach clear for pathing); clicking a red tile is ignored and placement mode stays active. Right-click / Esc cancels.
 4. The worker walks to the site (`movingToBuildSite`), arrives (`building`), and ticks the structure down (1 tick per sim tick while on site). At 0 ticks the pod becomes operational.
-5. Build aborted (worker redirected, worker killed): the pod stays under construction; another worker can be dispatched to finish it (in C.1 only one worker constructs at a time — multi-worker construction lands in a follow-up).
+5. Build aborted (worker redirected, worker killed): the pod stays under construction, frozen at its current progress. **To finish it, select one or more workers and left-click the half-built pod** (the same left-click-the-target gesture used to assign harvesting) — each pays 1 charge and walks over to complete the build (no Energy is re-paid; the build cost was already spent at placement). Multiple workers stack on site and finish it faster.
 
 ### Capacity
 
@@ -136,11 +137,12 @@ Research is hosted at any operational work pod — pick one, click **RESEARCH AU
 
 - **Left-click** an owned unit → selects only that unit (replaces any prior selection).
 - **Shift + left-click** an owned unit → toggle that unit in or out of the current selection.
-- **Left-click + drag** on empty ground → drag-rectangle. On release, every owned unit inside the rect joins the selection (shift-drag adds).
+- **Left-click + drag** on empty ground → drag-rectangle. On release, every owned **unit** inside the rect joins the selection (shift-drag adds). The drag-rect only ever picks units — buildings (HQ / work pods) are **never** drag-selectable, and a drag that grabs workers drops any HQ / pod that was focused from an earlier click, so the HUD follows the workers, not a stale building.
 - With selected workers, **left-click** a node → all selected workers are assigned to harvest there. Each accepted worker pays 1 charge; workers in charge mode silently flash the lightning cue.
+- With selected workers, **left-click** a friendly **half-built work pod** → the workers walk over and finish constructing it (each pays 1 charge; no Energy re-paid). Mirrors the left-click-a-node-to-harvest order; right-click stays move-only. See *Build flow* above.
 - **Right-click** on empty ground → MoveUnit for every selected unit. Workers in charge mode flash the lightning cue and stay put.
 - **Left-click on empty ground** → clears the unit selection.
-- **Left-click your HQ** → selects the HQ (the command card shows the TRAIN WORKER tile + a `used/cap` indicator; a production-queue strip appears above it while workers are training).
+- **Left-click your HQ** → selects the HQ (the command card shows the TRAIN WORKER tile + a `used/cap` indicator; a production-queue strip appears above it while workers are training). Buildings are selected by **left-click only**, never by drag.
 - **Left-click a work pod** → selects the pod (info-only panel for now).
 - **Esc** → clears selection. Cancels any pending placement.
 
@@ -160,7 +162,7 @@ Research is hosted at any operational work pod — pick one, click **RESEARCH AU
 A fixed-footprint HUD; nothing resizes to fit its text.
 
 - **Resource bar (top-centre):** HQ HP · Energy · **Matter** (reserved + greyed until Phase C.7) · Supply `used/cap` (pulses red/white at the cap — build a work pod to raise it).
-- **Portrait panel (bottom-left):** a 3D snapshot of the selected entity + its name, plus an action-state icon and HP / charge bars (workers), HP + build status (pods), or remaining energy (nodes).
+- **Portrait panel (bottom-left):** a live 3D render of the selected entity + its name, plus an action-state icon and HP / charge bars (workers), HP + build status (pods), or remaining energy (nodes). The portrait isn't static — the entity plays its in-game life animation (HQ / pod emissive breathe, worker idle hover, node spin) and slowly turntable-rotates at a fixed rate so you see it from every side.
 - **Command card (bottom-centre):** a fixed 3-wide grid of **icon tiles**, each with a hotkey badge (top-left) + Energy-cost badge (top-right); unused slots render as dim cells. Above it, a **production-queue strip** shows the queued workers, the head one carrying a production-progress bar.
 - **Minimap (bottom-right):** a top-down map of the arena. Blips mirror what's currently visible in the 3D scene (so it respects fog), plus a camera-focus marker. **Click anywhere on it to recentre the camera.**
 

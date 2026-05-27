@@ -255,7 +255,7 @@ describe('Sim — worker charge', () => {
     expect(positions.size).toBe(3);
   });
 
-  it('always prefers pod over HQ regardless of HQ being closer', () => {
+  it('charges at the HQ when the HQ is closer than the only pod', () => {
     // HQ at (3, 3), pod at (15, 15), worker at (4, 4) — much closer to HQ.
     const sim = new Sim(SPEC);
     trainWorker(sim, 0, 4, 4);
@@ -274,8 +274,32 @@ describe('Sim — worker charge', () => {
       buildTicksRemaining: 0,
     });
     sim.step({ tick: sim.state.tick, commands: [] });
-    expect(w.phase).toBe('walkingToCharge');
-    expect(w.chargeTargetStructureId).not.toBe(0); // pod id
+    expect(['walkingToCharge', 'charging']).toContain(w.phase);
+    expect(w.chargeTargetStructureId).toBe(0); // HQ, not the far pod
+  });
+
+  it('charges at the pod when the pod is closer than the HQ', () => {
+    // HQ at (3, 3), pod at (14, 14), worker at (13, 13) — much closer to pod.
+    const sim = new Sim(SPEC);
+    trainWorker(sim, 0, 13, 13);
+    const w = sim.state.units[0];
+    if (w.kind !== 'worker') throw new Error('expected worker');
+    w.charge = 0;
+    w.phase = 'idle';
+    const podId = sim.state.nextEntityId++;
+    sim.state.structures.push({
+      id: podId,
+      alive: true,
+      kind: 'workPod',
+      faction: 0,
+      x: fromInt(14),
+      y: fromInt(14),
+      hp: STRUCTURE_STATS.workPod.maxHp,
+      buildTicksRemaining: 0,
+    });
+    sim.step({ tick: sim.state.tick, commands: [] });
+    expect(['walkingToCharge', 'charging']).toContain(w.phase);
+    expect(w.chargeTargetStructureId).toBe(podId);
   });
 });
 
@@ -413,6 +437,108 @@ describe('Sim — work pod build flow', () => {
       }],
     });
     expect(sim.state.structures).toHaveLength(0);
+  });
+});
+
+describe('Sim — resume partial work-pod build (AssignWorkerToBuild)', () => {
+  // Place a pod via worker A, let construction start, then redirect A so the
+  // pod is left partially built — the exact stranded state AssignWorkerToBuild
+  // exists to rescue.
+  function strandedPartialPod(sim: Sim): { podId: number; remaining: number } {
+    trainWorker(sim, 0, 8, 8);
+    const a = sim.state.units[0];
+    if (a.kind !== 'worker') throw new Error('expected worker');
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{
+        kind: CommandKind.BuildStructureByWorker,
+        workerId: a.id,
+        structureKind: 'workPod',
+        x: 8,
+        y: 8,
+      }],
+    });
+    // Let the builder reach the site + tick a little build progress.
+    for (let i = 0; i < 60 && sim.state.structures[0].buildTicksRemaining === STRUCTURE_STATS.workPod.buildTicks; i++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+    }
+    const podId = sim.state.structures[0].id;
+    const remaining = sim.state.structures[0].buildTicksRemaining;
+    expect(remaining).toBeGreaterThan(0); // still under construction
+    // Redirect the builder elsewhere — pod is now abandoned mid-build.
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.MoveUnit, unitId: a.id, x: 2, y: 2 }],
+    });
+    expect(a.targetStructureId).toBe(0);
+    expect(sim.state.structures[0].buildTicksRemaining).toBeGreaterThan(0);
+    return { podId, remaining: sim.state.structures[0].buildTicksRemaining };
+  }
+
+  it('a second worker can finish a pod abandoned mid-build', () => {
+    const sim = new Sim(SPEC);
+    const { podId } = strandedPartialPod(sim);
+    // Spawn a fresh worker right by the pod and assign it to finish.
+    trainWorker(sim, 0, 9, 9);
+    const b = sim.state.units.find((u) => u.alive && u.kind === 'worker' && u.targetStructureId === 0 && u.id !== sim.state.units[0].id);
+    if (!b || b.kind !== 'worker') throw new Error('expected a second worker');
+    const startCharge = b.charge;
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.AssignWorkerToBuild, workerId: b.id, structureId: podId }],
+    });
+    expect(b.charge).toBe(startCharge - 1);
+    expect(['movingToBuildSite', 'building']).toContain(b.phase);
+    expect(b.targetStructureId).toBe(podId);
+    // Run until the pod is operational.
+    const pod = sim.state.structures.find((s) => s.id === podId)!;
+    for (let i = 0; i < 300 && pod.buildTicksRemaining > 0; i++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+    }
+    expect(pod.buildTicksRemaining).toBe(0);
+    expect(pod.alive).toBe(true);
+  });
+
+  it('is silently rejected at charge=0', () => {
+    const sim = new Sim(SPEC);
+    const { podId, remaining } = strandedPartialPod(sim);
+    trainWorker(sim, 0, 9, 9);
+    const b = sim.state.units.find((u) => u.alive && u.kind === 'worker' && u.targetStructureId === 0 && u.id !== sim.state.units[0].id);
+    if (!b || b.kind !== 'worker') throw new Error('expected a second worker');
+    b.charge = 0;
+    b.phase = 'idle';
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.AssignWorkerToBuild, workerId: b.id, structureId: podId }],
+    });
+    expect(b.targetStructureId).toBe(0);
+    // Pod untouched (no on-site builder) — still partial near where it was.
+    expect(sim.state.structures.find((s) => s.id === podId)!.buildTicksRemaining).toBeGreaterThanOrEqual(remaining - 1);
+  });
+
+  it('is silently rejected for an already-operational pod', () => {
+    const sim = new Sim(SPEC);
+    const podId = sim.state.nextEntityId++;
+    sim.state.structures.push({
+      id: podId,
+      alive: true,
+      kind: 'workPod',
+      faction: 0,
+      x: fromInt(10),
+      y: fromInt(10),
+      hp: STRUCTURE_STATS.workPod.maxHp,
+      buildTicksRemaining: 0, // operational
+    });
+    trainWorker(sim, 0, 9, 9);
+    const b = sim.state.units[0];
+    if (b.kind !== 'worker') throw new Error('expected worker');
+    const startCharge = b.charge;
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.AssignWorkerToBuild, workerId: b.id, structureId: podId }],
+    });
+    expect(b.targetStructureId).toBe(0);
+    expect(b.charge).toBe(startCharge); // no charge spent on a no-op
   });
 });
 

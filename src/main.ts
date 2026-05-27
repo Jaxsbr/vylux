@@ -823,6 +823,7 @@ async function bootstrap(): Promise<void> {
     const selNode = input?.getSelectedNodeId() ?? null;
     panel?.refresh(match.sim, selection, selStructure, selHq, selNode);
     portrait?.refresh(match.sim, selection, selStructure, selHq, selNode);
+    portrait?.animate(dtSeconds);
     minimap?.update(match.sim, renderer, cameraController.getTarget());
     renderer.applyInputVisuals(selection, selStructure, selHq, selNode);
     renderer.setHover(input?.getHoveredEntity() ?? null);

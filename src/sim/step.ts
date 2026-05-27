@@ -22,9 +22,11 @@
 // Phase C.1 (2026-05-12): workers carry per-unit charge. Each task
 // drains 1 at task-start. Movement is free while charge > 0; a worker
 // at charge === 0 enters charge mode (walkingToCharge → charging) and
-// refuses all player commands until full recharge. Charge spots are
-// (1) the nearest friendly operational work pod, or (2) the friendly
-// HQ if no pod exists. The HQ recharges at 50% the pod rate.
+// refuses all player commands until full recharge. The charge spot is
+// the physically NEAREST of (a) any friendly operational work pod or
+// (b) the friendly HQ — a worker no longer treks across the map to a
+// distant pod when its own HQ is right next door. The HQ recharges at
+// 50% the pod rate, so a pod still wins on ties / equal distance.
 
 import { Rng } from './rng';
 import { CommandKind, type Command, type InputFrame } from './commands';
@@ -135,18 +137,27 @@ export function isInChargeMode(w: Worker): boolean {
   return w.phase === 'walkingToCharge' || w.phase === 'charging';
 }
 
-// Phase C.1: charge-spot picking. Always prefer the nearest friendly
-// operational work pod; fall back to the friendly HQ only if no pod
-// exists. The chosen spot's structure id is recorded on
-// `chargeTargetStructureId` (0 = HQ since HQs aren't entities in the
-// structures array; the faction-on-worker disambiguates which HQ).
+// Phase C.1 (revised): charge-spot picking. Pick the physically NEAREST
+// charge spot — the closest friendly operational work pod OR the friendly
+// HQ, whichever the worker is actually nearer to. The old rule always
+// preferred any pod regardless of distance, which sent a worker across the
+// map to a far pod while its own HQ sat one tile away. The HQ wins only
+// when strictly closer; ties go to the pod (it recharges twice as fast).
+// The chosen spot's structure id is recorded on `chargeTargetStructureId`
+// (0 = HQ since HQs aren't entities in the structures array; the
+// faction-on-worker disambiguates which HQ).
 function pickChargeTarget(state: SimState, w: Worker): { x: Fixed; y: Fixed; structureId: number } {
-  const pod = findNearestFriendlyOperationalWorkPod(state, w.faction, w.x, w.y);
-  if (pod !== null) {
-    return { x: pod.x, y: pod.y, structureId: pod.id };
-  }
   const fs = state.factions[w.faction];
-  return { x: fs.hqX, y: fs.hqY, structureId: 0 };
+  const pod = findNearestFriendlyOperationalWorkPod(state, w.faction, w.x, w.y);
+  if (pod === null) {
+    return { x: fs.hqX, y: fs.hqY, structureId: 0 };
+  }
+  const podDistSq = distSq(w.x, w.y, pod.x, pod.y);
+  const hqDistSq = distSq(w.x, w.y, fs.hqX, fs.hqY);
+  if (hqDistSq < podDistSq) {
+    return { x: fs.hqX, y: fs.hqY, structureId: 0 };
+  }
+  return { x: pod.x, y: pod.y, structureId: pod.id };
 }
 
 // Phase C.1: pick the lowest-index unused charge slot at the chosen
@@ -421,6 +432,42 @@ export function applyCommand(state: SimState, cmd: Command): void {
       w.pathGoalTile = -1;
       return;
     }
+    case CommandKind.AssignWorkerToBuild: {
+      // Phase D-prep: assign a worker to FINISH an existing partial build.
+      // Unlike BuildStructureByWorker this spawns nothing and re-pays no
+      // Energy — the structure already exists (its build cost was paid at
+      // placement); the worker simply adopts it and ticks it down on site.
+      // This is the path that rescues a half-built pod whose original
+      // builder was redirected to another task.
+      const w = findUnit(state, cmd.workerId);
+      if (w === null || !w.alive || w.kind !== 'worker') return;
+      if (isInChargeMode(w)) return;
+      if (w.charge < ENERGY_COST_PER_TASK) return;
+      const s = findStructure(state, cmd.structureId);
+      if (s === null || !s.alive) return;
+      if (s.kind !== 'workPod') return;
+      if (s.faction !== w.faction) return;
+      if (s.buildTicksRemaining <= 0) return; // already operational — nothing to finish
+      // Pay the worker's charge (same per-task drain as any other order).
+      w.charge -= ENERGY_COST_PER_TASK;
+      // Drop any in-progress harvest / move — the worker's new job is to
+      // build. carrying / carriedKind reset to canonical zeros so the hash
+      // slot stays clean (mirrors BuildStructureByWorker).
+      w.carrying = 0;
+      w.carriedKind = 'energy';
+      w.targetNodeId = 0;
+      w.targetNodeSlot = 0;
+      w.moveTarget = null;
+      w.harvestTicksRemaining = 0;
+      w.phase = 'movingToBuildSite';
+      w.targetStructureId = s.id;
+      // Build supersedes any auto-resume memory.
+      w.previousNodeId = 0;
+      // Phase C.6.6: invalidate the cached A* route on retarget.
+      w.path.length = 0;
+      w.pathGoalTile = -1;
+      return;
+    }
     case CommandKind.Resign: {
       // The resigning faction concedes; the other faction wins. No-op
       // if a winner is already set so a late Resign command in the
@@ -452,18 +499,20 @@ export function applyCommand(state: SimState, cmd: Command): void {
       return;
     }
     case CommandKind.ScoutWorker: {
-      // Phase C.6.8: send a worker to reveal fog. Same charge gate as any
-      // other task — a worker in charge mode (or at 0 charge) silently
-      // rejects. Pick the frontier FIRST: if the faction's map is already
-      // fully revealed there's nothing to scout, so don't spend the charge
-      // or disturb the worker's current task.
+      // Phase C.6.8: send a worker to reveal fog. Scouting is exploration /
+      // movement, not an energy-burning task, so it costs NO charge to run —
+      // but it's still gated to a controllable worker: one in charge mode (or
+      // at 0 charge, i.e. one that needs charging) silently rejects. Because
+      // no charge is drained, a worker with as little as 1 charge can scout
+      // and keeps that charge, so it never gets stranded at 0 mid-scout.
+      // Pick the frontier FIRST: if the faction's map is already fully
+      // revealed there's nothing to scout, so don't disturb the worker's task.
       const w = findUnit(state, cmd.workerId);
       if (w === null || !w.alive || w.kind !== 'worker') return;
       if (isInChargeMode(w)) return;
       if (w.charge < ENERGY_COST_PER_TASK) return;
       const target = findNearestUnexploredTile(state, w.faction, w.x, w.y);
       if (target < 0) return; // fully revealed — no-op
-      w.charge -= ENERGY_COST_PER_TASK;
       const c = tileCenter(target, state.gridSize);
       w.moveTarget = { x: c.x, y: c.y };
       w.phase = 'scouting';
@@ -748,6 +797,11 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
   // (energy was drained at task-start, so the worker has nothing more
   // to spend even if it's mid-cycle). End-of-task code paths call
   // maybeEnterChargeMode directly.
+  //
+  // Scouting can't strand a worker at 0 charge: it costs no charge to run
+  // (see the ScoutWorker command) and is gated to ≥1 charge at start, so a
+  // scout always keeps the charge it had and stays controllable (redirectable
+  // by any command, which all require ≥1 charge).
   if (w.charge === 0 && w.phase === 'idle') {
     maybeEnterChargeMode(state, w);
   }
@@ -934,8 +988,12 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
         maybeEnterChargeMode(state, w);
         return;
       }
-      // Tick the structure down. Multi-worker construction would stack
-      // here naturally, but C.1 ships single-worker for simplicity.
+      // Tick the structure down. Multi-worker construction stacks here
+      // naturally: every worker on site (its own builder plus any assigned
+      // via AssignWorkerToBuild) decrements once per tick, so N builders
+      // finish the pod ~N× faster. The `<= 0` guard above means a late
+      // builder this tick sees the pod already done and bails without
+      // driving buildTicksRemaining negative.
       s.buildTicksRemaining -= 1;
       if (s.buildTicksRemaining <= 0) {
         w.phase = 'idle';
