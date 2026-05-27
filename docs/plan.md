@@ -1,6 +1,6 @@
 # Vylux — Plan
 
-> **Last updated:** 2026-05-27 — doc catch-up: C.6.7–C.6.10 (fog foundation, scout order, user Scout button, AI scouting) marked landed (they shipped in #21 but the status wasn't updated), and C.6.11/C.6.12 marked **not required** — their behaviour is already present (expand-harvest falls out of the C.6.10 wiring; the AI no longer stalls, so cluster-biased pod placement isn't needed). Earlier: 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change. Map work inserted as **C.6.5** ahead of the economy depth by owner direction (2026-05-24): double the grid to 64², ~16 seeded random nodes with low/med/high values + brightness, fully-random (not mirrored), placement barred from HQ / HQ-adjacent / edge tiles and guaranteed ≥1 node in each HQ's vision; the tutorial keeps its hand-placed layout. Two further sub-phases inserted 2026-05-24 by owner direction: **C.6.6** (sim-side obstacle avoidance so workers stop clipping through the HQ / pods / nodes — accepted as a sim change, goldens regen + version bump) ahead of the economy; and **C.7.5** (a dedicated **Resource Depot** building — a closer offload point that fixes the long-haul collection stall, plus the resource-collection research tree — sequenced after C.7 so it collects Matter too, not just energy).
+> **Last updated:** 2026-05-27 — **remaining Phase C economy/research work re-clustered into standalone launcher phases.** The old C.7 (Matter + cost split), C.7.5 (Resource Depot), and C.8 (worker/HQ research) were small, individually-unexciting increments; they are now bundled into **Phase D — The Living Economy** (Matter + cost split · a richer *clustered* resource field · the Resource Depot · economy + worker research — shipped together as one economic leap) and **Phase E — First Blood** (HQ defence · the first combat unit · its research evolution — folding the old standalone Phase D). The old **Phase F / Loop-Closure fun-gate is dropped** — this is a long-term project, so there is no terminal "is it fun enough" gate. **Phase C is complete** (the experience work all landed). Earlier (2026-05-27): doc catch-up — C.6.7–C.6.10 marked landed (shipped in #21, status not updated), C.6.11/C.6.12 marked **not required** (behaviour already present). Earlier: 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change. Map work inserted as **C.6.5** ahead of the economy depth by owner direction (2026-05-24): double the grid to 64², ~16 seeded random nodes with low/med/high values + brightness, fully-random (not mirrored), placement barred from HQ / HQ-adjacent / edge tiles and guaranteed ≥1 node in each HQ's vision; the tutorial keeps its hand-placed layout. Two further sub-phases inserted 2026-05-24 by owner direction: **C.6.6** (sim-side obstacle avoidance so workers stop clipping through the HQ / pods / nodes — accepted as a sim change, goldens regen + version bump) ahead of the economy; and **C.7.5** (a dedicated **Resource Depot** building — a closer offload point that fixes the long-haul collection stall, plus the resource-collection research tree — sequenced after C.7 so it collects Matter too, not just energy).
 > **Visual north star:** [`concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`](concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png) — dense glowing Tron city, cyan/red grid lines pulsing through the world, lit vertical structures, purposeful silhouettes.
 > **Mindset:** the game must be fun. A good game loop matters more than feature count. Strip down to the minimum that's already fun, polish until it sings, *then* layer more on.
 
@@ -73,12 +73,16 @@ The opening 5 minutes must be fun on their own, before any combat unit exists.
 Phase C runs as a series of focused sub-phases — each lands one slice end-to-end
 (sim + render + audio + tests + docs) before the next starts.
 
-> **Status: not met (2026-05-23 review).** An uninstructed playthrough — HQ →
+> **Status: complete (2026-05-27)** — every experience sub-phase below is landed
+> or not-required, and the economy/research depth has graduated to its own
+> launcher (**Phase D**). History — the 2026-05-23 review that set the
+> re-sequencing below: an uninstructed playthrough — HQ →
 > train worker → move → harvest → charge → build pod → research auto-resume —
 > confirmed the *mechanics* all work, but the *experience* is flat: the HUD reads
 > cheap, actions give no reward, and nothing tells the player what to do. The
-> sub-phases below are re-sequenced to close that gap first; the original
-> economy/research work is deferred to C.7–C.8. Phase B's "vibe pass" landed
+> sub-phases below were re-sequenced to close that gap first; the original
+> economy/research work has since **graduated to a standalone launcher (Phase D)**.
+> Phase B's "vibe pass" landed
 > earlier (sky / layered grid / fog); the remaining at-rest liveliness is folded
 > into C.4.
 
@@ -142,13 +146,15 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | C.6.10 | **AI scouting — idle-trigger dispatch** | new scope | ✅ landed 2026-05-26 (#21) |
 | C.6.11 | **AI expand-harvest — route to distant discovered nodes** | new scope | ✅ not required — behaviour already present (see below) |
 | C.6.12 | **AI grow-via-pods — cluster-biased placement** | new scope | ✅ not required — anti-stall goal already met (see below) |
-| C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
-| C.7.5 | **Resource Depot — collection building + research** | new scope | spec'd 2026-05-24 |
-| C.8 | Research depth — worker + HQ trees      | (was C.2)     | deferred             |
 
-The original "C.2+" economy/research work (Matter, upgrade trees) is intentionally
-pushed behind the experience work — it is **C.7–C.8** now. Don't pull it forward:
-a richer economy layered on a flat-feeling loop doesn't move the fun needle.
+**Phase C is complete.** Every experience sub-phase above is landed or
+not-required. The economy/research depth that used to sit here as C.7 (Matter +
+cost split), C.7.5 (Resource Depot), and C.8 (worker/HQ research) was a set of
+small, individually-unexciting increments — so it has been **re-clustered into a
+standalone launcher that lands as one economic leap**: see **Phase D — The Living
+Economy**, below. Combat (the old standalone Phase D) is now **Phase E — First
+Blood**. The "don't pull the economy forward ahead of the experience work" rule
+did its job; the experience work is done.
 
 #### Phase C.1 — Work pods + worker charge ✅ (landed 2026-05-12)
 
@@ -234,7 +240,7 @@ Target layout:
 ```
 
 - **Resource bar (top):** fixed-width fields, never resize-to-fit — Energy now,
-  **Matter reserved + greyed** (goes live in C.7), Supply n/m. Monospace, aligned.
+  **Matter reserved + greyed** (goes live in D.1), Supply n/m. Monospace, aligned.
 - **Portrait panel (bottom-left):** keep the existing WebGL mesh portrait
   (`PortraitRenderer`) + name, but render status as **icon + bars**, not flat
   text — HP bar, charge bar, and a current-action icon (idle / move / harvest /
@@ -848,20 +854,33 @@ depletes. The one piece **not** built is *cluster-biased* placement — pods sti
 spread around the HQ via the deterministic offset table rather than reaching
 toward discovered node clusters. Per owner call (2026-05-27) that refinement is
 **not required**: the economy no longer stalls without it. The cluster-targeting
-helper it would have shared with C.7.5's depot AI can be built there if/when C.7.5
-needs it.
+helper it would have shared with the depot AI can be built in **Phase D** (D.3)
+if/when its depot placement needs it.
 
 **Determinism (all sub-phases).** AI logic stays the pure `tickAi(state,
 faction) → Command[]`; scout/frontier target picks read deterministic sim state
 only, **never `Math.random`**. Each sub-phase that moves the state shape bumps
 `REPLAY_VERSION` and regenerates the affected golden fixtures.
 
-Out of scope (unchanged): autonomous AI research; combat AI (Phase D);
-difficulty tiers; depot placement (C.7.5, which reuses C.6.12's cluster helper).
+Out of scope (unchanged): autonomous AI research; combat AI (Phase E);
+difficulty tiers; depot placement (Phase D · D.3, which reuses C.6.12's cluster
+helper).
 
-#### Phase C.7 — Economy depth: Matter + cost split  (was C.2)
+### Phase D — The Living Economy  *(launcher · was C.7 + C.7.5 + C.8)*
 
-The original C.2 economy work, now after the experience pass.
+> **The leap.** The economy goes from "haul one resource to your HQ" to **running
+> a real economy**: mine a second resource, build with both, harvest a *clustered*
+> field where the rich clusters are worth contesting, plant depots near far
+> clusters so collection scales out, and research upgrades that visibly speed the
+> whole machine. The four sub-phases below ship **together** as one noticeable
+> leap — not as four standalone drops. Determinism discipline is unchanged
+> throughout: every generation + research draw comes off the deterministic sim RNG
+> (never `Math.random`), and each sub-phase that moves hashed state bumps
+> `REPLAY_VERSION` and regenerates the affected golden fixtures.
+
+#### D.1 — Matter + cost split
+
+The second resource and the cost system that uses it.
 - Introduce **Matter** as the second resource (construction material). The cost
   system handles `{ energy?: number; matter?: number }` cleanly — some costs
   energy-only, some matter-only, some both. The C.2 resource bar's reserved
@@ -870,24 +889,48 @@ The original C.2 economy work, now after the experience pass.
   also an ongoing upkeep?
 - Tests + manual updated; regenerate the golden fixtures (sim cost shapes change).
 
-#### Phase C.7.5 — Resource Depot: dedicated collection building + research · [new — owner-inserted 2026-05-24]
+#### D.2 — Resource clustering (a richer, more desirable field)
 
-> **Inserted by owner direction (2026-05-24), sequenced after C.7.** Origin: once
-> the energy nodes near the HQ exhaust, workers haul all the way back to the HQ to
-> offload (deposit is hardcoded to the HQ — `step.ts:630–636`), the round trip
-> balloons, and the collection rate craters — the opposite of the "economy
-> accelerates with more workers" feel we want. C.6.5's bigger 64² map made this
-> worse. The fix is a **dedicated resource-collection building** you plant near a
-> fresh node cluster so the offload trip stays short. Owner chose a distinct
-> building over reusing the work pod, and chose to land it *with the resource
-> expansion* (C.7) rather than as an early energy-only patch: since Matter (C.7)
-> adds a second resource, this building is the home for **multi-resource collection
-> and the resource-collection research tree**.
+> **Why.** C.6.5 deliberately *spaced nodes out* (≥3-tile spacing, no clumping) so
+> the early field read evenly. The economy is more interesting if the field
+> instead forms **clusters of varied size and value**, so a big, rich cluster is a
+> genuinely more desirable prize than a lean one — something worth scouting for,
+> contesting, and planting a depot beside. This is an **algorithmic change to the
+> seeded map generator**, not new entities.
 
-> **Lever.** This defers the energy-haul stall fix until after C.7. If the stall
-> hurts the Phase C fun gate before then, pull a minimal energy-only version of the
-> deposit-retarget below forward as a stopgap (same `pickDepositTarget` seam) — but
-> the full building lands here.
+Evolve the seeded generator (`src/sim/map-gen.ts` `generateEnergyField`) from
+evenly-spaced singletons to **clusters**:
+- A cluster has a **size** (node count) and an aggregate **value** profile; the
+  draw makes large / high-value clusters **rarer and more desirable** (worth
+  contesting), and small / lean clusters common and nearer to home. Size and value
+  combine so "how good is this cluster" is a real, readable spectrum — a big
+  cluster of high-tier nodes ≫ a lone low-tier node.
+- Tight spacing *within* a cluster, clear gaps *between* clusters (replacing the
+  old uniform ≥3-tile spacing). Tunable knobs: cluster count, size distribution,
+  value weighting, intra- vs inter-cluster spacing.
+- Once Matter (D.1) exists, a cluster can **mix energy + matter** nodes, so *where*
+  you expand decides *which* resource you're chasing.
+- **Determinism + constraints unchanged from C.6.5:** seeded sim RNG only, never
+  `Math.random`; still no node on an HQ / HQ-adjacent / map-edge tile; still
+  **≥1 reachable live node within each HQ's vision** (no bootstrap deadlock); the
+  per-launch seed stays baked into the spec → replay.
+- **Tutorial stays exempt** — `TUTORIAL_SPEC` keeps its hand-placed layout (the
+  coach + harvest steps depend on a known field).
+- Tests: the generator stays a pure seeded function — same seed → same clusters;
+  all constraints hold; the size/value distribution lands in range; the AI-vs-AI
+  smoke still proves no harvest deadlock on the clustered field.
+
+#### D.3 — Resource Depot: dedicated collection building
+
+> **Why.** Once the energy near the HQ exhausts, workers haul all the way back to
+> the HQ to offload (deposit is hardcoded to the HQ — `step.ts:630–636`), the round
+> trip balloons, and the collection rate craters — the opposite of the "economy
+> accelerates with more workers" feel we want; C.6.5's 64² map and D.2's distant
+> rich clusters make it sharper still. The fix is a **dedicated collection
+> building** you plant beside a fresh cluster so the offload trip stays short — a
+> distinct building from the work pod (pod = supply cap + worker charge; depot =
+> collection + resource research), and the natural home for **multi-resource
+> collection** now that Matter (D.1) exists.
 
 **The depot (new structure).** A worker-built structure dedicated to resource
 logistics, distinct from the work pod (pod = supply cap + worker charge; depot =
@@ -902,15 +945,15 @@ existing `pickChargeTarget()` (`step.ts:138–145`): a returning worker offloads
 **nearest friendly operational depot, falling back to the HQ** — exactly the pattern
 charge already uses. Called at the head of the `returning` phase in place of the
 hardcoded HQ walk. Energy is a faction-global pool, so depositing at a depot still
-credits `faction.energy` (no per-structure storage) — same for Matter once C.7 lands.
+credits `faction.energy` (no per-structure storage) — same for Matter (D.1).
 
 **Resource-collection research (the "relevant research").** The depot surfaces a
 research slot (same infra as the pod's auto-resume — `ResearchKind` + action-bar row +
 completion switch). Candidate items (pick a first cut in scope): deposit throughput,
 deposit/collection radius, passive trickle-collection, or a yield bonus on nearby
 nodes. Each must produce a **visible** change on the depot (reuse the C.4 beam/ring
-idiom) — the C.8 rule applies here too. This is the *resource* research tree; C.8's
-worker/HQ trees layer beside it.
+idiom) — the D.4 "every research result is visible" rule applies here too. This is
+the *resource* research tree; D.4's worker tree layers beside it.
 
 **AI.** The AI plants pods around its own HQ via a deterministic offset table — it
 won't *expand toward nodes* on its own, so a depot near remote clusters is a
@@ -939,7 +982,12 @@ instead of hauling to the HQ, the collection rate holds as the economy scales ou
 and ≥1 resource-collection research item lands with a visible change; verify gate
 green incl. regenerated goldens.
 
-#### Phase C.8 — Research depth: worker + HQ trees  (was C.2)
+#### D.4 — Economy research: worker + economy upgrades
+
+The research that makes the whole economy faster and smarter — the depot's
+resource-collection tree (D.3) plus the worker tree here, landing as the "upgrades
+that visibly accelerate the machine" payoff of Phase D. (The combat-side HQ
+research — the auto-defence beam — moves to **Phase E · E.1**.)
 
 - **Worker-upgrade research, hosted at any operational work pod.** The first
   concrete worker-tree items beside the C.1 auto-resume validator. Each is a
@@ -960,6 +1008,12 @@ green incl. regenerated goldens.
     That's the intent — the high price is what balances it.
   - The **energy-trail** mechanic also returns here as a further upgrade-tree
     option.
+  - **Smart Harvesting** — researched workers auto-route to the highest-*value*
+    discovered node (size × tier, off D.2's clusters) instead of merely the
+    nearest, so the upgrade makes harvesting *smarter*, not just faster (the
+    "workers more informed while harvesting" idea). Faction-level flag;
+    deterministic node pick; visible as workers re-targeting toward the rich
+    clusters.
 - **Determinism + HUD for the worker tree.** New `ResearchKind` values
   (`harvestSpeed`, `moveSpeed`) + matching `*Researched` flags on `FactionState`;
   the harvest-tick and move-speed reads consult the flags (a multiplier applied
@@ -970,7 +1024,8 @@ green incl. regenerated goldens.
   three items it must become a small fixed grid of research tiles (auto-resume +
   the two speed upgrades) with per-item cost / disabled / in-progress / done
   states (the C.2 command-card model).
-- HQ research track (vision aura, storage cap, auto-defence beam, …).
+- **Economy-side HQ research** (vision aura, storage cap, …). The combat-side HQ
+  research — the **auto-defence beam** — moves to **Phase E · E.1**.
 - Every research result must change something **visible** on the HQ or worker —
   research the player can't see doesn't reinforce the loop. Move Speed is
   inherently visible (workers visibly quicker); Harvest Speed reads via a faster /
@@ -981,30 +1036,48 @@ green incl. regenerated goldens.
   researched flag actually applies its multiplier (deterministically); e2e that
   every research tile renders with the correct state.
 
-**Phase C exit (the fun gate):** ≥3 internal sessions per faction-pick where the
-player spends 5 minutes building economy + researching, and reports the time as
-enjoyable. Now gated behind the experience work (C.2–C.6), not the economy work
-alone.
+**Phase D exit:** a player runs two resources (energy + matter), harvests a
+clustered field where the rich clusters are worth expanding to, plants depots so
+collection holds as the economy scales out, and buys worker / economy research
+that visibly accelerates the machine; replays reproduce and the verify gate
+(incl. regenerated goldens) is green.
 
-### Phase D — First Combat Unit
+### Phase E — First Blood  *(launcher · folds the old Phase D)*
 
-Introduce *one* combat unit, designed against the new tech tree — not ported from the old prototype.
+> **The leap.** The game becomes a **contest** — defend your base and field a unit
+> to attack the enemy HQ, not just out-harvest the AI. The three sub-phases ship
+> together as the "there is now a war" moment. Combat units are **designed against
+> Phase D's tech tree**, not ported from the old prototype.
 
-- Spec from scratch: role, motion personality, visual evolution path through research, whether it earns a supply system back, where it's trained.
-- Land as a single research target, not as a default availability.
-- Re-evaluate whether any of the previously-stripped units (Defender / Raider / Vanguard) deserve to come back. They probably don't return as-is.
+#### E.1 — HQ defence
 
-**Exit:** a PvAI match plays through to HQ destruction with the new combat unit on the field.
+The "you can defend" beat, and the home for the combat-side HQ research split out
+of the old C.8 track.
+- **Auto-defence beam** research at the HQ — a visible, automatic defence so a
+  lone scout or first raider can't walk into an undefended base. Faction-level
+  research, same infra as the economy trees, with a visible + audible cue (the
+  C.3 / C.4 idiom).
+- A minimal defensive structure too, if the beam alone isn't enough — decide in
+  scope.
 
-### Phase E — Loop Closure (the fun gate)
+#### E.2 — First combat unit
 
-The original Phase 3.14 question, asked properly.
+Introduce *one* combat unit, designed against Phase D's tech tree — not ported
+from the old prototype.
+- Spec from scratch: role, motion personality, whether it earns a supply system
+  back, where it's trained.
+- Land as a single **research target**, not as default availability.
+- Re-evaluate whether any previously-stripped unit (Defender / Raider / Vanguard)
+  deserves to come back. They probably don't return as-is.
 
-- ≥10 internal matches across both faction-picks.
-- The "do I want to start another match?" answer must land as yes.
-- If no: don't add more — go back and fix what the playtest surfaced.
+#### E.3 — Combat evolution
 
-**Exit:** the loop is fun. From here, additional phases (more units, scenarios-as-data, meta-progression) get planned individually.
+The unit's **visual + behavioural upgrade path** through research — each result
+changes something visible (the Phase D "visible research" rule carries over). The
+first concrete combat research tree, beside the economy trees from Phase D.
+
+**Phase E exit:** a PvAI match plays through to HQ destruction with the new combat
+unit on the field, after the player has defended at least one push.
 
 ---
 
