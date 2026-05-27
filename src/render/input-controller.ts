@@ -348,7 +348,23 @@ export class InputController {
     // selection — confusing because the player's intent was clearly
     // "harvest this node." Shift+click still falls through to the
     // unit-toggle path so additive selection works as before.
+    //
+    // The same precedence rule now covers a friendly half-built work pod:
+    // left-click it with workers selected → finish the build. This keeps
+    // non-move worker orders on LEFT-click (like harvest-this-node), with
+    // right-click reserved for move orders — matching the existing model
+    // rather than introducing a right-click-only exception. Structures are
+    // checked before nodes (static-first pick order); the node keep-out
+    // rule means a pod + node never share a click anyway.
     if (!e.shiftKey && this.selectedUnitIds.size > 0) {
+      const podHitFromDown = this.pickOwnedStructure(e);
+      if (podHitFromDown !== null) {
+        const s = findStructure(this.opts.sim.state, podHitFromDown);
+        if (s !== null && s.kind === 'workPod' && s.buildTicksRemaining > 0) {
+          this.queueAssignWorkersToBuild(s.id);
+          return; // consumed — don't fall through to selecting the pod
+        }
+      }
       const nodeHitFromDown = this.pickLiveNode(e);
       if (nodeHitFromDown !== null) {
         const sentAny = this.queueAssignWorkersToNode(nodeHitFromDown);
@@ -487,8 +503,25 @@ export class InputController {
       const top = Math.min(drag.startClientY, e.clientY);
       const bottom = Math.max(drag.startClientY, e.clientY);
       const inRect = this.findOwnedUnitsInScreenRect(left, top, right, bottom);
-      if (!drag.additive) this.selectedUnitIds.clear();
+      // A drag-rect is a UNIT-selection gesture — it never picks buildings or
+      // nodes (findOwnedUnitsInScreenRect only collects units). A non-additive
+      // sweep is a full replace, so it also drops any focused building/node.
+      // A shift-additive sweep keeps the prior unit selection, but the moment
+      // it grabs ≥1 worker it must still drop a building/node that was focused
+      // from an earlier click — otherwise the HUD stays pinned to the HQ/pod
+      // while the workers silently take move/harvest orders.
+      if (!drag.additive) {
+        this.selectedUnitIds.clear();
+        this.selectedStructureId = null;
+        this.selectedHqFaction = null;
+        this.selectedNodeId = null;
+      }
       for (const id of inRect) this.selectedUnitIds.add(id);
+      if (drag.additive && inRect.length > 0) {
+        this.selectedStructureId = null;
+        this.selectedHqFaction = null;
+        this.selectedNodeId = null;
+      }
       // Phase C.3: only a non-empty drag-rect counts as a selection cue;
       // an empty sweep that clears the selection stays silent.
       if (inRect.length > 0) this.opts.feedback?.onSelect?.();
@@ -526,11 +559,13 @@ export class InputController {
     }
     if (this.selectedUnitIds.size === 0) return;
 
-    // Phase A: structures retired; right-click is move-order only.
+    const state = this.opts.sim.state;
+
+    // Phase A: structures retired; right-click is move-order only (finishing
+    // a half-built pod is a LEFT-click order — see handlePointerDown).
     // Phase C.1: workers at 0 charge or in charge mode reject the move
     // — fire the lightning cue on each rejected worker so the player
     // sees why the command didn't take.
-    const state = this.opts.sim.state;
     const tile = this.pickGroundTile(e);
     if (tile === null) return;
     let queued = false;
@@ -595,6 +630,36 @@ export class InputController {
       });
       queued = true;
     }
+    return queued;
+  }
+
+  // Phase D-prep: assign every selected friendly worker to FINISH an existing
+  // partially-built work pod (left-click order — see handlePointerDown). The
+  // build cost was already paid at placement, so this only costs each worker
+  // 1 charge; charge-mode / 0-charge workers flash the lightning cue + skip.
+  // Returns whether any command was queued.
+  private queueAssignWorkersToBuild(structureId: number): boolean {
+    const state = this.opts.sim.state;
+    const s = findStructure(state, structureId);
+    if (s === null || s.kind !== 'workPod' || s.buildTicksRemaining <= 0) return false;
+    let queued = false;
+    for (const id of this.selectedUnitIds) {
+      const u = findUnit(state, id);
+      if (!u) continue;
+      if (u.faction !== this.opts.playerFaction) continue;
+      if (u.kind !== 'worker') continue;
+      if (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK) {
+        this.opts.feedback?.onEnergyBlocked?.(u.id);
+        continue;
+      }
+      this.queue.push({
+        kind: CommandKind.AssignWorkerToBuild,
+        workerId: u.id,
+        structureId: s.id,
+      });
+      queued = true;
+    }
+    if (queued) this.opts.feedback?.onPlacement?.(Math.round(toFloat(s.x)), Math.round(toFloat(s.y)));
     return queued;
   }
 

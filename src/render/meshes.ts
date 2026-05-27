@@ -39,7 +39,13 @@ function factionToId(f: Faction): FactionId {
 // current Phase 3 sim-renderer (no external tickPlacementPulse caller),
 // so scale stays at whatever we set here.
 const UNIT_SCALE = 1.8;
-const HQ_SCALE = 2.0;
+// HQ uniform scale. The legacy base tier is 0.9 world-units wide (see
+// HQ_CONSTANTS.baseW in legacy/hq.ts); scaling it to 3 world-units — and the
+// grid's TILE_SIZE is 1 — makes the HQ occupy a centred 3×3-tile footprint on
+// the grid. Uniform on all axes so the tiered silhouette keeps its aspect
+// ratio. Exported so the selection portrait can keep the HQ framed the same
+// regardless of this value (its frustum tracks HQ_SCALE).
+export const HQ_SCALE = 3 / 0.9; // 0.9-wide base → 3-tile span (3×3 footprint)
 const PRODUCTION_SCALE = 1.9;
 const SPIRE_SCALE = 1.4;
 const PYLON_SCALE = 1.4;

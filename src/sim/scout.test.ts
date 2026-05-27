@@ -32,7 +32,7 @@ function exploredCount(sim: Sim, faction: 0 | 1): number {
 }
 
 describe('Phase C.6.8 — scout order', () => {
-  it('enters the scouting phase, sets a frontier target, and drains one charge', () => {
+  it('enters the scouting phase + sets a frontier target without spending charge', () => {
     const sim = new Sim(SPEC);
     const w = spawnUnit(sim.state, 'worker', 0, fromInt(2), fromInt(2));
     expect(w.charge).toBe(WORKER_DEFAULT_MAX_CHARGE);
@@ -42,7 +42,8 @@ describe('Phase C.6.8 — scout order', () => {
     const after = findWorker(sim.state, w.id)!;
     expect(after.phase).toBe('scouting');
     expect(after.moveTarget).not.toBeNull();
-    expect(after.charge).toBe(WORKER_DEFAULT_MAX_CHARGE - 1);
+    // Scouting is free — the worker keeps every point of charge.
+    expect(after.charge).toBe(WORKER_DEFAULT_MAX_CHARGE);
   });
 
   it('targets an UNEXPLORED tile (no peeking under the fog)', () => {
@@ -89,5 +90,34 @@ describe('Phase C.6.8 — scout order', () => {
     const after = findWorker(sim.state, w.id)!;
     expect(after.phase).toBe('idle');
     expect(after.charge).toBe(WORKER_DEFAULT_MAX_CHARGE);
+  });
+
+  it('is valid with a single charge and stays controllable (free, never stranded)', () => {
+    // Scouting costs no charge, so a 1-charge worker scouts, keeps its charge,
+    // and remains redirectable — it can never get stuck at 0 charge mid-scout
+    // (the original bug). It still requires ≥1 charge to start.
+    const sim = new Sim(SPEC);
+    const w = spawnUnit(sim.state, 'worker', 0, fromInt(2), fromInt(2));
+    w.charge = 1;
+    sim.step({ tick: 0, commands: [{ kind: CommandKind.ScoutWorker, workerId: w.id }] });
+    expect(w.phase).toBe('scouting');
+    expect(w.charge).toBe(1); // unspent
+
+    // It scouts a while, still at 1 charge.
+    for (let t = 1; t < 50; t++) sim.step({ tick: t, commands: [] });
+    expect(w.charge).toBe(1);
+
+    // And the player can redirect it (charge ≥ 1, not in charge mode).
+    sim.step({ tick: sim.state.tick, commands: [{ kind: CommandKind.MoveUnit, unitId: w.id, x: 6, y: 6 }] });
+    expect(w.phase).not.toBe('scouting');
+    expect(w.moveTarget).not.toBeNull();
+  });
+
+  it('a worker that needs a charge (0 charge / charge mode) cannot be sent scouting', () => {
+    const sim = new Sim(SPEC);
+    const w = spawnUnit(sim.state, 'worker', 0, fromInt(2), fromInt(2));
+    w.charge = 0;
+    applyCommand(sim.state, { kind: CommandKind.ScoutWorker, workerId: w.id });
+    expect(w.phase).not.toBe('scouting');
   });
 });
