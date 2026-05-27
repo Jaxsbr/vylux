@@ -1,6 +1,6 @@
 # Vylux — Plan
 
-> **Last updated:** 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change. Map work inserted as **C.6.5** ahead of the economy depth by owner direction (2026-05-24): double the grid to 64², ~16 seeded random nodes with low/med/high values + brightness, fully-random (not mirrored), placement barred from HQ / HQ-adjacent / edge tiles and guaranteed ≥1 node in each HQ's vision; the tutorial keeps its hand-placed layout. Two further sub-phases inserted 2026-05-24 by owner direction: **C.6.6** (sim-side obstacle avoidance so workers stop clipping through the HQ / pods / nodes — accepted as a sim change, goldens regen + version bump) ahead of the economy; and **C.7.5** (a dedicated **Resource Depot** building — a closer offload point that fixes the long-haul collection stall, plus the resource-collection research tree — sequenced after C.7 so it collects Matter too, not just energy).
+> **Last updated:** 2026-05-27 — doc catch-up: C.6.7–C.6.10 (fog foundation, scout order, user Scout button, AI scouting) marked landed (they shipped in #21 but the status wasn't updated), and C.6.11/C.6.12 marked **not required** — their behaviour is already present (expand-harvest falls out of the C.6.10 wiring; the AI no longer stalls, so cluster-biased pod placement isn't needed). Earlier: 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change. Map work inserted as **C.6.5** ahead of the economy depth by owner direction (2026-05-24): double the grid to 64², ~16 seeded random nodes with low/med/high values + brightness, fully-random (not mirrored), placement barred from HQ / HQ-adjacent / edge tiles and guaranteed ≥1 node in each HQ's vision; the tutorial keeps its hand-placed layout. Two further sub-phases inserted 2026-05-24 by owner direction: **C.6.6** (sim-side obstacle avoidance so workers stop clipping through the HQ / pods / nodes — accepted as a sim change, goldens regen + version bump) ahead of the economy; and **C.7.5** (a dedicated **Resource Depot** building — a closer offload point that fixes the long-haul collection stall, plus the resource-collection research tree — sequenced after C.7 so it collects Matter too, not just energy).
 > **Visual north star:** [`concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`](concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png) — dense glowing Tron city, cyan/red grid lines pulsing through the world, lit vertical structures, purposeful silhouettes.
 > **Mindset:** the game must be fun. A good game loop matters more than feature count. Strip down to the minimum that's already fun, polish until it sings, *then* layer more on.
 
@@ -136,12 +136,12 @@ Grouped by theme. Each later sub-phase cites the cluster(s) it closes.
 | C.6 | Onboarding & tutorial sandbox           | ONBOARD       | ✅ landed 2026-05-24 (#17) |
 | C.6.5 | **Map: bigger arena + randomised energy field** | new scope | ✅ landed 2026-05-24 |
 | C.6.6 | **Sim-side obstacle avoidance — grid A\* (worker pathing)** | new scope | ✅ landed 2026-05-26 (pure A\*, waypoint-only; hybrid attempt reverted first) |
-| C.6.7 | **Fog foundation — per-faction exploration in the sim** | new scope | spec'd 2026-05-26 |
-| C.6.8 | **Scout order — worker primitive (frontier target + reveal)** | new scope | spec'd 2026-05-26 |
-| C.6.9 | **User Scout button — HUD command card** | new scope | spec'd 2026-05-26 |
-| C.6.10 | **AI scouting — idle-trigger dispatch** | new scope | spec'd 2026-05-26 |
-| C.6.11 | **AI expand-harvest — route to distant discovered nodes** | new scope | deferred |
-| C.6.12 | **AI grow-via-pods — cluster-biased placement** | new scope | deferred |
+| C.6.7 | **Fog foundation — per-faction exploration in the sim** | new scope | ✅ landed 2026-05-26 (#21) |
+| C.6.8 | **Scout order — worker primitive (frontier target + reveal)** | new scope | ✅ landed 2026-05-26 (#21) |
+| C.6.9 | **User Scout button — HUD command card** | new scope | ✅ landed 2026-05-26 (#21) |
+| C.6.10 | **AI scouting — idle-trigger dispatch** | new scope | ✅ landed 2026-05-26 (#21) |
+| C.6.11 | **AI expand-harvest — route to distant discovered nodes** | new scope | ✅ not required — behaviour already present (see below) |
+| C.6.12 | **AI grow-via-pods — cluster-biased placement** | new scope | ✅ not required — anti-stall goal already met (see below) |
 | C.7 | Economy depth — Matter + cost split     | (was C.2)     | deferred             |
 | C.7.5 | **Resource Depot — collection building + research** | new scope | spec'd 2026-05-24 |
 | C.8 | Research depth — worker + HQ trees      | (was C.2)     | deferred             |
@@ -783,6 +783,15 @@ instead of clipping through them; verify gate green incl. regenerated goldens.
 > exhausts the nodes near its HQ it has no discovered live node left and stalls
 > (stops harvesting, never expands). Scouting is the missing primitive.
 
+> **Status (2026-05-27): C.6.7–C.6.10 all landed in #21**; the doc-status update
+> was overlooked at the time. Fog foundation, the `ScoutWorker` primitive, the
+> user Scout button, and AI idle-trigger scouting are all in the sim/render
+> (`src/sim/state.ts`, `commands.ts`, `step.ts`, `ai.ts`; `src/render/
+> action-bar.ts`, `input-controller.ts`), covered by `scout.test.ts` +
+> `ai-scout.test.ts`. `REPLAY_VERSION` is now **29** (26→29 across the three
+> sim-shape bumps; C.6.9 was render-only). **C.6.11 and C.6.12 are no longer
+> required** — see their notes below.
+
 **C.6.7 — Fog foundation (refactor; no new behaviour).** Add a per-faction
 explored tile set to `SimState` (both factions), seeded by the initial HQ vision
 sweep and advanced each tick by a new `advanceExploration` pass that mirrors the
@@ -821,14 +830,26 @@ a long 64² match. Regenerate `ai-vs-ai` golden. Update `docs/manual.md` → AI
 behaviour. **Exit:** on a normal 64² match the AI scouts out from its home patch
 and keeps harvesting after the nearby nodes deplete (no stall).
 
-**C.6.11 — AI expand-harvest** *(deferred behaviour 2 from the old bundle)*.
-When the AI has no discovered live node within easy reach, route workers to the
-nearest discovered live node *anywhere*; if none is discovered, scout (C.6.10)
-rather than idling. No economic deadlock.
+**C.6.11 — AI expand-harvest** ✅ *not required — behaviour already present.*
+The intended behaviour is already live: `autoAssignIdleWorkers` (`ai.ts`) points
+every idle worker at `nearestLiveNode`, which only returns **discovered** live
+nodes, so the AI already routes to the nearest discovered live node *anywhere* on
+the map (not just "within easy reach"); when none is discovered, `dispatchScouts`
+(C.6.10) sends scouts rather than idling. That is exactly the C.6.11 spec — no
+economic deadlock — so no separate work is needed. It landed as a consequence of
+C.6.10's wiring rather than as a dedicated phase.
 
-**C.6.12 — AI grow-via-pods** *(deferred behaviour 3)*. Harden the cap→pod build
-and bias pod placement toward discovered node clusters rather than hugging the
-HQ. Shares a cluster-targeting helper with the future C.7.5 depot AI.
+**C.6.12 — AI grow-via-pods** ✅ *not required — anti-stall goal already met.*
+The cap→pod build is already hardened (`ai.ts` *scans* `AI_POD_OFFSETS` for the
+first buildable, node-clear tile instead of indexing blindly, so it can't spin on
+a forbidden tile), and the stall this phase targeted no longer happens: scouting
+(C.6.10) + expand-harvest (C.6.11) keep the AI harvesting after its home patch
+depletes. The one piece **not** built is *cluster-biased* placement — pods still
+spread around the HQ via the deterministic offset table rather than reaching
+toward discovered node clusters. Per owner call (2026-05-27) that refinement is
+**not required**: the economy no longer stalls without it. The cluster-targeting
+helper it would have shared with C.7.5's depot AI can be built there if/when C.7.5
+needs it.
 
 **Determinism (all sub-phases).** AI logic stays the pure `tickAi(state,
 faction) → Command[]`; scout/frontier target picks read deterministic sim state
