@@ -988,8 +988,12 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
         maybeEnterChargeMode(state, w);
         return;
       }
-      // Tick the structure down. Multi-worker construction would stack
-      // here naturally, but C.1 ships single-worker for simplicity.
+      // Tick the structure down. Multi-worker construction stacks here
+      // naturally: every worker on site (its own builder plus any assigned
+      // via AssignWorkerToBuild) decrements once per tick, so N builders
+      // finish the pod ~N× faster. The `<= 0` guard above means a late
+      // builder this tick sees the pod already done and bails without
+      // driving buildTicksRemaining negative.
       s.buildTicksRemaining -= 1;
       if (s.buildTicksRemaining <= 0) {
         w.phase = 'idle';

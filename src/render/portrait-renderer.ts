@@ -151,6 +151,10 @@ export class PortraitRenderer {
     }
     this.root.add(cached.group);
     this.active = cached;
+    // Start each new selection face-on, then spin — otherwise the entity pops
+    // in pre-rotated to wherever the previous selection's turntable left off.
+    this.spinYaw = 0;
+    this.root.rotation.set(0, 0, 0);
     this.fitCameraTo(cached.halfExtent);
     this.render();
   }
@@ -220,18 +224,24 @@ export class PortraitRenderer {
       case 'energyNode': {
         const v = buildNodeMesh(0, 0, 'energy');
         v.group.position.set(0, 0, 0);
-        // Use a fixed mid-bright emissive for the portrait silhouette so it
-        // reads consistently regardless of in-world depletion.
-        v.setRemaining(1, 1);
         wrapper.add(v.group);
-        // In-game node life: the core slowly spins + breathes.
-        tick = (dt) => v.tickLife(dt);
+        // In-game node life: the core slowly spins + breathes. The node's
+        // tickLife ADDS its breathe on top of the remaining-driven base
+        // emissive, relying on setRemaining being called first each frame to
+        // reset that base (SimRenderer does exactly this). So reset it here
+        // too — without the per-frame reset the breathe accumulates and the
+        // portrait node blows out brighter every frame. A fixed full reserve
+        // keeps the silhouette mid-bright regardless of in-world depletion.
+        tick = (dt) => {
+          v.setRemaining(1, 1);
+          v.tickLife(dt);
+        };
         break;
       }
     }
 
     // Recentre the mesh so its bounding-box centre sits at the wrapper
-    // origin. The wrapper then rotates (parallax) around the visual centre,
+    // origin. The wrapper then turntable-rotates around the visual centre,
     // and the camera looks straight at the origin.
     const box = new THREE.Box3().setFromObject(wrapper);
     const center = box.getCenter(new THREE.Vector3());
@@ -261,7 +271,7 @@ export class PortraitRenderer {
     this.camera.updateProjectionMatrix();
 
     // Entities are recentred on the origin (see buildEntity), so the camera
-    // always looks at (0, 0, 0); the small parallax rotation keeps the centre
+    // always looks at (0, 0, 0); the turntable rotation keeps the centre
     // fixed. Distance is well outside the ±50 ortho near/far clip.
     const distance = 10;
     this.camera.position.copy(this.camDir).multiplyScalar(distance);

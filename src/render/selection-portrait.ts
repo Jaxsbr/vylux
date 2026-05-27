@@ -144,9 +144,9 @@ export class SelectionPortrait {
   }
 
   // Per-frame animation tick — drives the portrait's in-game life pulse +
-  // mouse-follow parallax. Separate from refresh() (which is selection /
+  // slow turntable spin. Separate from refresh() (which is selection /
   // status-driven + skips when nothing changed); animate runs every frame so
-  // the 3D portrait keeps breathing + tracking the cursor while shown.
+  // the 3D portrait keeps breathing + rotating while shown.
   animate(dtSeconds: number): void {
     this.portraitRenderer.animate(dtSeconds);
   }
