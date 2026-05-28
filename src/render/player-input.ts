@@ -10,7 +10,8 @@
 // tagline ("THE CURRENT HOLDS" / "THE ANVIL HOLDS" / etc) underneath.
 // Sourced from the shared `factions/theme` module.
 
-import type { Faction } from '../sim/types';
+import type { Faction, SimState } from '../sim/types';
+import { scoreBreakdown, type ScoreBreakdown } from '../sim/score';
 import { themeForFaction, VY_BG, VY_INK } from './factions/theme';
 
 // Desync overlay. Shown when the lockstep hash gate fires onDesync —
@@ -123,7 +124,7 @@ export class MatchEndOverlay {
     root.appendChild(this.el);
   }
 
-  show(playerFaction: Faction, winner: Faction): void {
+  show(playerFaction: Faction, winner: Faction, state: SimState | null = null): void {
     if (this.shown) return;
     this.shown = true;
     this.el.innerHTML = '';
@@ -184,13 +185,91 @@ export class MatchEndOverlay {
     ].filter(Boolean).join(';');
     content.appendChild(tagline);
 
+    // Final ranked scoreboard. Built from the same scoreBreakdown helper
+    // the buzzer reads (sim/score.ts) so the headline number on screen is
+    // exactly what the winner decision ranked on. Rendered ranked high-to-
+    // low so the leader is on top — the player's column is tinted in
+    // their faction colour so they can spot themselves at a glance.
+    if (state !== null) {
+      content.appendChild(this.buildScoreboard(state, playerFaction));
+    }
+
     const buttonRow = document.createElement('div');
-    buttonRow.style.cssText = 'display:flex;gap:14px;margin-top:18px';
+    buttonRow.style.cssText = 'display:flex;gap:14px;margin-top:18px;flex-wrap:wrap;justify-content:center';
+    // NEW RUN keeps its primary styling on victory (the natural celebratory
+    // CTA). MENU is the explicit return-to-main-menu — it strips the URL
+    // query string the same way the tutorial-complete overlay's exit does
+    // (window.location.pathname), so deep-links like ?tutorial=1 don't
+    // re-trigger the tutorial; bare reload would.
     buttonRow.appendChild(this.button('NEW  RUN', () => window.location.reload(), { primary: true, theme: f, won }));
+    buttonRow.appendChild(this.button('MENU', () => { window.location.href = window.location.pathname; }, { primary: false, theme: f, won }));
     buttonRow.appendChild(this.button('DOWNLOAD  REPLAY', () => this.downloadReplay(), { primary: false, theme: f, won }));
     content.appendChild(buttonRow);
 
     this.el.style.display = 'flex';
+  }
+
+  // Two-row final scoreboard, ranked high-to-low. Each row shows the
+  // breakdown that fed the total (harvested + workers×10 + structures×30)
+  // so the number isn't a black box — the player can see WHY they won or
+  // lost. The player's row is tinted in their faction colour with a faint
+  // background so it stands out from the opponent's neutral grey.
+  private buildScoreboard(state: SimState, playerFaction: Faction): HTMLDivElement {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = [
+      'display:flex', 'flex-direction:column', 'gap:6px',
+      'margin-top:14px', 'min-width:360px',
+      'font-family:ui-monospace,Menlo,monospace',
+      'font-size:13px', 'color:#cde',
+    ].join(';');
+
+    const sb0 = scoreBreakdown(state, 0);
+    const sb1 = scoreBreakdown(state, 1);
+    const ranked: ScoreBreakdown[] = sb0.total >= sb1.total ? [sb0, sb1] : [sb1, sb0];
+
+    ranked.forEach((sb, rank) => {
+      const isPlayer = sb.faction === playerFaction;
+      const ft = themeForFaction(sb.faction);
+      const row = document.createElement('div');
+      row.style.cssText = [
+        'display:grid', 'grid-template-columns:32px 90px 1fr 80px',
+        'align-items:center', 'gap:10px',
+        'padding:8px 12px',
+        `border:1px solid ${isPlayer ? ft.primary : 'rgba(180,200,210,0.25)'}`,
+        `border-radius:${ft.radius}px`,
+        isPlayer ? `background:rgba(7,9,12,0.72)` : 'background:rgba(7,9,12,0.45)',
+        isPlayer ? `box-shadow:0 0 10px ${ft.glowSoft}` : '',
+      ].filter(Boolean).join(';');
+
+      const rankEl = document.createElement('span');
+      rankEl.textContent = `#${rank + 1}`;
+      rankEl.style.cssText = `font-weight:700;color:${isPlayer ? ft.primary : '#8fa'}`;
+      row.appendChild(rankEl);
+
+      const name = document.createElement('span');
+      name.textContent = `${ft.name}${isPlayer ? '  · YOU' : ''}`;
+      name.style.cssText = `font-weight:600;letter-spacing:0.1em;color:${isPlayer ? ft.primary : 'rgba(220,235,240,0.75)'}`;
+      row.appendChild(name);
+
+      const breakdown = document.createElement('span');
+      breakdown.textContent = `harvest ${sb.harvested}  ·  workers ${sb.workers}  ·  pods ${sb.structures}`;
+      breakdown.style.cssText = 'color:rgba(220,235,240,0.6);font-size:12px';
+      row.appendChild(breakdown);
+
+      const total = document.createElement('span');
+      total.textContent = String(sb.total);
+      total.style.cssText = [
+        'text-align:right', 'font-variant-numeric:tabular-nums',
+        'font-size:18px', 'font-weight:700',
+        `color:${isPlayer ? ft.primary : '#cde'}`,
+        isPlayer ? `text-shadow:0 0 10px ${ft.glow}` : '',
+      ].filter(Boolean).join(';');
+      row.appendChild(total);
+
+      wrap.appendChild(row);
+    });
+
+    return wrap;
   }
 
   // Test hook to surface visibility without exposing the DOM element.

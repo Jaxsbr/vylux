@@ -65,6 +65,7 @@ import { TutorialController } from './render/tutorial/tutorial-controller';
 import { FirstActionNudge } from './render/tutorial/first-action-nudge';
 import { loadFactionId } from './render/factions/persistence';
 import { factionFromId, RESOURCE_COLOR, themeForFaction, type FactionId } from './render/factions/theme';
+import { scoreBreakdown } from './sim/score';
 import { LockstepChannel, type BroadcastChannelLike } from './net/lockstep-channel';
 import { LockstepLoop } from './net/lockstep-loop';
 import { ObserverChannel } from './net/observer-channel';
@@ -88,6 +89,12 @@ const NODE_COUNT = 16;
 // generator uses it to guarantee each HQ starts with a discoverable node.
 const HQ_VISION_TILES = 8;
 const DEFAULT_MAP_SEED = 42;
+// Pre-Phase-D scored match: live PvA / lockstep / observe matches end at the
+// buzzer (or early on full field exhaustion) and the higher score wins (see
+// sim/score.ts + checkWinner in sim/step.ts). 5 min × 60 s × 20 Hz = 6000
+// ticks. Tutorial + tests + the determinism-gate scripted matches leave
+// `matchLengthTicks` unset so their behavior is unchanged.
+const MATCH_LENGTH_TICKS = 5 * 60 * TICK_HZ;
 
 // Build the energy field for a normal match from a seed. Pure + seeded, so the
 // same seed always yields the same layout; the chosen seed is baked into the
@@ -114,6 +121,9 @@ const SPEC: InitialMatchSpec = {
   nodes: buildEnergyField(DEFAULT_MAP_SEED),
   initialEnergy: 200,
   hqMaxHp: 250,
+  // Opts the live match into the scored / timed end. Tutorial leaves it off
+  // so the sandbox stays open-ended.
+  matchLengthTicks: MATCH_LENGTH_TICKS,
 };
 
 // Phase C.6: the tutorial sandbox. Deterministic seed, generous starting
@@ -694,6 +704,82 @@ async function bootstrap(): Promise<void> {
   const supplyCard = makeResourceCard('S', '0/5', RESOURCE_COLOR.supply, false, factionTint);
   resourceBar.appendChild(supplyCard.root);
 
+  // Pre-Phase-D scored-match HUD (top-right) — match countdown + ranked
+  // score per faction. The number shown here is computed by the same
+  // `scoreBreakdown` helper the buzzer reads (sim/score.ts), so the
+  // player's live read of "I'm winning" is exactly what the timed-end
+  // winner decision will rule. Hidden in unscored matches (tutorial /
+  // tests / determinism-gate scripted matches all leave matchLengthTicks
+  // at 0) — the panel is built once with display:none in that case.
+  const scoreboard = document.createElement('div');
+  scoreboard.style.cssText = [
+    'position:fixed', 'top:14px', 'left:14px',
+    'display:flex', 'flex-direction:column', 'gap:6px',
+    'padding:10px 14px',
+    'background:rgba(7,9,12,0.78)',
+    `border:${playerTheme.strokeW}px solid ${playerTheme.primary}`,
+    `border-radius:${playerTheme.radius}px`,
+    `box-shadow:0 0 8px ${playerTheme.glowSoft}, 0 0 18px rgba(0,0,0,0.55)`,
+    'font-family:ui-monospace,Menlo,monospace',
+    'pointer-events:none', 'z-index:30',
+    'min-width:170px',
+    match.sim.state.matchLengthTicks > 0 ? '' : 'display:none',
+  ].filter(Boolean).join(';');
+
+  const timerEl = document.createElement('div');
+  timerEl.style.cssText = [
+    'font-size:24px', 'font-weight:700', 'letter-spacing:0.14em',
+    `color:${playerTheme.primary}`,
+    `text-shadow:0 0 10px ${playerTheme.glow}`,
+    'text-align:center', 'font-variant-numeric:tabular-nums',
+  ].join(';');
+  timerEl.textContent = '00:00';
+  scoreboard.appendChild(timerEl);
+
+  const scoreboardDivider = document.createElement('div');
+  scoreboardDivider.style.cssText = `height:1px;background:${playerTheme.primary};opacity:0.35;margin:2px 0`;
+  scoreboard.appendChild(scoreboardDivider);
+
+  // One row per faction, in (player, opponent) order. Rows never reorder
+  // (no per-frame layout jitter); the rank marker on the leader's row
+  // encodes who is currently winning.
+  type ScoreRow = { row: HTMLDivElement; rankMark: HTMLSpanElement; scoreEl: HTMLSpanElement };
+  const makeScoreRow = (label: string, accent: string): ScoreRow => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:13px;color:#cde';
+    const stripe = document.createElement('span');
+    stripe.style.cssText = `width:6px;height:14px;background:${accent};box-shadow:0 0 8px ${accent}`;
+    row.appendChild(stripe);
+    const name = document.createElement('span');
+    name.textContent = label;
+    name.style.cssText = `font-weight:600;letter-spacing:0.12em;color:${accent};min-width:64px`;
+    row.appendChild(name);
+    const rankMark = document.createElement('span');
+    rankMark.textContent = ' ';
+    rankMark.style.cssText = 'width:12px;text-align:center;color:#cde;opacity:0.85';
+    row.appendChild(rankMark);
+    const scoreEl = document.createElement('span');
+    scoreEl.textContent = '0';
+    scoreEl.style.cssText = 'flex:1;text-align:right;font-variant-numeric:tabular-nums;font-weight:500';
+    row.appendChild(scoreEl);
+    return { row, rankMark, scoreEl };
+  };
+  // In observer mode the panel labels host / join (no "you"); otherwise
+  // the player row reads YOU in their faction colour.
+  const youFactionId: Faction = isObserver ? 0 : playerFaction;
+  const oppFactionId: Faction = (1 - youFactionId) as Faction;
+  const youRow = makeScoreRow(
+    isObserver ? 'HOST' : 'YOU',
+    themeForFaction(youFactionId).primary,
+  );
+  const oppRow = makeScoreRow(
+    isObserver ? 'JOIN' : 'AI',
+    themeForFaction(oppFactionId).primary,
+  );
+  scoreboard.appendChild(youRow.row);
+  scoreboard.appendChild(oppRow.row);
+  document.body.appendChild(scoreboard);
+
   // Debug panel — opt-in via ?debug=1. Carries the dense diagnostic
   // text the old HUD used to show by default. Same layout (monospace,
   // pre-formatted lines) so existing dev habits survive.
@@ -828,7 +914,37 @@ async function bootstrap(): Promise<void> {
     renderer.applyInputVisuals(selection, selStructure, selHq, selNode);
     renderer.setHover(input?.getHoveredEntity() ?? null);
 
-    if (s.winner !== null) matchEnd.show(playerFaction, s.winner);
+    // Scored-match HUD updater. No-op when the panel is hidden — the
+    // textContent assignments don't reflow a display:none element. The
+    // countdown reads remaining = matchLengthTicks - s.tick, clamped at
+    // 0, and rounds UP to seconds so the timer never shows a misleading
+    // 00:00 while the sim still has a tick left (it only hits 00:00 the
+    // moment the winner is set).
+    if (s.matchLengthTicks > 0) {
+      const remaining = Math.max(0, s.matchLengthTicks - s.tick);
+      const seconds = Math.ceil(remaining / TICK_HZ);
+      const mm = Math.floor(seconds / 60).toString().padStart(2, '0');
+      const ss = (seconds % 60).toString().padStart(2, '0');
+      timerEl.textContent = `${mm}:${ss}`;
+      const sb0 = scoreBreakdown(s, 0);
+      const sb1 = scoreBreakdown(s, 1);
+      const youScore = youFactionId === 0 ? sb0.total : sb1.total;
+      const oppScore = oppFactionId === 0 ? sb0.total : sb1.total;
+      youRow.scoreEl.textContent = String(youScore);
+      oppRow.scoreEl.textContent = String(oppScore);
+      if (youScore > oppScore) {
+        youRow.rankMark.textContent = '▲';
+        oppRow.rankMark.textContent = ' ';
+      } else if (oppScore > youScore) {
+        youRow.rankMark.textContent = ' ';
+        oppRow.rankMark.textContent = '▲';
+      } else {
+        youRow.rankMark.textContent = '=';
+        oppRow.rankMark.textContent = '=';
+      }
+    }
+
+    if (s.winner !== null) matchEnd.show(playerFaction, s.winner, s);
   }
   requestAnimationFrame(tickHud);
 

@@ -4,6 +4,18 @@
 // scattered field of energy nodes with randomised positions and randomised
 // low/med/high values, replacing the six hand-placed `energy: 200` nodes.
 //
+// PRE-PHASE-D FAIRNESS (2026-05-28): the field is now MIRRORED — nodes are
+// drawn in the source half (the side of the anti-diagonal nearer faction-0)
+// and each is paired with its 180° rotation about the board centre, which
+// lands the twin near faction-1. Both halves end up identical up to the
+// rotation that swaps the two HQs, so neither side gets a free-win seed.
+// This is the prototype-fairness stopgap that pairs with the new timed
+// match + score (see plan.md "Phase D — The Living Economy"): a scoreboard
+// is only an honest measure when the starts are fair. Phase D.2 may replace
+// this with varied-but-balanced clusters (different positions, equal
+// value-budget per side); for now exact mirror is the cheapest trustworthy
+// floor.
+//
 // Determinism: every draw goes through the seeded `Rng` (splitmix64) — no
 // `Math.random` — so the same seed always yields the same field. This is a
 // SPEC BUILDER, not part of the per-tick sim loop: the bootstrap calls it
@@ -90,7 +102,7 @@ function chebyshev(ax: number, ay: number, bx: number, by: number): number {
 }
 
 /**
- * Generate a deterministic, constraint-respecting energy field.
+ * Generate a deterministic, MIRRORED, constraint-respecting energy field.
  *
  * Constraints enforced on every node:
  *  - inside the grid, off the outer edge ring (tile index 1 … gridSize-2);
@@ -99,8 +111,14 @@ function chebyshev(ax: number, ay: number, bx: number, by: number): number {
  *  - no two nodes within `minSpacing` (Chebyshev) of each other;
  *  - ≥ 1 node within `hqVisionRadiusTiles` (Euclidean) of each HQ.
  *
- * Placement is fully random (not mirrored) per owner direction — the
- * per-HQ-vision guarantee is the only balance floor.
+ * Mirror generation: nodes are drawn in the source half (x + y < gridSize-1,
+ * the side of the anti-diagonal nearer faction-0) and each is paired with
+ * its 180° rotation about the board centre — `R(x,y) = (N-x, N-y)` where
+ * `N = gridSize - 1`. R is an isometry that swaps the two HQs (which must
+ * be point-symmetric about the centre — enforced below), so a source node
+ * that's interior / off-edge / far-from-HQs has a twin that automatically
+ * satisfies the same. Only spacing has to be checked explicitly for both.
+ * `count` must be even; nodes are placed in source/mirror pairs.
  */
 export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
   const {
@@ -118,6 +136,29 @@ export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
       `generateEnergyField: count (${count}) must be ≥ hqs.length (${hqs.length})`,
     );
   }
+  // Mirror generation needs an even count — each source-half node ships with
+  // its 180°-rotated twin, so the field is always placed as pairs.
+  if (count % 2 !== 0) {
+    throw new Error(
+      `generateEnergyField: count (${count}) must be even (mirror generation places nodes in pairs)`,
+    );
+  }
+  // The mirror swap requires exactly 2 HQs, point-symmetric about the board
+  // centre. The live arena (HQs at (8,55) and (55,8) on a 64-grid) satisfies
+  // this; the test BASE spec does too. Fail loudly if a caller drifts off.
+  if (hqs.length !== 2) {
+    throw new Error(
+      `generateEnergyField: mirror generation expects exactly 2 HQs (got ${hqs.length})`,
+    );
+  }
+  const N = gridSize - 1;
+  const [hq0, hq1] = hqs;
+  if (hq0.x + hq1.x !== N || hq0.y + hq1.y !== N) {
+    throw new Error(
+      `generateEnergyField: HQs must be point-symmetric about the board centre ` +
+        `for mirror generation (hq0=(${hq0.x},${hq0.y}), hq1=(${hq1.x},${hq1.y}), grid ${gridSize})`,
+    );
+  }
 
   const rng = new Rng(seed);
   // Interior tile range, edge ring excluded.
@@ -132,8 +173,14 @@ export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
   // regardless of fixed-point rounding in the sim's distance check.
   const nearR = Math.max(2, hqVisionRadiusTiles - 1);
 
+  // R: 180° point reflection about the board centre. Source-half tiles
+  // (x+y < N) map to f1-half tiles (x+y > N); the anti-diagonal x+y == N
+  // is the dividing line and gets skipped (`inSourceHalf` is strict).
+  const mirror = (x: number, y: number): { x: number; y: number } => ({ x: N - x, y: N - y });
+
   const placed: GeneratedNode[] = [];
 
+  const inSourceHalf = (x: number, y: number): boolean => x + y < N;
   const farFromHqs = (x: number, y: number): boolean => {
     for (const hq of hqs) {
       if (chebyshev(x, y, hq.x, hq.y) <= 1) return false; // HQ tile + 8 neighbours
@@ -146,8 +193,23 @@ export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
     }
     return true;
   };
-  const valid = (x: number, y: number): boolean =>
-    x >= lo && x <= hi && y >= lo && y <= hi && farFromHqs(x, y) && spacedFromPlaced(x, y);
+  // A candidate source tile is "pair-valid" only when the SOURCE passes every
+  // constraint AND its mirror is spaced from every already-placed node AND
+  // source/mirror are themselves spaced (matters for source tiles close to
+  // the diagonal, where the pair can collapse together). R is an isometry
+  // and the HQs are point-symmetric, so the mirror's interior + far-from-HQs
+  // checks fall out of the source's automatically — only spacing needs to
+  // read the mirror coordinate.
+  const pairValid = (x: number, y: number): boolean => {
+    if (!inSourceHalf(x, y)) return false;
+    if (x < lo || x > hi || y < lo || y > hi) return false;
+    if (!farFromHqs(x, y)) return false;
+    if (!spacedFromPlaced(x, y)) return false;
+    const m = mirror(x, y);
+    if (!spacedFromPlaced(m.x, m.y)) return false;
+    if (chebyshev(x, y, m.x, m.y) < minSpacing) return false;
+    return true;
+  };
 
   // Pick a tile by random sampling within [rxLo,rxHi]×[ryLo,ryHi], falling
   // back to a deterministic scan of that box so generation always succeeds
@@ -166,11 +228,11 @@ export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
     for (let a = 0; a < MAX_SAMPLE_ATTEMPTS; a++) {
       const x = rxLo + rng.nextInt(wx);
       const y = ryLo + rng.nextInt(wy);
-      if (valid(x, y) && extra(x, y)) return { x, y };
+      if (pairValid(x, y) && extra(x, y)) return { x, y };
     }
     for (let y = ryLo; y <= ryHi; y++) {
       for (let x = rxLo; x <= rxHi; x++) {
-        if (valid(x, y) && extra(x, y)) return { x, y };
+        if (pairValid(x, y) && extra(x, y)) return { x, y };
       }
     }
     return null;
@@ -190,39 +252,53 @@ export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
     return tiers[tiers.length - 1].energy;
   };
 
-  // 1) One guaranteed node within vision of each HQ (so neither side starts
-  //    blind). Sampled from a box around the HQ, gated on Euclidean radius.
-  for (const hq of hqs) {
+  // Push a source/mirror pair, both carrying the SAME drawn tier value —
+  // perfect mirror in both position and reserve. One energy draw per pair
+  // also keeps the RNG stream short + deterministic.
+  const pushPair = (x: number, y: number): void => {
+    const e = drawTierEnergy();
+    const m = mirror(x, y);
+    placed.push({ x, y, energy: e });
+    placed.push({ x: m.x, y: m.y, energy: e });
+  };
+
+  // 1) One guaranteed node within HQ_F0's vision (in the source half). Its
+  //    mirror automatically lands within HQ_F1's vision — R is an isometry
+  //    that swaps the HQs — so neither side starts blind. (No separate near
+  //    pick for HQ_F1; the rotation does that for us.)
+  {
     const within = (x: number, y: number): boolean => {
-      const dx = x - hq.x;
-      const dy = y - hq.y;
+      const dx = x - hq0.x;
+      const dy = y - hq0.y;
       return dx * dx + dy * dy <= nearR * nearR;
     };
     const spot = pickTile(
-      Math.max(lo, hq.x - nearR),
-      Math.min(hi, hq.x + nearR),
-      Math.max(lo, hq.y - nearR),
-      Math.min(hi, hq.y + nearR),
+      Math.max(lo, hq0.x - nearR),
+      Math.min(hi, hq0.x + nearR),
+      Math.max(lo, hq0.y - nearR),
+      Math.min(hi, hq0.y + nearR),
       within,
     );
     if (spot === null) {
       throw new Error(
-        `generateEnergyField: could not place a node within vision of HQ (${hq.x},${hq.y})`,
+        `generateEnergyField: could not place a source-half node within vision of HQ (${hq0.x},${hq0.y})`,
       );
     }
-    placed.push({ x: spot.x, y: spot.y, energy: drawTierEnergy() });
+    pushPair(spot.x, spot.y);
   }
 
-  // 2) Remaining nodes scattered anywhere valid across the whole interior.
+  // 2) Remaining pairs scattered anywhere pair-valid in the source half.
+  //    pushPair adds 2 entries per iteration; loop until `count` nodes total
+  //    are placed (count is required even).
   while (placed.length < count) {
     const spot = pickTile(lo, hi, lo, hi, () => true);
     if (spot === null) {
       throw new Error(
-        `generateEnergyField: ran out of valid tiles at ${placed.length}/${count} ` +
+        `generateEnergyField: ran out of valid source-half tiles at ${placed.length}/${count} ` +
           `(grid ${gridSize}, minSpacing ${minSpacing})`,
       );
     }
-    placed.push({ x: spot.x, y: spot.y, energy: drawTierEnergy() });
+    pushPair(spot.x, spot.y);
   }
 
   return placed;

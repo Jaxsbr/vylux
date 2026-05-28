@@ -48,6 +48,13 @@ export interface InitialMatchSpec {
   // Both HQs share the same starting HP, default 500. Lower in tests to
   // produce shorter match-end scenarios.
   hqMaxHp?: number;
+  // Scored-match length in sim ticks. When set (>0), the match also ends
+  // at this tick (or early if the whole field is mined out), awarding the
+  // win to the higher faction score with a deterministic tie-break. When
+  // unset / 0 the match has no timer and only HQ-destruction / Resign can
+  // end it — preserving classic behavior for tests, the tutorial, and the
+  // determinism-gate scripted matches. PvA / observe / lockstep opt in.
+  matchLengthTicks?: number;
 }
 
 export function createInitialState(spec: InitialMatchSpec): { state: SimState; rng: Rng } {
@@ -63,6 +70,7 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       hqX: fromInt(spec.hqs.faction0.x),
       hqY: fromInt(spec.hqs.faction0.y),
       energy: initialEnergy,
+      energyHarvested: fromInt(0),
       hqHp: hqMaxHp,
       nextSpawnRotation: 0,
       supplyCap: HQ_SUPPLY_CAP_INITIAL,
@@ -78,6 +86,7 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       hqX: fromInt(spec.hqs.faction1.x),
       hqY: fromInt(spec.hqs.faction1.y),
       energy: initialEnergy,
+      energyHarvested: fromInt(0),
       hqHp: hqMaxHp,
       nextSpawnRotation: 0,
       supplyCap: HQ_SUPPLY_CAP_INITIAL,
@@ -106,6 +115,7 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
     tick: 0,
     rngState: rng.snapshot(),
     gridSize,
+    matchLengthTicks: spec.matchLengthTicks ?? 0,
     factions,
     units: [],
     nodes,
