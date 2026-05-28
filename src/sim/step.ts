@@ -48,6 +48,7 @@ import {
   type Worker,
 } from './types';
 import { add, distSq, fromFloat, fromInt, rangeSq, sub, type Fixed } from './fixed';
+import { decideScoreWinner } from './score';
 import { findPath, tileAxis, tileCenter, packTile, NO_EXEMPT, type PathBlocker } from './pathfind';
 import {
   CHARGE_TICKS_PER_UNIT_HQ,
@@ -931,6 +932,10 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
       w.y = nextRet.y;
       if (distSq(w.x, w.y, hq.hqX, hq.hqY) <= HQ_DEPOSIT_REACH_SQ) {
         hq.energy = add(hq.energy, w.carrying);
+        // Tally the cumulative score-spine total. Mirrors the spendable
+        // credit but never decrements — `energy` drops on spend; this
+        // doesn't. This is the only site that credits energyHarvested.
+        hq.energyHarvested = add(hq.energyHarvested, w.carrying);
         w.carrying = 0;
         w.carriedKind = 'energy';
         // End of harvest cycle — task complete. Decide what's next:
@@ -1184,9 +1189,40 @@ function advanceExploration(state: SimState): void {
 }
 
 function checkWinner(state: SimState): SimState['winner'] {
+  // HQ destruction takes priority — the canonical win path. Stays the
+  // only reachable end when matchLengthTicks is 0 (tests, tutorial,
+  // determinism-gate scripted matches).
   if (state.factions[1].hqHp <= 0) return 0;
   if (state.factions[0].hqHp <= 0) return 1;
+  // Scored economic match (opt-in via spec.matchLengthTicks). Ends at the
+  // buzzer, or early if the whole field is mined out — higher score wins
+  // with a deterministic tie-break (see decideScoreWinner). checkWinner
+  // runs with state.tick == the tick just processed (pre-increment), so
+  // testing `tick + 1 >= matchLengthTicks` makes the timer trip on the
+  // last gameplay tick of the configured window.
+  if (state.matchLengthTicks > 0) {
+    const timeUp = state.tick + 1 >= state.matchLengthTicks;
+    if (timeUp || fieldExhausted(state)) return decideScoreWinner(state);
+  }
   return null;
+}
+
+// "The whole node field has been mined out." Workers may still be hauling
+// a final load, so the check holds off while any worker carries cargo —
+// otherwise an early-end would deny the worker its last deposit (and the
+// score it earned). Empty-node specs (used in win.test.ts BASIC_SPEC and
+// other minimal fixtures) never qualify as exhausted — there was nothing
+// to mine in the first place.
+function fieldExhausted(state: SimState): boolean {
+  if (state.nodes.length === 0) return false;
+  for (let i = 0; i < state.nodes.length; i++) {
+    if (state.nodes[i].alive) return false;
+  }
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (u.alive && u.carrying > 0) return false;
+  }
+  return true;
 }
 
 export function step(state: SimState, rng: Rng, frame: InputFrame): void {

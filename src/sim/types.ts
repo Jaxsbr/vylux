@@ -65,6 +65,12 @@ export interface FactionState {
   hqX: Fixed;
   hqY: Fixed;
   energy: Fixed;
+  // Cumulative energy ever deposited at this faction's HQ — monotonic, only
+  // ever increases. `energy` above is the spendable balance (drops when you
+  // train / build); this is the honest "how much have you collected" total
+  // and the spine of the match score. Incremented at the deposit site; read
+  // by the timed-match winner decision + the HUD scoreboard. Hashed.
+  energyHarvested: Fixed;
   // HQ hit-points. Reaching 0 ends the match — the OTHER faction wins.
   // HQ destruction + Resign are the only paths to a winner.
   hqHp: Fixed;
@@ -257,6 +263,14 @@ export interface SimState {
   // over. Sourced from the render's GRID_CONSTANTS via the match spec so sim +
   // render agree; constant per match — NOT hashed (static config).
   gridSize: number;
+  // Scored-match length in sim ticks (0 = disabled → classic HQ-destruction /
+  // resign only). When > 0 the match also ends at this tick — or early if the
+  // whole node field is mined out — awarding the win to the higher faction
+  // score (see checkWinner). Sourced from the spec; static per match, so —
+  // like gridSize — it is NOT hashed. PvA / observe / lockstep set it on the
+  // live spec; tests, the tutorial, and the scripted-match goldens leave it
+  // unset so behavior there is unchanged.
+  matchLengthTicks: number;
   factions: [FactionState, FactionState];
   units: Unit[];
   nodes: ResourceNode[];
@@ -275,7 +289,10 @@ export interface SimState {
   // one source of truth. Hashed (folded compactly; see sim.ts).
   explored: [Uint8Array, Uint8Array];
   nextEntityId: number;
-  // Set when a faction's HQ is destroyed (the OTHER faction wins) or
-  // when the OTHER faction issues a Resign command.
+  // Set when a faction's HQ is destroyed (the OTHER faction wins), when
+  // the OTHER faction issues a Resign command, or — in scored mode (when
+  // matchLengthTicks > 0) — when the timer expires or the whole node field
+  // is mined out, in which case the higher-score faction wins with a
+  // deterministic tie-break.
   winner: Faction | null;
 }

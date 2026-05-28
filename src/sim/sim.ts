@@ -58,6 +58,9 @@ export class Sim {
       h.writeI32(fs.hqX);
       h.writeI32(fs.hqY);
       h.writeI32(fs.energy);
+      // Cumulative deposited energy (the match-score spine). Hashed so any
+      // divergence in collected total surfaces at the tick it happens.
+      h.writeI32(fs.energyHarvested);
       h.writeI32(fs.hqHp);
       h.writeU32(fs.nextSpawnRotation);
       // Phase C.1: supply cap + used.

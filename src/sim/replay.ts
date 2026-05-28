@@ -276,7 +276,17 @@ import type { InitialMatchSpec } from './state';
 // scout now retains the charge it previously spent, so the AI-vs-AI golden
 // fixture moves (the AI scouts in that match); it's regenerated. The two
 // scripted harvest fixtures never scout, so they don't move.
-export const REPLAY_VERSION = 31;
+//
+// v32 (pre-Phase-D scored match): adds `FactionState.energyHarvested` (Fixed,
+// hashed) — cumulative deposited energy, the spine of the new timed-match
+// score. Spec gains an optional `matchLengthTicks` that opts the match into
+// the timed/exhaustion end with a deterministic score-based winner (see
+// sim/score.ts + checkWinner). The new field changes the hash even when
+// matchLengthTicks is unset, so every fixture regenerates. The mirrored
+// energy field (map-gen.ts now generates source-half + 180° rotation) only
+// affects callers that go through generateEnergyField — the determinism
+// goldens build their own hand-spec, so node positions don't move there.
+export const REPLAY_VERSION = 32;
 
 export interface ReplayLog {
   version: number;

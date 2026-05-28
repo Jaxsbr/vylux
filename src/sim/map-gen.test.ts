@@ -116,6 +116,35 @@ describe('generateEnergyField', () => {
   it('throws when count is below the HQ count', () => {
     expect(() => generateEnergyField({ ...BASE, count: 1 })).toThrow();
   });
+
+  // Mirror generation (pre-Phase-D fair-starts). Every node has its 180°
+  // twin about the board centre, both carrying the SAME tier energy, so
+  // neither side gets a free-win seed. The 180° rotation also swaps the
+  // two HQs — verified by the construction (R(8,55) = (55,8)).
+  it('produces a perfectly mirrored field — every node has its 180° twin', () => {
+    const N = BASE.gridSize - 1;
+    const nodes = generateEnergyField(BASE);
+    // Each node must have a twin at (N-x, N-y) with the same energy value.
+    for (const n of nodes) {
+      const twin = nodes.find(
+        (m) => m.x === N - n.x && m.y === N - n.y && m.energy === n.energy,
+      );
+      expect(twin).toBeDefined();
+    }
+  });
+
+  it('throws on an odd count (pairs only)', () => {
+    expect(() => generateEnergyField({ ...BASE, count: 15 })).toThrow();
+  });
+
+  it('throws when the two HQs are not point-symmetric about the centre', () => {
+    expect(() =>
+      generateEnergyField({
+        ...BASE,
+        hqs: [{ x: 8, y: 55 }, { x: 50, y: 8 }], // sum 50+8=58 ≠ 63
+      }),
+    ).toThrow();
+  });
 });
 
 describe('classifyTier', () => {

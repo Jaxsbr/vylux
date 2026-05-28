@@ -6,6 +6,8 @@
 
 > **Phase C.1 (2026-05-12) landed:** work pods + worker per-unit charge + the first research item (auto-resume). Workers now spend 1 charge per task (harvest cycle or build). At 0 charge a worker enters charge mode (walks to the nearest charge spot — the closest friendly work pod or its HQ, whichever is actually nearer) and refuses player commands until fully recharged. Each operational work pod also raises the worker cap, and hosts the worker auto-resume research. AI actively grows its workforce — it trains workers up to the cap and builds work pods to raise the cap further.
 
+> **Pre-Phase-D ad-hoc: scored match (2026-05-28) landed.** A normal PvA match now ends — instead of running forever until the field depletes with no defined outcome. The match has a **5-minute timer** (configurable as `matchLengthTicks` per spec) and an early-end when the **whole node field is mined out**. At either end the **higher score wins** with a deterministic tie-break. The score is `cumulative energy harvested + alive workers × 10 + operational pods × 30` — see `src/sim/score.ts` (single source of truth: the HUD scoreboard, the live ranked panel, and the buzzer all read the same formula). A new **scoreboard + countdown panel** appears top-left during scored matches; the end overlay now carries the final ranked breakdown plus a **MENU** button back to the main menu (alongside NEW RUN / DOWNLOAD REPLAY). The energy field is also now **mirrored** — generated in one half and rotated 180° about the board centre — so neither side starts with a free-win seed. Tutorial + tests + the determinism-gate scripted matches leave `matchLengthTicks` unset, so they behave exactly as before.
+
 ---
 
 ## Resources
@@ -126,8 +128,30 @@ Research is hosted at any operational work pod — pick one, click **RESEARCH AU
 
 ## Victory conditions
 
-- **HQ destruction** — destroy the enemy HQ. The other faction wins. (No combat units are currently in the active sim, so this path is unreachable through gameplay — it remains the canonical win condition that combat units will route to once Phase D reintroduces them.)
-- **Resign** — `CommandKind.Resign` (slot 13). The named faction concedes; the other faction wins. No-op if a winner is already set.
+Three paths to a winner, in **runtime priority order** (highest first — the sim freezes the moment a winner is set, so an earlier path pre-empts a later one within the same tick; see `win.test.ts`):
+
+1. **Resign** — `CommandKind.Resign` (slot 13). The named faction concedes; the other faction wins. Applied during command processing (`step.ts:472`), which runs **before** the per-tick winner checks, so a Resign in the same tick as a fatal HQ blow still routes the win to whoever the resigner conceded to. No-op if a winner is already set.
+2. **HQ destruction** — destroy the enemy HQ. The other faction wins. Combat units aren't in the active sim yet (they return in Phase E), so this path is unreachable through gameplay today; it stays the canonical win condition combat units will route to.
+3. **Score victory** — only in **scored mode** (the spec carries `matchLengthTicks > 0`; the live PvA / lockstep / observe spec opts in, the tutorial + tests do not). Triggers when either (a) the timer expires (`tick + 1 >= matchLengthTicks`) or (b) the entire energy field is depleted **and** no worker is still carrying a final load (carrying workers get to deposit before the buzzer rules). The higher score wins; the deterministic tie-break cascades through total → raw cumulative harvest → HQ HP → faction 0. Live arena defaults: **5-minute timer** (6000 ticks at 20 Hz) on a 64² mirrored field.
+
+### Score
+
+The match score is computed by `scoreBreakdown(state, faction)` in `src/sim/score.ts` — the same function the buzzer reads and the HUD shows, so the on-screen number is exactly what the winner decision ranks on. Integer + deterministic (no floats).
+
+| Component | Weight |
+|---|---|
+| Cumulative energy harvested (`faction.energyHarvested`, floored) | × 1 |
+| Alive workers | × 10 |
+| Operational work pods (`buildTicksRemaining === 0`) | × 30 |
+
+Cumulative harvest is the spine — the honest "how much have you collected." Workers/pods add small bonuses so a pure hoarder doesn't outscore a developed economy. Weights live in `score.ts` (`SCORE_WORKER_BONUS`, `SCORE_STRUCTURE_BONUS`) and are tunable in playtest; bumping either invalidates timed-match goldens.
+
+`faction.energyHarvested` is a **monotonic** Fixed counter — incremented at the single deposit site in `step.ts`, never decremented. The spendable `faction.energy` balance drops when you train / build; the score-spine total doesn't.
+
+### Live HUD
+
+- **Top-right panel** (scored matches only): a big mm:ss countdown above two ranked rows — YOU vs AI, faction-colour-tinted, with a ▲ marker on the current leader. Hidden in the tutorial + any spec without `matchLengthTicks`.
+- **End overlay** — fires the moment a winner is set; shows VICTORY / DEFEATED, the faction tagline, and a final ranked scoreboard (harvest · workers · pods · total per faction). Buttons: **NEW RUN** (reload), **MENU** (returns to main menu — strips URL query so a `?tutorial=1` deep-link doesn't re-trigger the tutorial), **DOWNLOAD REPLAY**.
 
 ---
 
@@ -162,6 +186,7 @@ Research is hosted at any operational work pod — pick one, click **RESEARCH AU
 A fixed-footprint HUD; nothing resizes to fit its text.
 
 - **Resource bar (top-centre):** HQ HP · Energy · **Matter** (reserved + greyed until Phase C.7) · Supply `used/cap` (pulses red/white at the cap — build a work pod to raise it).
+- **Scoreboard panel (top-left, scored matches only):** match countdown (mm:ss) above a two-row ranked scoreboard — YOU vs AI, faction-tinted, with a ▲ marker on the current leader. The number is the same `scoreBreakdown` the timed-end winner reads, so what you see is what wins. Hidden in the tutorial + any spec without `matchLengthTicks`.
 - **Portrait panel (bottom-left):** a live 3D render of the selected entity + its name, plus an action-state icon and HP / charge bars (workers), HP + build status (pods), or remaining energy (nodes). The portrait isn't static — the entity plays its in-game life animation (HQ / pod emissive breathe, worker idle hover, node spin) and slowly turntable-rotates at a fixed rate so you see it from every side.
 - **Command card (bottom-centre):** a fixed 3-wide grid of **icon tiles**, each with a hotkey badge (top-left) + Energy-cost badge (top-right); unused slots render as dim cells. Above it, a **production-queue strip** shows the queued workers, the head one carrying a production-progress bar.
 - **Minimap (bottom-right):** a top-down map of the arena. Blips mirror what's currently visible in the 3D scene (so it respects fog), plus a camera-focus marker. **Click anywhere on it to recentre the camera.**
@@ -240,7 +265,7 @@ The arena is defined in `src/main.ts`; the energy field is generated by `src/sim
 
 - **Grid:** 64×64 tiles (doubled from 32 in Phase C.6.5).
 - **HQ positions:** faction 0 (player) at (8, 55) — bottom-left; faction 1 (AI) at (55, 8) — top-right. Opposite corners on the anti-diagonal.
-- **Energy nodes:** a **randomised field** — ~16 nodes scattered by a seeded generator, fresh each PvA match (the seed is baked into the spec, so replays reproduce the layout). Placement constraints: never on an HQ tile, never directly adjacent (the 8 neighbours) to an HQ, never on the outer edge ring, no two nodes closer than 3 tiles, and **≥1 node guaranteed within each HQ's vision** so neither side starts blind. Each node is randomly assigned a **low / med / high** value (≈120 / 220 / 360 energy, weighted toward low+med); the tier shows visually — richer nodes glow **brighter** (more emissive + bloom) with a slight hue lift toward white on the high tier. (Lockstep modes keep a fixed-seed field so both peers agree; the tutorial keeps its hand-placed nodes.)
+- **Energy nodes:** a **seeded, mirrored field** — 16 nodes (8 source + 8 mirrored), fresh each PvA match (the seed is baked into the spec, so replays reproduce the layout). The generator draws each node in the source half (`x + y < 63`) and pairs it with its **180° rotation about the board centre** (`(x,y) → (63−x, 63−y)`), so the two halves are identical up to the rotation that swaps the HQs — neither side gets a free-win seed. Same constraints as before: never on an HQ tile, never directly adjacent (the 8 neighbours) to an HQ, never on the outer edge ring, no two nodes closer than 3 tiles, **≥1 node guaranteed within each HQ's vision** so neither side starts blind (the mirror covers both HQs from one source-side guarantee — `R` is an isometry that swaps the HQs). Each node is randomly assigned a **low / med / high** value (≈120 / 220 / 360 energy, weighted toward low+med) and its **mirror twin carries the same energy**; the tier shows visually — richer nodes glow **brighter** (more emissive + bloom) with a slight hue lift toward white on the high tier. (Lockstep modes keep a fixed-seed field so both peers agree; the tutorial keeps its hand-placed nodes — no mirror.) Mirror generation requires an even `count` and HQs point-symmetric about the centre; the generator throws otherwise. Phase D.2 may replace this exact mirror with "varied but balanced" clusters (different positions, equal value-budget per side); for the prototype, exact mirror is the cheapest trustworthy fairness floor.
 - **Starting pools:** 200 Energy per faction. Workers spawn at full charge (10/10).
 - **Vision:** fog of war active. Each faction's home patch is auto-discovered at tick 0; the rest of the (now larger) map requires scouting to see.
 - **Terrain:** flat, no vision blockers, no impassable tiles.
