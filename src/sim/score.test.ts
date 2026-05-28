@@ -27,7 +27,7 @@ import type { InitialMatchSpec } from './state';
 const HARVEST_SPEC: InitialMatchSpec = {
   seed: 1,
   hqs: { faction0: { x: 2, y: 2 }, faction1: { x: 18, y: 18 } },
-  nodes: [{ x: 4, y: 2, energy: 200 }],
+  nodes: [{ x: 4, y: 2, amount: 200 }],
   initialEnergy: 200,
 };
 
@@ -130,6 +130,15 @@ describe('scoreBreakdown — formula', () => {
     expect(sb.structures).toBe(2);
     expect(sb.total).toBe(250 + 3 * SCORE_WORKER_BONUS + 2 * SCORE_STRUCTURE_BONUS);
     expect(matchScore(sim.state, 0)).toBe(sb.total);
+  });
+
+  it('counts matterHarvested toward the harvested spine (energy + matter)', () => {
+    const sim = new Sim(HARVEST_SPEC);
+    sim.state.factions[0].energyHarvested = fromInt(100);
+    sim.state.factions[0].matterHarvested = fromInt(50);
+    const sb = scoreBreakdown(sim.state, 0);
+    expect(sb.harvested).toBe(150);
+    expect(sb.total).toBe(150); // no workers/structures in this fresh state
   });
 
   it('floors the Fixed harvest total deterministically', () => {

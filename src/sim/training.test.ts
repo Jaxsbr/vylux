@@ -40,7 +40,7 @@ describe('Sim — training', () => {
     });
     // Energy is charged at enqueue (faction 0 defaults to swarm → cost 40).
     const after = sim.state.factions[0].energy;
-    expect(after).toBe(before - unitStatsFor('swarm', 'worker').trainCost);
+    expect(after).toBe(before - (unitStatsFor('swarm', 'worker').trainCost.energy ?? 0));
     // Training is timed — no worker yet.
     expect(sim.state.units.length).toBe(0);
 
@@ -101,7 +101,7 @@ describe('Sim — worker harvest cycle', () => {
     const sim = new Sim({
       seed: 1,
       hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 17, y: 17 } },
-      nodes: [{ x: 5, y: 5, energy: 100 }],
+      nodes: [{ x: 5, y: 5, amount: 100 }],
       initialEnergy: 100,
     });
     // Train (timed), wait for the worker to pop, then assign it.
@@ -140,7 +140,7 @@ describe('Sim — worker harvest cycle', () => {
       seed: 1,
       hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 17, y: 17 } },
       // Only 5 units in the node — one harvest gain empties it.
-      nodes: [{ x: 5, y: 5, energy: 5 }],
+      nodes: [{ x: 5, y: 5, amount: 5 }],
       initialEnergy: 100,
     });
     sim.step({
@@ -165,7 +165,7 @@ describe('Sim — MoveUnit', () => {
     const sim = new Sim({
       seed: 1,
       hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 17, y: 17 } },
-      nodes: [{ x: 5, y: 5, energy: 100 }],
+      nodes: [{ x: 5, y: 5, amount: 100 }],
       initialEnergy: 100,
     });
     sim.step({
@@ -220,9 +220,9 @@ describe('Sim — fog of war', () => {
       seed: 1,
       hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 27, y: 27 } },
       nodes: [
-        { x: 4, y: 4, energy: 100 }, // close to faction-0 HQ — discovered
-        { x: 26, y: 26, energy: 100 }, // close to faction-1 HQ — discovered
-        { x: 15, y: 15, energy: 100 }, // mid-map — neither sees
+        { x: 4, y: 4, amount: 100 }, // close to faction-0 HQ — discovered
+        { x: 26, y: 26, amount: 100 }, // close to faction-1 HQ — discovered
+        { x: 15, y: 15, amount: 100 }, // mid-map — neither sees
       ],
     });
     const [near0, near1, mid] = sim.state.nodes;
@@ -238,7 +238,7 @@ describe('Sim — fog of war', () => {
     const sim = new Sim({
       seed: 1,
       hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 27, y: 27 } },
-      nodes: [{ x: 15, y: 15, energy: 100 }], // outside both HQs' vision
+      nodes: [{ x: 15, y: 15, amount: 100 }], // outside both HQs' vision
       initialEnergy: 100,
     });
     expect(sim.state.nodes[0].discoveredBy[0]).toBe(false);
@@ -261,7 +261,7 @@ describe('Sim — fog of war', () => {
     const sim = new Sim({
       seed: 1,
       hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 27, y: 27 } },
-      nodes: [{ x: 20, y: 20, energy: 100 }], // outside both HQs' vision
+      nodes: [{ x: 20, y: 20, amount: 100 }], // outside both HQs' vision
       initialEnergy: 100,
     });
     sim.step({
@@ -279,8 +279,8 @@ describe('Sim — AI determinism', () => {
     seed: 99,
     hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 17, y: 17 } },
     nodes: [
-      { x: 6, y: 6, energy: 200 },
-      { x: 14, y: 14, energy: 200 },
+      { x: 6, y: 6, amount: 200 },
+      { x: 14, y: 14, amount: 200 },
     ],
     initialEnergy: 100,
   };

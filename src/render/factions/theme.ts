@@ -57,6 +57,10 @@ export const VY_PANEL = 'rgba(7,9,12,0.78)';
 // Resource info colours stay constant across factions for legibility.
 export const RESOURCE_COLOR = {
   energy: '#ffd34a',
+  // Phase D.1: Matter = construction material. Amber — warm + distinct from
+  // gold energy by the `M` glyph and the node silhouette (the hues are close
+  // by design choice; shape/glyph carry the distinction).
+  matter: '#ff9a3c',
   hp:     '#cfd8dc',
   supply: '#b6e8ff',
 } as const;

@@ -8,6 +8,7 @@ import { Rng } from './rng';
 import type {
   FactionId,
   FactionState,
+  ResourceKind,
   ResourceNode,
   SimState,
   Structure,
@@ -39,12 +40,21 @@ export interface InitialMatchSpec {
   // Which faction-id each slot plays. Defaults to swarm/siege so legacy
   // callers (tests + headless cli) don't have to spell it out.
   factionIds?: { faction0: FactionId; faction1: FactionId };
-  // Resource nodes. Phase A: only 'energy' nodes are valid; the kind
-  // field is dropped from the input shape since there's no other choice.
-  nodes: Array<{ x: number; y: number; energy: number }>;
+  // Resource nodes. Phase D.1: nodes carry a `kind` (energy | matter) and a
+  // kind-neutral `amount` (the starting reserve). `kind` is optional and
+  // defaults to 'energy' so legacy specs / tests that predate matter stay
+  // valid. (Field renamed from `energy` to `amount` in D.1 — a matter node
+  // carrying `energy: 120` read wrong, and the rename is part of the
+  // stop-overloading-"energy" cleanup.)
+  nodes: Array<{ x: number; y: number; amount: number; kind?: ResourceKind }>;
   // Energy each faction starts with. 0 by default. Used to bootstrap AI
   // build orders that need to train before any worker has harvested.
   initialEnergy?: number;
+  // Phase D.1: Matter each faction starts with. 0 by default — a normal
+  // match earns its matter from tick 0 (the worker is energy-only, so
+  // matter isn't bootstrap-critical). The tutorial sets it so its
+  // build-a-pod step never blocks on matter.
+  initialMatter?: number;
   // Both HQs share the same starting HP, default 500. Lower in tests to
   // produce shorter match-end scenarios.
   hqMaxHp?: number;
@@ -60,6 +70,7 @@ export interface InitialMatchSpec {
 export function createInitialState(spec: InitialMatchSpec): { state: SimState; rng: Rng } {
   const rng = new Rng(spec.seed);
   const initialEnergy = fromInt(spec.initialEnergy ?? 0);
+  const initialMatter = fromInt(spec.initialMatter ?? 0);
 
   const hqMaxHp = fromInt(spec.hqMaxHp ?? 500);
   const factionId0 = spec.factionIds?.faction0 ?? 'swarm';
@@ -70,6 +81,8 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       hqX: fromInt(spec.hqs.faction0.x),
       hqY: fromInt(spec.hqs.faction0.y),
       energy: initialEnergy,
+      matter: initialMatter,
+      matterHarvested: fromInt(0),
       energyHarvested: fromInt(0),
       hqHp: hqMaxHp,
       nextSpawnRotation: 0,
@@ -86,6 +99,8 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       hqX: fromInt(spec.hqs.faction1.x),
       hqY: fromInt(spec.hqs.faction1.y),
       energy: initialEnergy,
+      matter: initialMatter,
+      matterHarvested: fromInt(0),
       energyHarvested: fromInt(0),
       hqHp: hqMaxHp,
       nextSpawnRotation: 0,
@@ -102,10 +117,10 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
   const nodes: ResourceNode[] = spec.nodes.map((n, i) => ({
     id: i + 1,
     alive: true,
-    kind: 'energy' as const,
+    kind: (n.kind ?? 'energy') as ResourceKind,
     x: fromInt(n.x),
     y: fromInt(n.y),
-    remaining: fromInt(n.energy),
+    remaining: fromInt(n.amount),
     discoveredBy: [false, false] as [boolean, boolean],
   }));
 

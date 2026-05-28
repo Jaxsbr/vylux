@@ -263,7 +263,7 @@ export class SimRenderer {
     }
   }
 
-  // Phase C.1: fire a "needs energy" lightning cue on a worker. Called
+  // Phase C.1: fire a "needs charge" lightning cue on a worker. Called
   // by the input controller when it detects a blocked command on a
   // charge-mode worker. No-op if the worker has no mesh yet (unlikely
   // but harmless).

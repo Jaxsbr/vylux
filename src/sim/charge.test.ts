@@ -22,8 +22,12 @@ import { tickAi } from './ai';
 const SPEC: InitialMatchSpec = {
   seed: 1,
   hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 27, y: 27 } },
-  nodes: [{ x: 5, y: 5, energy: 1000 }],
+  nodes: [{ x: 5, y: 5, amount: 1000 }],
   initialEnergy: 10000,
+  // Phase D.1: work pods now cost matter too — fund it so the build-flow
+  // tests below (which exercise charge/build mechanics, not the economy)
+  // aren't gated on harvesting matter first.
+  initialMatter: 10000,
 };
 
 function ownedWorkerCount(sim: Sim, faction: 0 | 1): number {
@@ -675,7 +679,7 @@ describe('Sim — research + auto-resume', () => {
   it('research + depleted previous node: no resume, idle', () => {
     const sim = new Sim({
       ...SPEC,
-      nodes: [{ x: 5, y: 5, energy: 5 }], // small node — drains fast
+      nodes: [{ x: 5, y: 5, amount: 5 }], // small node — drains fast
     });
     sim.state.factions[0].autoResumeResearched = true;
     trainWorker(sim, 0, 4, 4);
@@ -702,8 +706,9 @@ describe('Sim — AI work-pod growth', () => {
     const sim = new Sim({
       seed: 1,
       hqs: { faction0: { x: 5, y: 5 }, faction1: { x: 27, y: 27 } },
-      nodes: [{ x: 6, y: 5, energy: 1000 }],
+      nodes: [{ x: 6, y: 5, amount: 1000 }],
       initialEnergy: 10000,
+      initialMatter: 10000, // Phase D.1: pods cost matter; fund it for the AI build gate.
     });
     // Fill the faction-0 worker cap by training to it.
     const cap = sim.state.factions[0].supplyCap;
@@ -730,8 +735,9 @@ describe('Sim — AI work-pod growth', () => {
     const sim = new Sim({
       seed: 1,
       hqs: { faction0: { x: 5, y: 5 }, faction1: { x: 27, y: 27 } },
-      nodes: [{ x: 6, y: 5, energy: 1000 }],
+      nodes: [{ x: 6, y: 5, amount: 1000 }],
       initialEnergy: 10000,
+      initialMatter: 10000, // Phase D.1: pods cost matter; fund it for the AI build gate.
     });
     // Inject a mid-construction pod for faction 0.
     sim.state.structures.push({

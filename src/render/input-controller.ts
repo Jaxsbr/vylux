@@ -27,7 +27,7 @@ import { CommandKind, type Command } from '../sim/commands';
 import type { Sim } from '../sim/sim';
 import { findNode, findStructure, findUnit, isPodTileBlockedByNode } from '../sim/state';
 import { isInChargeMode } from '../sim/step';
-import { ENERGY_COST_PER_TASK } from '../sim/units-config';
+import { CHARGE_COST_PER_TASK } from '../sim/units-config';
 import type { Faction, UnitKind } from '../sim/types';
 import { GRID_CONSTANTS } from '../grid';
 import { tileFloatToWorld } from './scene';
@@ -244,7 +244,7 @@ export class InputController {
       if (!u || u.kind !== 'worker') continue;
       if (u.faction !== this.opts.playerFaction) continue;
       if (isInChargeMode(u)) continue;
-      if (u.charge < ENERGY_COST_PER_TASK) continue;
+      if (u.charge < CHARGE_COST_PER_TASK) continue;
       if (best === null || u.id < best) best = u.id;
     }
     return best;
@@ -271,7 +271,7 @@ export class InputController {
       if (!u) continue;
       if (u.faction !== this.opts.playerFaction) continue;
       if (u.kind !== 'worker') continue;
-      if (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK) {
+      if (isInChargeMode(u) || u.charge < CHARGE_COST_PER_TASK) {
         this.opts.feedback?.onEnergyBlocked?.(u.id);
         continue;
       }
@@ -572,7 +572,7 @@ export class InputController {
     for (const id of this.selectedUnitIds) {
       const u = findUnit(state, id);
       if (!u) continue;
-      if (u.kind === 'worker' && (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK)) {
+      if (u.kind === 'worker' && (isInChargeMode(u) || u.charge < CHARGE_COST_PER_TASK)) {
         this.opts.feedback?.onEnergyBlocked?.(id);
         continue;
       }
@@ -619,7 +619,7 @@ export class InputController {
       if (u.kind !== 'worker') continue;
       // Phase C.1: fire the cue + skip the command for charge-mode /
       // 0-charge workers so the player sees why nothing happened.
-      if (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK) {
+      if (isInChargeMode(u) || u.charge < CHARGE_COST_PER_TASK) {
         this.opts.feedback?.onEnergyBlocked?.(u.id);
         continue;
       }
@@ -648,7 +648,7 @@ export class InputController {
       if (!u) continue;
       if (u.faction !== this.opts.playerFaction) continue;
       if (u.kind !== 'worker') continue;
-      if (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK) {
+      if (isInChargeMode(u) || u.charge < CHARGE_COST_PER_TASK) {
         this.opts.feedback?.onEnergyBlocked?.(u.id);
         continue;
       }

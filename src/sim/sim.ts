@@ -58,6 +58,11 @@ export class Sim {
       h.writeI32(fs.hqX);
       h.writeI32(fs.hqY);
       h.writeI32(fs.energy);
+      // Phase D.1: spendable Matter balance + its cumulative harvested twin
+      // (both feed the score). Hashed so any divergence in matter income/spend
+      // surfaces at the tick it happens.
+      h.writeI32(fs.matter);
+      h.writeI32(fs.matterHarvested);
       // Cumulative deposited energy (the match-score spine). Hashed so any
       // divergence in collected total surfaces at the tick it happens.
       h.writeI32(fs.energyHarvested);
@@ -197,6 +202,7 @@ function structureKindToInt(kind: StructureKind): number {
 function resourceKindToInt(kind: ResourceKind): number {
   switch (kind) {
     case 'energy': return 0;
+    case 'matter': return 1;
   }
 }
 

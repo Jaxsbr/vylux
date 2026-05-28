@@ -27,6 +27,7 @@
 // sim's gameplay RNG stream, so it never perturbs the determinism gate.)
 
 import { Rng } from './rng';
+import type { ResourceKind } from './types';
 
 export interface EnergyTier {
   readonly name: 'low' | 'med' | 'high';
@@ -84,15 +85,27 @@ export interface EnergyFieldOptions {
   minSpacing?: number;
   /** Override the tier table (tests). Defaults to ENERGY_TIERS. */
   tiers?: readonly EnergyTier[];
+  /**
+   * Phase D.1: "1 in N" odds that a (non-guaranteed) source/mirror pair is
+   * MATTER rather than energy. Default 3 → ~1/3 of scattered pairs are matter.
+   * The guaranteed near-HQ pair is always energy (bootstrap), so it ignores
+   * this. Set high to suppress matter (tests).
+   */
+  matterOneIn?: number;
 }
 
 export interface GeneratedNode {
   x: number;
   y: number;
-  energy: number;
+  /** Starting reserve (kind-neutral; was `energy` pre-D.1). */
+  amount: number;
+  /** Phase D.1: which resource this node yields. */
+  kind: ResourceKind;
 }
 
 const DEFAULT_MIN_SPACING = 3;
+// Phase D.1: ~1/3 of scattered pairs are matter (1 in 3). Tunable per call.
+const DEFAULT_MATTER_ONE_IN = 3;
 // Random-sampling budget before falling back to a deterministic scan. High
 // enough that the scan is essentially never reached for sane params.
 const MAX_SAMPLE_ATTEMPTS = 400;
@@ -129,6 +142,7 @@ export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
     hqVisionRadiusTiles,
     minSpacing = DEFAULT_MIN_SPACING,
     tiers = ENERGY_TIERS,
+    matterOneIn = DEFAULT_MATTER_ONE_IN,
   } = opts;
 
   if (count < hqs.length) {
@@ -252,14 +266,20 @@ export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
     return tiers[tiers.length - 1].energy;
   };
 
-  // Push a source/mirror pair, both carrying the SAME drawn tier value —
-  // perfect mirror in both position and reserve. One energy draw per pair
-  // also keeps the RNG stream short + deterministic.
-  const pushPair = (x: number, y: number): void => {
-    const e = drawTierEnergy();
+  // Phase D.1: draw a node kind. ~1-in-`matterOneIn` pairs are matter; the
+  // rest energy. Off the same seeded stream so the field stays deterministic.
+  const drawKind = (): ResourceKind => (rng.nextInt(matterOneIn) === 0 ? 'matter' : 'energy');
+
+  // Push a source/mirror pair, both carrying the SAME drawn tier value AND
+  // the SAME kind — perfect mirror in position, reserve, and resource so
+  // matter access is symmetric. One tier draw per pair keeps the RNG stream
+  // short + deterministic; the kind is decided by the caller (the guaranteed
+  // near-HQ pair forces energy, scattered pairs draw it).
+  const pushPair = (x: number, y: number, kind: ResourceKind): void => {
+    const amount = drawTierEnergy();
     const m = mirror(x, y);
-    placed.push({ x, y, energy: e });
-    placed.push({ x: m.x, y: m.y, energy: e });
+    placed.push({ x, y, amount, kind });
+    placed.push({ x: m.x, y: m.y, amount, kind });
   };
 
   // 1) One guaranteed node within HQ_F0's vision (in the source half). Its
@@ -284,7 +304,10 @@ export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
         `generateEnergyField: could not place a source-half node within vision of HQ (${hq0.x},${hq0.y})`,
       );
     }
-    pushPair(spot.x, spot.y);
+    // Guaranteed near-HQ pair stays ENERGY so the bootstrap worker economy
+    // (worker = energy-only) always has a reachable energy node on tick 0.
+    // Matter is something you scout out and expand toward.
+    pushPair(spot.x, spot.y, 'energy');
   }
 
   // 2) Remaining pairs scattered anywhere pair-valid in the source half.
@@ -298,7 +321,7 @@ export function generateEnergyField(opts: EnergyFieldOptions): GeneratedNode[] {
           `(grid ${gridSize}, minSpacing ${minSpacing})`,
       );
     }
-    pushPair(spot.x, spot.y);
+    pushPair(spot.x, spot.y, drawKind());
   }
 
   return placed;

@@ -137,7 +137,7 @@ describe('Sim — worker routes around 1-tile pods (A* regression)', () => {
     const sim = new Sim({
       seed: 7,
       hqs: { faction0: { x: 10, y: 10 }, faction1: { x: 50, y: 50 } },
-      nodes: [{ x: 10, y: 20, energy: 1000 }],
+      nodes: [{ x: 10, y: 20, amount: 1000 }],
       initialEnergy: 10000,
     });
     injectOperationalPods(sim, [[10, 16]]); // dead on the straight line
@@ -154,7 +154,7 @@ describe('Sim — worker routes around 1-tile pods (A* regression)', () => {
     const sim = new Sim({
       seed: 7,
       hqs: { faction0: { x: 10, y: 10 }, faction1: { x: 50, y: 50 } },
-      nodes: [{ x: 10, y: 20, energy: 1000 }],
+      nodes: [{ x: 10, y: 20, amount: 1000 }],
       initialEnergy: 10000,
     });
     injectOperationalPods(sim, [[9, 16], [10, 16], [11, 16]]);
@@ -172,7 +172,7 @@ describe('Sim — worker routes around 1-tile pods (A* regression)', () => {
     const sim = new Sim({
       seed: 7,
       hqs: { faction0: { x: 10, y: 10 }, faction1: { x: 50, y: 50 } },
-      nodes: [{ x: 10, y: 16, energy: 1000 }],
+      nodes: [{ x: 10, y: 16, amount: 1000 }],
       initialEnergy: 10000,
     });
     const w = spawnUnit(sim.state, 'worker', 0, fromInt(10), fromInt(12));
@@ -199,7 +199,7 @@ describe('Sim — worker routes around 1-tile pods (A* regression)', () => {
     const sim = new Sim({
       seed: 7,
       hqs: { faction0: { x: 10, y: 10 }, faction1: { x: 50, y: 50 } },
-      nodes: [{ x: 10, y: 20, energy: 1000 }],
+      nodes: [{ x: 10, y: 20, amount: 1000 }],
       initialEnergy: 10000,
     });
     injectOperationalPods(sim, [[9, 16], [11, 16]]); // gap at x=10
@@ -214,7 +214,7 @@ describe('Pod placement keep-out around nodes', () => {
     const sim = new Sim({
       seed: 7,
       hqs: { faction0: { x: 10, y: 10 }, faction1: { x: 50, y: 50 } },
-      nodes: [{ x: 20, y: 20, energy: 1000 }],
+      nodes: [{ x: 20, y: 20, amount: 1000 }],
       initialEnergy: 10000,
     });
     expect(isPodTileBlockedByNode(sim.state, 20, 20)).toBe(true); // on the node
@@ -228,8 +228,9 @@ describe('Pod placement keep-out around nodes', () => {
     const sim = new Sim({
       seed: 7,
       hqs: { faction0: { x: 10, y: 10 }, faction1: { x: 50, y: 50 } },
-      nodes: [{ x: 20, y: 20, energy: 1000 }],
+      nodes: [{ x: 20, y: 20, amount: 1000 }],
       initialEnergy: 10000,
+      initialMatter: 10000, // Phase D.1: pods cost matter too.
     });
     const w = spawnUnit(sim.state, 'worker', 0, fromInt(18), fromInt(20));
     const podsBefore = sim.state.structures.length;

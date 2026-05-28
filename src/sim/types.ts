@@ -34,9 +34,17 @@ export function opposingFactionId(id: FactionId): FactionId {
 // Worker is the only unit kind. Combat units return in Phase D.
 export type UnitKind = 'worker';
 
-// Energy is the only live resource. Matter (construction material) lands
-// in Phase C.7.
-export type ResourceKind = 'energy';
+// Phase D.1: two live resources. Energy = the power that runs things
+// (spent to train + build; the score spine). Matter = construction
+// material (spent at build time only). Both are harvested from nodes of
+// the matching `kind` and deposited at the HQ.
+//
+// NOTE on the word "energy": the harvested resource here is distinct from
+// a worker's per-task `charge` battery (see Worker.charge below). Charge is
+// the unit's work fuel — drained per task, refilled at a pod/HQ; it is NOT
+// the faction's harvested Energy pool. Phase D.1 standardised the unit
+// mechanic's vocabulary on "charge" to keep the two apart.
+export type ResourceKind = 'energy' | 'matter';
 
 // Phase C.1: only the work pod survives in the structures union. Future
 // sub-phases re-introduce more kinds (HQ research host, combat-unit
@@ -65,6 +73,13 @@ export interface FactionState {
   hqX: Fixed;
   hqY: Fixed;
   energy: Fixed;
+  // Phase D.1: spendable Matter balance (construction material). Credited
+  // when a worker deposits matter at the HQ; debited at build time.
+  matter: Fixed;
+  // Cumulative matter ever deposited — monotonic (never decrements on spend),
+  // the matter twin of energyHarvested. Both feed the match score: the score
+  // spine is total resources harvested (energy + matter). Hashed.
+  matterHarvested: Fixed;
   // Cumulative energy ever deposited at this faction's HQ — monotonic, only
   // ever increases. `energy` above is the spendable balance (drops when you
   // train / build); this is the honest "how much have you collected" total
@@ -113,7 +128,7 @@ export interface FactionState {
 //   charging          — at the charge spot, ticking energy back up
 // `walkingToCharge` + `charging` together are CHARGE MODE — both are
 // uninterruptible. Player commands targeting a worker in charge mode are
-// silently rejected; the renderer surfaces a floating "needs energy"
+// silently rejected; the renderer surfaces a floating "needs charge"
 // lightning cue on the worker.
 // Phase C.6.8 adds one more:
 //   scouting — heading toward the nearest unexplored frontier tile to

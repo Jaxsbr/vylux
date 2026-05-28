@@ -20,7 +20,7 @@ const SPEC: InitialMatchSpec = {
   seed: 7,
   gridSize: 32,
   hqs: { faction0: { x: 2, y: 2 }, faction1: { x: 29, y: 29 } },
-  nodes: [{ x: 20, y: 20, energy: 100 }],
+  nodes: [{ x: 20, y: 20, amount: 100 }],
   initialEnergy: 0,
 };
 

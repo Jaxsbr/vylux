@@ -91,10 +91,10 @@ const HQ_VISION_TILES = 8;
 const DEFAULT_MAP_SEED = 42;
 // Pre-Phase-D scored match: live PvA / lockstep / observe matches end at the
 // buzzer (or early on full field exhaustion) and the higher score wins (see
-// sim/score.ts + checkWinner in sim/step.ts). 5 min × 60 s × 20 Hz = 6000
+// sim/score.ts + checkWinner in sim/step.ts). 15 min × 60 s × 20 Hz = 18000
 // ticks. Tutorial + tests + the determinism-gate scripted matches leave
 // `matchLengthTicks` unset so their behavior is unchanged.
-const MATCH_LENGTH_TICKS = 5 * 60 * TICK_HZ;
+const MATCH_LENGTH_TICKS = 15 * 60 * TICK_HZ;
 
 // Build the energy field for a normal match from a seed. Pure + seeded, so the
 // same seed always yields the same layout; the chosen seed is baked into the
@@ -142,15 +142,25 @@ const TUTORIAL_SPEC: InitialMatchSpec = {
   },
   nodes: [
     // faction-0 corner (bottom-left, near HQ (8,55))
-    { x: 12, y: 55, energy: 500 },
-    { x: 8, y: 51, energy: 500 },
-    { x: 13, y: 52, energy: 500 },
+    { x: 12, y: 55, amount: 500 },
+    { x: 8, y: 51, amount: 500 },
+    { x: 13, y: 52, amount: 500 },
     // faction-1 corner (top-right, near HQ (55,8))
-    { x: 51, y: 8, energy: 500 },
-    { x: 55, y: 12, energy: 500 },
-    { x: 52, y: 13, energy: 500 },
+    { x: 51, y: 8, amount: 500 },
+    { x: 55, y: 12, amount: 500 },
+    { x: 52, y: 13, amount: 500 },
+    // Phase D.1: one matter node per corner so matter is VISIBLE/discoverable
+    // in the tutorial (point-symmetric about the 64-grid centre, so each
+    // corner is equivalent). Not a required step — the player has starting
+    // matter for the pod; this is the "go find more" beat.
+    { x: 8, y: 48, amount: 300, kind: 'matter' },  // f0 corner
+    { x: 55, y: 15, amount: 300, kind: 'matter' }, // f1 corner (mirror)
   ],
   initialEnergy: 400,
+  // Phase D.1: enough matter to build the tutorial's work pod (30 M) without
+  // first hauling any, so the buildPod step never blocks; the matter node
+  // above lets the player harvest more if they explore.
+  initialMatter: 60,
   hqMaxHp: 250,
 };
 
@@ -694,12 +704,11 @@ async function bootstrap(): Promise<void> {
   resourceBar.appendChild(hpCard.root);
   const energyCard = makeResourceCard('E', '0', RESOURCE_COLOR.energy, false, factionTint);
   resourceBar.appendChild(energyCard.root);
-  // Phase C.2: Matter is the planned construction-material companion
-  // (plan.md C.7). Reserved + greyed in the SC2-model resource bar so the
-  // slot exists now and goes live later without a layout shift.
-  const matterCard = makeResourceCard('M', '—', '#6b7d88', false, factionTint);
-  matterCard.root.style.opacity = '0.45';
-  matterCard.root.title = 'Matter — reserved (Phase C.7)';
+  // Phase D.1: Matter goes live — the second spendable resource (construction
+  // material). Was reserved + greyed since C.2; now bound to faction.matter
+  // each frame, same as Energy.
+  const matterCard = makeResourceCard('M', '0', RESOURCE_COLOR.matter, false, factionTint);
+  matterCard.root.title = 'Matter — construction material';
   resourceBar.appendChild(matterCard.root);
   const supplyCard = makeResourceCard('S', '0/5', RESOURCE_COLOR.supply, false, factionTint);
   resourceBar.appendChild(supplyCard.root);
@@ -849,6 +858,7 @@ async function bootstrap(): Promise<void> {
     const me = s.factions[viewFaction];
     hpCard.value.textContent = `${(me.hqHp / 65536).toFixed(0)}`;
     energyCard.value.textContent = `${(me.energy / 65536).toFixed(0)}`;
+    matterCard.value.textContent = `${(me.matter / 65536).toFixed(0)}`;
     supplyCard.value.textContent = `${me.supplyUsed}/${me.supplyCap}`;
     const blocked = me.supplyUsed >= me.supplyCap;
     supplyCard.root.style.borderColor = blocked ? '#ff5577' : '#234';

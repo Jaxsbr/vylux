@@ -18,7 +18,7 @@
 import { CommandKind, type Command } from './commands';
 import { distSq, fromInt, type Fixed } from './fixed';
 import { type Faction, type ResourceNode, type SimState } from './types';
-import { MAX_TRAIN_QUEUE, STRUCTURE_STATS, unitStatsFor } from './units-config';
+import { MAX_TRAIN_QUEUE, STRUCTURE_STATS, canAfford, unitStatsFor } from './units-config';
 import { isInChargeMode } from './step';
 import { isFullyExplored, isPodTileBlockedByNode } from './state';
 
@@ -57,13 +57,20 @@ const AI_POD_OFFSETS: ReadonlyArray<{ dx: number; dy: number }> = [
 export function tickAi(state: SimState, faction: Faction): Command[] {
   if (state.tick % AI_TICK_INTERVAL !== 0) return [];
 
-  const commands: Command[] = autoAssignIdleWorkers(state, faction);
+  // Phase D.1: keep ONE worker steadily on matter so the dual-cost pod build
+  // (40 E + 30 M) never starves. Runs FIRST and claims its worker via an
+  // exclusion set so autoAssign + scouting don't fight over it the same frame.
+  // The kind-agnostic autoAssign would otherwise re-point a freshly-assigned
+  // matter worker at the nearest (possibly energy) node.
+  const matter = ensureMatterHarvester(state, faction);
+  const commands: Command[] = matter.commands.slice();
+  for (const c of autoAssignIdleWorkers(state, faction, matter.assignedIds)) commands.push(c);
   // Phase C.6.10: send stalled workers scouting so the AI discovers fresh
   // nodes instead of stalling once its home patch depletes. autoAssign above
   // already routes any worker that HAS a discovered live node; dispatchScouts
   // only takes the genuinely starved ones (idle past the threshold with no
   // node to harvest), so the two never command the same worker in one frame.
-  const scout = dispatchScouts(state, faction);
+  const scout = dispatchScouts(state, faction, matter.assignedIds);
   for (let i = 0; i < scout.commands.length; i++) commands.push(scout.commands[i]);
   const fs = state.factions[faction];
   const workerCount = countOwnedWorkers(state, faction);
@@ -77,7 +84,7 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
   if (
     fs.supplyUsed + queued < fs.supplyCap
     && queued < MAX_TRAIN_QUEUE
-    && fs.energy >= workerCost
+    && canAfford(fs, workerCost)
   ) {
     commands.push({ kind: CommandKind.TrainUnit, faction, unitKind: 'worker' });
     return commands;
@@ -100,7 +107,7 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
     workerCount >= fs.supplyCap
     && !podInFlight
     && ownedPodCount < AI_MAX_POD_COUNT
-    && fs.energy >= podStats.buildCost
+    && canAfford(fs, podStats.buildCost)
     && builder !== 0
   ) {
     // Pick the first deterministic offset whose tile is buildable — clear of
@@ -146,18 +153,88 @@ function friendlyPodOnTile(state: SimState, faction: Faction, tileX: number, til
   return false;
 }
 
+// Phase D.1: ensure exactly ONE worker is steadily harvesting matter, so the
+// AI can afford the dual-cost pod (40 E + 30 M). Pods cost matter now, but the
+// AI's nearest-node harvesting is kind-agnostic and its guaranteed near-HQ
+// node is energy — so without this it might never collect matter and never
+// raise its supply cap.
+//
+// Policy ("one steady harvester"): if a worker is already committed to matter
+// (assigned to a matter node, or carrying matter home), do nothing — it stays
+// the harvester. Otherwise claim the idle, actionable worker nearest the
+// nearest discovered matter node and assign it. The returned id is excluded
+// from autoAssign + scouting this frame so nothing re-commands it. Returns no
+// command (and an empty set) when no matter is discovered yet, or no worker is
+// free — the AI simply builds pods later once matter is found.
+//
+// Deterministic: nodes/workers scanned in array order, nearest with lowest-id
+// tiebreak. No RNG.
+function ensureMatterHarvester(
+  state: SimState,
+  faction: Faction,
+): { commands: Command[]; assignedIds: Set<number> } {
+  const assignedIds = new Set<number>();
+
+  // Already have a worker on matter? Assigned-to-a-matter-node covers
+  // moving/harvesting/returning (targetNodeId persists across the cycle);
+  // carrying matter is the belt-and-braces case.
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (!u.alive || u.faction !== faction || u.kind !== 'worker') continue;
+    if (u.carriedKind === 'matter' && u.carrying > 0) return { commands: [], assignedIds };
+    if (u.targetNodeId !== 0) {
+      const tn = findNodeById(state, u.targetNodeId);
+      if (tn !== null && tn.kind === 'matter') return { commands: [], assignedIds };
+    }
+  }
+
+  // No matter discovered yet → nothing to do (build pods later).
+  const node = nearestLiveNode(state, faction, state.factions[faction].hqX, state.factions[faction].hqY, 'matter');
+  if (node === null) return { commands: [], assignedIds };
+
+  // Claim the idle, actionable worker nearest that matter node (same gates as
+  // autoAssign), lowest-id tiebreak.
+  let bestId = 0;
+  let bestD: Fixed = 0;
+  for (let i = 0; i < state.units.length; i++) {
+    const u = state.units[i];
+    if (!u.alive || u.faction !== faction || u.kind !== 'worker') continue;
+    if (u.phase !== 'idle') continue;
+    if (u.targetNodeId !== 0) continue;
+    if (u.moveTarget !== null) continue;
+    if (isInChargeMode(u)) continue;
+    if (u.charge <= 0) continue;
+    const d = distSq(u.x, u.y, node.x, node.y);
+    if (bestId === 0 || d < bestD) {
+      bestId = u.id;
+      bestD = d;
+    }
+  }
+  if (bestId === 0) return { commands: [], assignedIds };
+  assignedIds.add(bestId);
+  return {
+    commands: [{ kind: CommandKind.AssignWorkerToNode, workerId: bestId, nodeId: node.id }],
+    assignedIds,
+  };
+}
+
 // Point every idle worker (phase==='idle' with no node target and no
 // active manual move-park) at the nearest live energy node. Skips
 // workers in charge mode — the sim is autonomously walking them to a
 // charge spot, and a re-assign from the AI would just bounce off the
 // applyCommand charge gate.
-export function autoAssignIdleWorkers(state: SimState, faction: Faction): Command[] {
+export function autoAssignIdleWorkers(
+  state: SimState,
+  faction: Faction,
+  exclude?: ReadonlySet<number>,
+): Command[] {
   const out: Command[] = [];
   for (let i = 0; i < state.units.length; i++) {
     const u = state.units[i];
     if (!u.alive) continue;
     if (u.faction !== faction) continue;
     if (u.kind !== 'worker') continue;
+    if (exclude !== undefined && exclude.has(u.id)) continue;
     if (u.phase !== 'idle') continue;
     if (u.targetNodeId !== 0) continue;
     if (u.moveTarget !== null) continue;
@@ -191,6 +268,7 @@ export function autoAssignIdleWorkers(state: SimState, faction: Faction): Comman
 function dispatchScouts(
   state: SimState,
   faction: Faction,
+  exclude?: ReadonlySet<number>,
 ): { commands: Command[]; scoutingIds: Set<number> } {
   const commands: Command[] = [];
   const scoutingIds = new Set<number>();
@@ -204,6 +282,8 @@ function dispatchScouts(
     if (!u.alive) continue;
     if (u.faction !== faction) continue;
     if (u.kind !== 'worker') continue;
+    // Don't scout a worker the matter-harvester pass just claimed this frame.
+    if (exclude !== undefined && exclude.has(u.id)) continue;
     if (u.phase === 'scouting') { activeScouts += 1; continue; }
     if (u.phase !== 'idle') continue;
     if (u.moveTarget !== null) continue;
@@ -291,7 +371,23 @@ function pickActionableWorker(
 // Lowest-ID tiebreaker on equal distance — same convention as the rest
 // of the sim. Skips undiscovered nodes so the AI doesn't auto-route to
 // nodes its faction hasn't scouted yet.
-function nearestLiveNode(state: SimState, faction: Faction, x: Fixed, y: Fixed): ResourceNode | null {
+// Node lookup by id. Nodes never reorder (tombstones keep array order), so a
+// scan is stable + deterministic. Returns null if absent or dead.
+function findNodeById(state: SimState, id: number): ResourceNode | null {
+  for (let i = 0; i < state.nodes.length; i++) {
+    const n = state.nodes[i];
+    if (n.id === id) return n.alive ? n : null;
+  }
+  return null;
+}
+
+function nearestLiveNode(
+  state: SimState,
+  faction: Faction,
+  x: Fixed,
+  y: Fixed,
+  kind?: ResourceNode['kind'],
+): ResourceNode | null {
   let best: ResourceNode | null = null;
   let bestD: Fixed = 0;
   for (let i = 0; i < state.nodes.length; i++) {
@@ -299,6 +395,7 @@ function nearestLiveNode(state: SimState, faction: Faction, x: Fixed, y: Fixed):
     if (!n.alive) continue;
     if (n.remaining <= 0) continue;
     if (!n.discoveredBy[faction]) continue;
+    if (kind !== undefined && n.kind !== kind) continue;
     const d = distSq(x, y, n.x, n.y);
     if (best === null || d < bestD || (d === bestD && n.id < best.id)) {
       best = n;

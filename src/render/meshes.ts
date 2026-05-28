@@ -72,7 +72,7 @@ export interface UnitVisual {
   // Phase C.4 — charge ring. The readable charge indicator that replaced the
   // tiny charge bar. Driven by SimRenderer from the worker's charge mode.
   chargeRing: ChargeRing;
-  // Phase C.1 — "needs energy" lightning cue. Floats above the worker
+  // Phase C.1 — "needs charge" lightning cue. Floats above the worker
   // for ~1 s when the renderer detects a blocked command. trigger()
   // resets the fade; tick() advances + auto-hides.
   energyCue: EnergyCue;
@@ -334,7 +334,7 @@ function buildChargeBar(): ChargeBar {
   };
 }
 
-// Phase C.1 — "needs energy" lightning cue. A small bright sprite that
+// Phase C.1 — "needs charge" lightning cue. A small bright sprite that
 // pops above the worker for ~1 s when the renderer detects a blocked
 // command on a charge-mode worker. Uses a canvas-drawn glyph rather
 // than a textured asset so we don't ship a new file. Visibility is
@@ -536,6 +536,7 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
 //
 const NODE_PALETTE: Record<ResourceKind, number> = {
   energy: 0xffd166, // gold
+  matter: 0xff9a3c, // amber (Phase D.1) — construction material
 };
 
 // Phase C.4 node life. A slow core spin (rad/s) reads as "live energy" at a
@@ -679,6 +680,18 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
       // shade-filled idiom shared with HQ and work pods.
       const geo = new THREE.OctahedronGeometry(0.18, 0);
       addOutlined(geo, 0.45, new THREE.Vector3(1, 2.2, 1), 'energy-spike');
+      break;
+    }
+    case 'matter': {
+      // Amber material block — a squat cube, wider than tall, sitting low.
+      // Deliberately a DIFFERENT cross-section + proportion from energy's
+      // tall spike so the resource reads by SHAPE first; the amber/gold
+      // colours are close, so shape carries the distinction (Phase D.1).
+      // Rotating the whole group 45° gives a crystalline diamond footprint
+      // from the top-down camera (rotates body + edge trim together).
+      const geo = new THREE.BoxGeometry(0.3, 0.22, 0.3);
+      addOutlined(geo, 0.2, null, 'matter-block');
+      group.rotation.y = Math.PI / 4;
       break;
     }
   }

@@ -84,14 +84,14 @@ describe('generateEnergyField', () => {
   it('assigns only allowed tier energy values', () => {
     const allowed = new Set(ENERGY_TIERS.map((t) => t.energy));
     for (const n of generateEnergyField(BASE)) {
-      expect(allowed.has(n.energy)).toBe(true);
+      expect(allowed.has(n.amount)).toBe(true);
     }
   });
 
   it('produces a mix of tiers across many seeds (values are randomised)', () => {
     const seen = new Set<number>();
     for (let s = 0; s < 40; s++) {
-      for (const n of generateEnergyField({ ...BASE, seed: s })) seen.add(n.energy);
+      for (const n of generateEnergyField({ ...BASE, seed: s })) seen.add(n.amount);
     }
     // Over 40 seeds × 16 nodes we expect all three tiers to appear.
     expect(seen.size).toBe(ENERGY_TIERS.length);
@@ -127,7 +127,7 @@ describe('generateEnergyField', () => {
     // Each node must have a twin at (N-x, N-y) with the same energy value.
     for (const n of nodes) {
       const twin = nodes.find(
-        (m) => m.x === N - n.x && m.y === N - n.y && m.energy === n.energy,
+        (m) => m.x === N - n.x && m.y === N - n.y && m.amount === n.amount && m.kind === n.kind,
       );
       expect(twin).toBeDefined();
     }

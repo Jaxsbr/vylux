@@ -53,7 +53,7 @@ import { findPath, tileAxis, tileCenter, packTile, NO_EXEMPT, type PathBlocker }
 import {
   CHARGE_TICKS_PER_UNIT_HQ,
   CHARGE_TICKS_PER_UNIT_POD,
-  ENERGY_COST_PER_TASK,
+  CHARGE_COST_PER_TASK,
   HQ_CHARGE_SLOT_COUNT,
   HQ_CHARGE_SLOT_OFFSETS,
   HQ_SUPPLY_CAP_INITIAL,
@@ -67,6 +67,8 @@ import {
   UNIT_STATS,
   WORK_POD_BUILD_REACH_SQ,
   WORK_POD_CAP_BONUS,
+  canAfford,
+  spendCost,
   factionConfigFor,
   unitStatsFor,
 } from './units-config';
@@ -272,10 +274,10 @@ function maybeAutoResumeAfterCharge(state: SimState, w: Worker): void {
     w.previousNodeId = 0;
     return;
   }
-  if (w.charge < ENERGY_COST_PER_TASK) return;
+  if (w.charge < CHARGE_COST_PER_TASK) return;
   // Resume — same shape as applyCommand AssignWorkerToNode, minus the
   // command path. We're spending a fresh charge to start the cycle.
-  w.charge -= ENERGY_COST_PER_TASK;
+  w.charge -= CHARGE_COST_PER_TASK;
   w.targetNodeSlot = pickHarvestSlot(state, node.id, w.id);
   w.targetNodeId = node.id;
   w.phase = 'movingToNode';
@@ -293,13 +295,13 @@ export function applyCommand(state: SimState, cmd: Command): void {
       if (!n) return;
       // Phase C.1: charge gate. A worker in charge mode (or at 0 charge)
       // silently rejects new task assignments. The renderer surfaces a
-      // floating "needs energy" lightning cue when this filter trips.
+      // floating "needs charge" lightning cue when this filter trips.
       if (isInChargeMode(u)) return;
-      if (u.charge < ENERGY_COST_PER_TASK) return;
+      if (u.charge < CHARGE_COST_PER_TASK) return;
       // Phase C.1: drain at TASK START. One harvest cycle = 1 energy.
       // The deduction lands now (not at deposit) so an aborted cycle
       // costs the player the same as a completed one.
-      u.charge -= ENERGY_COST_PER_TASK;
+      u.charge -= CHARGE_COST_PER_TASK;
       // Pick a harvest slot before binding the worker to the node —
       // counted across all currently-assigned workers, so a multi-worker
       // fan-out (player click on node with 3 workers selected → 3
@@ -330,13 +332,13 @@ export function applyCommand(state: SimState, cmd: Command): void {
       // the head down and spawns it on completion.
       const fs = state.factions[cmd.faction];
       const stats = unitStatsFor(fs.factionId, cmd.unitKind);
-      if (fs.energy < stats.trainCost) return;
+      if (!canAfford(fs, stats.trainCost)) return;
       // Reserve supply: live workers (supplyUsed, recomputed end-of-step
       // so stable here) PLUS already-queued units must stay under the cap.
       // Silent reject when the cap is full or the queue is full.
       if (fs.supplyUsed + fs.trainQueue.length >= fs.supplyCap) return;
       if (fs.trainQueue.length >= MAX_TRAIN_QUEUE) return;
-      fs.energy = sub(fs.energy, stats.trainCost);
+      spendCost(fs, stats.trainCost);
       // Resolve the spawn tile NOW (concrete Fixed coords) so the queue
       // item is fully hashable and the perimeter rotation advances
       // deterministically at enqueue. Explicit tile = click-to-place;
@@ -366,7 +368,7 @@ export function applyCommand(state: SimState, cmd: Command): void {
       // move orders too. Per the answer to open Q3 — moves are free
       // while energy exists, but a depleted worker is fully locked
       // until recharge.
-      if (u.kind === 'worker' && (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK)) return;
+      if (u.kind === 'worker' && (isInChargeMode(u) || u.charge < CHARGE_COST_PER_TASK)) return;
       const tx = fromInt(cmd.x);
       const ty = fromInt(cmd.y);
       // Formation retention — see FORMATION_OFFSETS comment.
@@ -396,18 +398,18 @@ export function applyCommand(state: SimState, cmd: Command): void {
       const w = findUnit(state, cmd.workerId);
       if (w === null || !w.alive || w.kind !== 'worker') return;
       if (isInChargeMode(w)) return;
-      if (w.charge < ENERGY_COST_PER_TASK) return;
+      if (w.charge < CHARGE_COST_PER_TASK) return;
       // Phase C.6.6: keep work pods out of a node's immediate ring so the
       // node's harvest-slot approach stays clear (the worker's blind final
       // hop to a slot would otherwise clip a pod glued to the node).
       if (cmd.structureKind === 'workPod' && isPodTileBlockedByNode(state, cmd.x, cmd.y)) return;
       const fs = state.factions[w.faction];
       const stats = STRUCTURE_STATS[cmd.structureKind];
-      if (fs.energy < stats.buildCost) return;
-      // Pay the Energy + the worker's charge atomically — both fail
-      // together, or both apply together.
-      fs.energy = sub(fs.energy, stats.buildCost);
-      w.charge -= ENERGY_COST_PER_TASK;
+      if (!canAfford(fs, stats.buildCost)) return;
+      // Pay the resource cost (energy + matter for a pod) + the worker's
+      // charge atomically — all fail together, or all apply together.
+      spendCost(fs, stats.buildCost);
+      w.charge -= CHARGE_COST_PER_TASK;
       const newStructure = spawnStructure(
         state,
         cmd.structureKind,
@@ -443,14 +445,14 @@ export function applyCommand(state: SimState, cmd: Command): void {
       const w = findUnit(state, cmd.workerId);
       if (w === null || !w.alive || w.kind !== 'worker') return;
       if (isInChargeMode(w)) return;
-      if (w.charge < ENERGY_COST_PER_TASK) return;
+      if (w.charge < CHARGE_COST_PER_TASK) return;
       const s = findStructure(state, cmd.structureId);
       if (s === null || !s.alive) return;
       if (s.kind !== 'workPod') return;
       if (s.faction !== w.faction) return;
       if (s.buildTicksRemaining <= 0) return; // already operational — nothing to finish
       // Pay the worker's charge (same per-task drain as any other order).
-      w.charge -= ENERGY_COST_PER_TASK;
+      w.charge -= CHARGE_COST_PER_TASK;
       // Drop any in-progress harvest / move — the worker's new job is to
       // build. carrying / carriedKind reset to canonical zeros so the hash
       // slot stays clean (mirrors BuildStructureByWorker).
@@ -493,8 +495,10 @@ export function applyCommand(state: SimState, cmd: Command): void {
       // kinds land).
       const cost = cmd.researchKind === 'autoResume' ? RESEARCH_AUTO_RESUME_COST : 0;
       const ticks = cmd.researchKind === 'autoResume' ? RESEARCH_AUTO_RESUME_TICKS : 0;
-      if (fs.energy < cost) return;
-      fs.energy = sub(fs.energy, cost);
+      // Research is energy-only; route through the shared cost helpers so
+      // every spend site reads the same way.
+      if (!canAfford(fs, { energy: cost })) return;
+      spendCost(fs, { energy: cost });
       fs.researchingKind = cmd.researchKind;
       fs.researchTicksRemaining = ticks;
       return;
@@ -511,7 +515,7 @@ export function applyCommand(state: SimState, cmd: Command): void {
       const w = findUnit(state, cmd.workerId);
       if (w === null || !w.alive || w.kind !== 'worker') return;
       if (isInChargeMode(w)) return;
-      if (w.charge < ENERGY_COST_PER_TASK) return;
+      if (w.charge < CHARGE_COST_PER_TASK) return;
       const target = findNearestUnexploredTile(state, w.faction, w.x, w.y);
       if (target < 0) return; // fully revealed — no-op
       const c = tileCenter(target, state.gridSize);
@@ -931,11 +935,18 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
       w.x = nextRet.x;
       w.y = nextRet.y;
       if (distSq(w.x, w.y, hq.hqX, hq.hqY) <= HQ_DEPOSIT_REACH_SQ) {
-        hq.energy = add(hq.energy, w.carrying);
-        // Tally the cumulative score-spine total. Mirrors the spendable
-        // credit but never decrements — `energy` drops on spend; this
-        // doesn't. This is the only site that credits energyHarvested.
-        hq.energyHarvested = add(hq.energyHarvested, w.carrying);
+        // Phase D.1: credit the pool that matches what the worker carried,
+        // plus its cumulative harvested twin (the score spine — total
+        // resources, energy + matter). The spendable pool drops on spend;
+        // the *Harvested totals never decrement. This is the only site that
+        // credits energyHarvested / matterHarvested.
+        if (w.carriedKind === 'matter') {
+          hq.matter = add(hq.matter, w.carrying);
+          hq.matterHarvested = add(hq.matterHarvested, w.carrying);
+        } else {
+          hq.energy = add(hq.energy, w.carrying);
+          hq.energyHarvested = add(hq.energyHarvested, w.carrying);
+        }
         w.carrying = 0;
         w.carriedKind = 'energy';
         // End of harvest cycle — task complete. Decide what's next:
@@ -943,7 +954,7 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
         // (b) charge OK + node still alive? auto-continue cycle (which
         //     costs another charge — re-check + drain).
         // (c) otherwise idle.
-        if (w.charge < ENERGY_COST_PER_TASK) {
+        if (w.charge < CHARGE_COST_PER_TASK) {
           // Drop the target and go charge.
           w.phase = 'idle';
           w.targetNodeId = 0;
@@ -955,7 +966,7 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
         if (node) {
           // Auto-continue the cycle — pay the energy now (drain at
           // start of next cycle).
-          w.charge -= ENERGY_COST_PER_TASK;
+          w.charge -= CHARGE_COST_PER_TASK;
           w.phase = 'movingToNode';
         } else {
           w.phase = 'idle';

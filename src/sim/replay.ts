@@ -286,7 +286,24 @@ import type { InitialMatchSpec } from './state';
 // energy field (map-gen.ts now generates source-half + 180° rotation) only
 // affects callers that go through generateEnergyField — the determinism
 // goldens build their own hand-spec, so node positions don't move there.
-export const REPLAY_VERSION = 32;
+//
+// v33 (Phase D.1 — Matter + cost split): adds `FactionState.matter` (Fixed,
+// hashed) — the second spendable resource. `ResourceKind` gains 'matter', so
+// nodes + carried loads can now hash as kind=1; the worker deposit site
+// credits `matter` (matter is build-time-only, not scored, so there's no
+// cumulative twin). Costs generalised to `{ energy?, matter? }`: the work pod
+// now costs 40 E + 30 M (was 60 E). Spec node shape renamed `energy`→`amount`
+// + optional `kind`; spec gains optional `initialMatter`. The new faction
+// field changes the hash on every tick, so every fixture regenerates; the
+// AI-vs-AI gate also now seeds a matter node + the AI harvests/spends it.
+//
+// v34 (Phase D.1 follow-up): matter now FEEDS THE SCORE — adds cumulative
+// `FactionState.matterHarvested` (Fixed, hashed), the monotonic twin of
+// energyHarvested. The score spine becomes total resources harvested
+// (energy + matter); checkWinner / scoreBreakdown / the tie-break read both.
+// New hashed field → every fixture regenerates. (Match length 5→15 min is a
+// spec value, not hashed — it doesn't move the goldens.)
+export const REPLAY_VERSION = 34;
 
 export interface ReplayLog {
   version: number;

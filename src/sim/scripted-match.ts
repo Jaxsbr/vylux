@@ -32,9 +32,9 @@ export const SCRIPTED_MATCH_SPEC: InitialMatchSpec = {
     faction1: { x: 18, y: 18 },
   },
   nodes: [
-    { x: 8, y: 5, energy: 100 },
-    { x: 12, y: 14, energy: 100 },
-    { x: 5, y: 12, energy: 100 },
+    { x: 8, y: 5, amount: 100 },
+    { x: 12, y: 14, amount: 100 },
+    { x: 5, y: 12, amount: 100 },
   ],
   // Pre-fund energy so each faction can train its bootstrap worker on tick 0
   // before any harvest income arrives.
@@ -93,13 +93,20 @@ export const AI_VS_AI_SPEC: InitialMatchSpec = {
     faction1: { x: 17, y: 17 },
   },
   nodes: [
-    { x: 6, y: 6, energy: 200 },
-    { x: 14, y: 14, energy: 200 },
-    { x: 10, y: 10, energy: 200 },
-    { x: 6, y: 14, energy: 200 },
-    { x: 14, y: 6, energy: 200 },
+    { x: 6, y: 6, amount: 200 },
+    { x: 14, y: 14, amount: 200 },
+    // Phase D.1: a central matter node so the AI-vs-AI determinism gate
+    // exercises the matter harvest + deposit path (the AI's one-steady-
+    // matter-harvester routes a worker here once it's discovered).
+    { x: 10, y: 10, amount: 200, kind: 'matter' },
+    { x: 6, y: 14, amount: 200 },
+    { x: 14, y: 6, amount: 200 },
   ],
   initialEnergy: 100,
+  // Phase D.1: seed a little matter so the dual-cost pod build (40 E + 30 M)
+  // can fire from starting stock before the matter harvester catches up —
+  // keeps the gate covering the spendCost(matter) branch.
+  initialMatter: 60,
 };
 
 export function runAiVsAiMatch(durationTicks: number): string[] {

@@ -11,13 +11,19 @@
 import type { Faction, UnitKind } from '../sim/types';
 import type { Sim } from '../sim/sim';
 import { toFloat, type Fixed } from '../sim/fixed';
-import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, STRUCTURE_STATS, unitStatsFor } from '../sim/units-config';
+import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, STRUCTURE_STATS, canAfford, unitStatsFor, type ResourceCost } from '../sim/units-config';
 import { findStructure, findUnit, isFullyExplored } from '../sim/state';
 import { isInChargeMode } from '../sim/step';
 import { themeForFaction } from './factions/theme';
 import { hudIconSvg, type HudIconName } from './hud-icons';
 
 const displayCost = (f: Fixed): number => Math.round(toFloat(f));
+// Phase D.1: pull a single resource amount out of a cost bag for the badge
+// (undefined when that resource isn't part of the cost → no badge drawn).
+const costAmount = (cost: ResourceCost, key: 'energy' | 'matter'): number | undefined => {
+  const f = cost[key];
+  return f === undefined ? undefined : displayCost(f);
+};
 
 // Phase C.2: SC2-style command card — a fixed 3-wide grid of icon tiles so
 // the bar never resizes to fit its text and actions read as buttons, not
@@ -60,6 +66,9 @@ interface ButtonSpec {
   icon: HudIconName;
   hotkey?: string;
   costEnergy?: number;
+  // Phase D.1: matter cost badge (amber), shown beneath the energy badge
+  // when the action also costs matter (e.g. the work pod).
+  costMatter?: number;
   enabled: boolean;
   disabledReason?: string;
   onClick: () => void;
@@ -196,7 +205,7 @@ export class ActionBar {
       const factionId = fs.factionId;
       const stats = unitStatsFor(factionId, 'worker');
       const queued = fs.trainQueue.length;
-      const energyOk = fs.energy >= stats.trainCost;
+      const energyOk = canAfford(fs, stats.trainCost);
       // Phase C.2: the cap counts queued units too (matches the sim
       // reservation gate), and the queue itself is bounded.
       const capOk = (fs.supplyUsed + queued) < fs.supplyCap;
@@ -217,7 +226,8 @@ export class ActionBar {
           label: 'TRAIN WORKER',
           icon: 'worker',
           hotkey: 'W',
-          costEnergy: displayCost(stats.trainCost),
+          costEnergy: costAmount(stats.trainCost, 'energy'),
+          costMatter: costAmount(stats.trainCost, 'matter'),
           enabled,
           disabledReason: reason,
           onClick: () => this.delegate.onTrainKindSelected('worker'),
@@ -294,19 +304,25 @@ export class ActionBar {
     if (workerSelected) {
       const specs: ButtonSpec[] = [];
 
-      // Build work pod.
+      // Build work pod (Phase D.1: costs energy + matter).
       const podStats = STRUCTURE_STATS.workPod;
-      const podEnergyOk = fs.energy >= podStats.buildCost;
+      const podCostOk = canAfford(fs, podStats.buildCost);
+      // Distinguish which resource is short so the tooltip is actionable.
+      const podEnergyShort = podStats.buildCost.energy !== undefined && fs.energy < podStats.buildCost.energy;
+      const podMatterShort = podStats.buildCost.matter !== undefined && fs.matter < podStats.buildCost.matter;
       let podReason: string | undefined;
       if (!workerActionable) podReason = 'worker needs charge';
-      else if (!podEnergyOk) podReason = 'no energy';
+      else if (podEnergyShort && podMatterShort) podReason = 'no energy or matter';
+      else if (podMatterShort) podReason = 'no matter';
+      else if (podEnergyShort) podReason = 'no energy';
       specs.push({
         id: 'build-work-pod',
         label: 'BUILD WORK POD',
         icon: 'pod',
         hotkey: 'B',
-        costEnergy: displayCost(podStats.buildCost),
-        enabled: podEnergyOk && workerActionable,
+        costEnergy: costAmount(podStats.buildCost, 'energy'),
+        costMatter: costAmount(podStats.buildCost, 'matter'),
+        enabled: podCostOk && workerActionable,
         disabledReason: podReason,
         onClick: () => this.delegate.onBuildWorkPodSelected(),
       });
@@ -420,6 +436,14 @@ export class ActionBar {
       cost.style.cssText = 'position:absolute;top:2px;right:3px;font-size:8px;font-weight:700;color:#ffd166;';
       cost.textContent = `${spec.costEnergy}`;
       btn.appendChild(cost);
+    }
+    // Phase D.1: matter cost badge in amber, stacked just under the energy
+    // badge so a dual-cost action (the work pod) shows both at a glance.
+    if (spec.costMatter !== undefined) {
+      const m = document.createElement('div');
+      m.style.cssText = 'position:absolute;top:12px;right:3px;font-size:8px;font-weight:700;color:#ff9a3c;';
+      m.textContent = `${spec.costMatter}`;
+      btn.appendChild(m);
     }
     if (!spec.enabled && spec.disabledReason) btn.title = spec.disabledReason;
     btn.addEventListener('click', () => spec.onClick());
