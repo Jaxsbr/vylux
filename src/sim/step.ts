@@ -35,6 +35,7 @@ import {
   findNode,
   findStructure,
   findUnit,
+  isPodTileBlockedByHq,
   isPodTileBlockedByNode,
   markExploredCircle,
   spawnStructure,
@@ -47,7 +48,7 @@ import {
   type Unit,
   type Worker,
 } from './types';
-import { add, distSq, fromFloat, fromInt, rangeSq, sub, type Fixed } from './fixed';
+import { abs, add, distSq, FIXED_ONE, fromFloat, fromInt, rangeSq, sub, type Fixed } from './fixed';
 import { decideScoreWinner } from './score';
 import { findPath, tileAxis, tileCenter, packTile, NO_EXEMPT, type PathBlocker } from './pathfind';
 import {
@@ -402,7 +403,12 @@ export function applyCommand(state: SimState, cmd: Command): void {
       // Phase C.6.6: keep work pods out of a node's immediate ring so the
       // node's harvest-slot approach stays clear (the worker's blind final
       // hop to a slot would otherwise clip a pod glued to the node).
-      if (cmd.structureKind === 'workPod' && isPodTileBlockedByNode(state, cmd.x, cmd.y)) return;
+      if (
+        cmd.structureKind === 'workPod' &&
+        (isPodTileBlockedByNode(state, cmd.x, cmd.y) || isPodTileBlockedByHq(state, cmd.x, cmd.y))
+      ) {
+        return;
+      }
       const fs = state.factions[w.faction];
       const stats = STRUCTURE_STATS[cmd.structureKind];
       if (!canAfford(fs, stats.buildCost)) return;
@@ -713,9 +719,43 @@ function collectBlockers(state: SimState): PathBlocker[] {
   for (let i = 0; i < state.nodes.length; i++) {
     const n = state.nodes[i];
     if (!n.alive) continue;
-    blockers.push({ x: n.x, y: n.y, pathRadiusSq: NODE_PATH_BLOCK_SQ, key: n.id });
+    // Phase D.2 hybrid blocking: a node blocks pathfinding ONLY if it's a true
+    // standalone single — no other alive node within Chebyshev 1. A *clustered*
+    // node (≥1 adjacent/diagonal node neighbour) is walk-through, so the dense
+    // interior of an organic blob stays harvestable (it would otherwise be
+    // unreachable — A* can't enter and workers can't cross the surrounding
+    // nodes). Recomputed from alive nodes each tick, so a cluster picked down to
+    // its last survivor sees that survivor become solid again. See docs/plan.md
+    // "Phase D.2 — Pathfinding".
+    if (nodeIsStandalone(state.nodes, i)) {
+      blockers.push({ x: n.x, y: n.y, pathRadiusSq: NODE_PATH_BLOCK_SQ, key: n.id });
+    }
   }
   return blockers;
+}
+
+// Chebyshev-1 neighbour threshold for "is this node part of a cluster?". Nodes
+// sit on integer tiles, so this is exact equality at 1 tile (FIXED_ONE).
+const NODE_CLUSTER_NEIGHBOUR: Fixed = FIXED_ONE;
+
+// True iff node `idx` has NO alive node neighbour within Chebyshev 1 — i.e. it's
+// a standalone single (and therefore a pathfinding blocker per the D.2 rule).
+// Pure over the node array; exported for the cluster-pathing test.
+export function nodeIsStandalone(nodes: SimState['nodes'], idx: number): boolean {
+  const a = nodes[idx];
+  if (!a.alive) return false;
+  for (let j = 0; j < nodes.length; j++) {
+    if (j === idx) continue;
+    const b = nodes[j];
+    if (!b.alive) continue;
+    if (
+      abs(sub(a.x, b.x)) <= NODE_CLUSTER_NEIGHBOUR &&
+      abs(sub(a.y, b.y)) <= NODE_CLUSTER_NEIGHBOUR
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // The blocker key the worker is allowed to walk into — its current destination

@@ -14,7 +14,7 @@ import { toFloat, type Fixed } from '../sim/fixed';
 import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, STRUCTURE_STATS, canAfford, unitStatsFor, type ResourceCost } from '../sim/units-config';
 import { findStructure, findUnit, isFullyExplored } from '../sim/state';
 import { isInChargeMode } from '../sim/step';
-import { themeForFaction } from './factions/theme';
+import { themeForFaction, RESOURCE_COLOR } from './factions/theme';
 import { hudIconSvg, type HudIconName } from './hud-icons';
 
 const displayCost = (f: Fixed): number => Math.round(toFloat(f));
@@ -66,7 +66,7 @@ interface ButtonSpec {
   icon: HudIconName;
   hotkey?: string;
   costEnergy?: number;
-  // Phase D.1: matter cost badge (amber), shown beneath the energy badge
+  // Phase D.1: matter cost badge (violet), shown beneath the energy badge
   // when the action also costs matter (e.g. the work pod).
   costMatter?: number;
   enabled: boolean;
@@ -437,11 +437,11 @@ export class ActionBar {
       cost.textContent = `${spec.costEnergy}`;
       btn.appendChild(cost);
     }
-    // Phase D.1: matter cost badge in amber, stacked just under the energy
-    // badge so a dual-cost action (the work pod) shows both at a glance.
+    // Phase D.1: matter cost badge (matter colour), stacked just under the
+    // energy badge so a dual-cost action (the work pod) shows both at a glance.
     if (spec.costMatter !== undefined) {
       const m = document.createElement('div');
-      m.style.cssText = 'position:absolute;top:12px;right:3px;font-size:8px;font-weight:700;color:#ff9a3c;';
+      m.style.cssText = `position:absolute;top:12px;right:3px;font-size:8px;font-weight:700;color:${RESOURCE_COLOR.matter};`;
       m.textContent = `${spec.costMatter}`;
       btn.appendChild(m);
     }

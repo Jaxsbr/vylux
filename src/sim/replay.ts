@@ -303,7 +303,17 @@ import type { InitialMatchSpec } from './state';
 // (energy + matter); checkWinner / scoreBreakdown / the tie-break read both.
 // New hashed field → every fixture regenerates. (Match length 5→15 min is a
 // spec value, not hashed — it doesn't move the goldens.)
-export const REPLAY_VERSION = 34;
+//
+// v35 (Phase D.2 — Resource clustering): map-gen now grows mirrored resource
+// CLUSTERS (organic blobs) instead of evenly-spaced singletons, and the
+// pathfinder gains a HYBRID node-blocking rule — a node blocks only if it's a
+// standalone single (no Chebyshev-1 node neighbour); clustered nodes are
+// walk-through so dense blob interiors stay reachable. This is a sim-behaviour
+// change for any field with adjacent nodes. The determinism goldens build their
+// own hand-specs with well-separated nodes (no adjacency), so their hashes are
+// unchanged — but the rule + generator change bumps the version so clustered
+// replays are versioned distinctly. No hashed state-shape change.
+export const REPLAY_VERSION = 35;
 
 export interface ReplayLog {
   version: number;

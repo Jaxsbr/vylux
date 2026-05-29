@@ -20,7 +20,7 @@ import { distSq, fromInt, type Fixed } from './fixed';
 import { type Faction, type ResourceNode, type SimState } from './types';
 import { MAX_TRAIN_QUEUE, STRUCTURE_STATS, canAfford, unitStatsFor } from './units-config';
 import { isInChargeMode } from './step';
-import { isFullyExplored, isPodTileBlockedByNode } from './state';
+import { isFullyExplored, isPodTileBlockedByHq, isPodTileBlockedByNode } from './state';
 
 export const AI_TICK_INTERVAL = 10;
 
@@ -125,6 +125,7 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
       const tx = clampTile(toInt(fs.hqX) + offset.dx, state.gridSize);
       const ty = clampTile(toInt(fs.hqY) + offset.dy, state.gridSize);
       if (isPodTileBlockedByNode(state, tx, ty)) continue;
+      if (isPodTileBlockedByHq(state, tx, ty)) continue;
       if (friendlyPodOnTile(state, faction, tx, ty)) continue;
       commands.push({
         kind: CommandKind.BuildStructureByWorker,

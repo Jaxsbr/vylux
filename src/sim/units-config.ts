@@ -176,6 +176,12 @@ export const WORK_POD_CAP_BONUS = 5;
 // footprints so a worker's final hop to a slot never crosses a pod.
 export const POD_NODE_KEEPOUT_TILES = 1;
 
+// Chebyshev keep-out from an HQ tile for work-pod placement. The HQ mesh is a
+// 3×3 footprint (Chebyshev ≤ 1); 2 leaves a clear ring so a pod can't be glued
+// to the base. Matches the map-gen `hqExclusion` so nodes + pods obey the same
+// "no structure touching the HQ" rule.
+export const POD_HQ_KEEPOUT_TILES = 2;
+
 // Charge drained per worker task. Set to 1 universally — every task is
 // "one unit of work". NOTE: this is the per-worker CHARGE battery (the
 // unit's work fuel), NOT the faction's harvested Energy pool — see the

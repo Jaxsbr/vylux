@@ -19,6 +19,7 @@
 import { GRID_CONSTANTS } from '../grid';
 import type { Sim } from '../sim/sim';
 import type { Faction } from '../sim/types';
+import { debugReveal } from './debug-reveal';
 
 export class Exploration {
   private readonly sim: Sim;
@@ -39,7 +40,7 @@ export class Exploration {
   }
 
   isTileExplored(tx: number, ty: number): boolean {
-    if (this.bypassVision) return true;
+    if (this.bypassVision || debugReveal.all) return true;
     const N = GRID_CONSTANTS.gridSize;
     if (tx < 0 || tx >= N || ty < 0 || ty >= N) return false;
     return this.sim.state.explored[this.playerFaction][ty * N + tx] === 1;

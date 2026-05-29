@@ -32,6 +32,7 @@ import {
 } from './meshes';
 import { tileFloatToWorld } from './scene';
 import type { Exploration } from './exploration';
+import { debugReveal } from './debug-reveal';
 import { workerHover, phaseOffset, WORKER_HOVER_PERIOD_S } from './entity-life';
 import { WorkBeams, type BeamSpec } from './work-beam';
 import { isInChargeMode } from '../sim/step';
@@ -333,7 +334,7 @@ export class SimRenderer {
       // meshes, so this gate doubles as the click-to-assign filter.
       if (v) {
         v.group.visible = n.alive
-          && (this.bypassVision || n.discoveredBy[this.playerFaction]);
+          && (this.bypassVision || debugReveal.all || n.discoveredBy[this.playerFaction]);
         // Phase 3.10.9: per-frame remaining-amount label + silhouette
         // emissive fade. Pure presentation; sim hash is unaffected.
         // Using maxReserve as the "max" reference works for both

@@ -536,7 +536,17 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
 //
 const NODE_PALETTE: Record<ResourceKind, number> = {
   energy: 0xffd166, // gold
-  matter: 0xff9a3c, // amber (Phase D.1) — construction material
+  matter: 0xb06bff, // neon violet (Phase D.1) — construction material
+};
+
+// Per-kind emissive boost to equalise BLOOM. The bloom pass keys off pixel
+// luminance (heavily green-weighted), so gold (lum ≈ 0.83) crosses the bloom
+// threshold easily while violet (lum ≈ 0.52, almost no green) barely glows at
+// the same emissive intensity. Boosting violet's emissive intensity lifts it
+// over the threshold so a rich matter node reads as bright as a rich energy one.
+const NODE_EMISSIVE_BOOST: Record<ResourceKind, number> = {
+  energy: 1.0,
+  matter: 1.7,
 };
 
 // Phase C.4 node life. A slow core spin (rad/s) reads as "live energy" at a
@@ -571,7 +581,10 @@ export function buildNodeMesh(
 ): NodeVisual {
   const b = legacyBuildEnergyNode(tileX, tileY);
   const tier = maxEnergy === undefined ? 1 : classifyTier(maxEnergy);
+  // `brightness` scales tier read; `emissiveScale` adds the per-kind bloom
+  // compensation so violet matter glows as hard as gold energy (see boost table).
   const brightness = NODE_TIER_BRIGHTNESS[tier];
+  const emissiveScale = brightness * NODE_EMISSIVE_BOOST[kind];
   const colour = nodeTierColour(NODE_PALETTE[kind], tier);
 
   // Tint the legacy hex-base rim per kind so the disc reads as the
@@ -582,7 +595,7 @@ export function buildNodeMesh(
     if (obj.name === 'node-rim' && obj instanceof THREE.Mesh) {
       const m = obj.material as THREE.MeshStandardMaterial;
       m.emissive.set(colour);
-      m.emissiveIntensity *= brightness;
+      m.emissiveIntensity *= emissiveScale;
     } else if (obj.name === 'node-rim-edge' && obj instanceof LineSegments2) {
       const m = obj.material as LineMaterial;
       m.color.set(colour);
@@ -618,8 +631,8 @@ export function buildNodeMesh(
       // narrow to preserve the outlined-and-shaded look (a full-bright
       // body would compete with the building emissive palette).
       const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
-      // Tier brightness scales the silhouette glow (and the bloom it feeds).
-      const intensity = (0.05 + 0.25 * ratio) * brightness;
+      // Tier brightness (+ per-kind bloom boost) scales the silhouette glow.
+      const intensity = (0.05 + 0.25 * ratio) * emissiveScale;
       silhouette.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           const m = child.material as THREE.MeshStandardMaterial;
@@ -634,7 +647,7 @@ export function buildNodeMesh(
       // Gentle emissive breathe on top of the remaining-driven base (set by
       // setRemaining, which runs first each frame). Scaled by tier so the
       // richer nodes breathe a touch harder too.
-      const add = breathe(lifeClock, NODE_BREATHE_AMP * brightness, NODE_PULSE_PERIOD_S);
+      const add = breathe(lifeClock, NODE_BREATHE_AMP * emissiveScale, NODE_PULSE_PERIOD_S);
       for (const m of silhouetteMats) m.emissiveIntensity += add;
     },
   };
@@ -683,10 +696,10 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
       break;
     }
     case 'matter': {
-      // Amber material block — a squat cube, wider than tall, sitting low.
+      // Violet material block — a squat cube, wider than tall, sitting low.
       // Deliberately a DIFFERENT cross-section + proportion from energy's
-      // tall spike so the resource reads by SHAPE first; the amber/gold
-      // colours are close, so shape carries the distinction (Phase D.1).
+      // tall spike so the resource reads by SHAPE as well as colour — the
+      // violet/gold hues plus the silhouette carry the distinction (Phase D.1).
       // Rotating the whole group 45° gives a crystalline diamond footprint
       // from the top-down camera (rotates body + edge trim together).
       const geo = new THREE.BoxGeometry(0.3, 0.22, 0.3);

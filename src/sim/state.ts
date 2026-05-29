@@ -23,6 +23,7 @@ import { distSq, fromInt, rangeSq, toInt } from './fixed';
 import {
   HQ_SUPPLY_CAP_INITIAL,
   HQ_VISION_RADIUS,
+  POD_HQ_KEEPOUT_TILES,
   POD_NODE_KEEPOUT_TILES,
   STRUCTURE_STATS,
   WORKER_DEFAULT_MAX_CHARGE,
@@ -242,6 +243,21 @@ export function isPodTileBlockedByNode(state: SimState, tileX: number, tileY: nu
     const dx = Math.abs(tileX - toInt(n.x));
     const dy = Math.abs(tileY - toInt(n.y));
     if (dx <= POD_NODE_KEEPOUT_TILES && dy <= POD_NODE_KEEPOUT_TILES) return true;
+  }
+  return false;
+}
+
+// True when tile (tileX, tileY) is too close to EITHER HQ to build a work pod —
+// within POD_HQ_KEEPOUT_TILES (Chebyshev), i.e. on the HQ's 3×3 footprint or the
+// clear ring around it. Keeps structures from being glued to a base. Shared by
+// the authoritative build reject (step.ts), the AI tile pick (ai.ts), and the
+// render placement preview, same as isPodTileBlockedByNode.
+export function isPodTileBlockedByHq(state: SimState, tileX: number, tileY: number): boolean {
+  for (let f = 0; f < state.factions.length; f++) {
+    const fs = state.factions[f];
+    const dx = Math.abs(tileX - toInt(fs.hqX));
+    const dy = Math.abs(tileY - toInt(fs.hqY));
+    if (dx <= POD_HQ_KEEPOUT_TILES && dy <= POD_HQ_KEEPOUT_TILES) return true;
   }
   return false;
 }

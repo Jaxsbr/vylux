@@ -1,6 +1,6 @@
 # Vylux — Plan
 
-> **Last updated:** 2026-05-29 — **Phase D.1 (Matter + cost split) landed** (second resource live; `{energy?,matter?}` cost shape; pod = 40 E + 30 M; no upkeep; matter feeds the score; scored match 5→15 min; `REPLAY_VERSION` 34, goldens regen). Earlier: 2026-05-27 — **remaining Phase C economy/research work re-clustered into standalone launcher phases.** The old C.7 (Matter + cost split), C.7.5 (Resource Depot), and C.8 (worker/HQ research) were small, individually-unexciting increments; they are now bundled into **Phase D — The Living Economy** (Matter + cost split · a richer *clustered* resource field · the Resource Depot · economy + worker research — shipped together as one economic leap) and **Phase E — First Blood** (HQ defence · the first combat unit · its research evolution — folding the old standalone Phase D). The old **Phase F / Loop-Closure fun-gate is dropped** — this is a long-term project, so there is no terminal "is it fun enough" gate. **Phase C is complete** (the experience work all landed). Earlier (2026-05-27): doc catch-up — C.6.7–C.6.10 marked landed (shipped in #21, status not updated), C.6.11/C.6.12 marked **not required** (behaviour already present). Earlier: 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change. Map work inserted as **C.6.5** ahead of the economy depth by owner direction (2026-05-24): double the grid to 64², ~16 seeded random nodes with low/med/high values + brightness, fully-random (not mirrored), placement barred from HQ / HQ-adjacent / edge tiles and guaranteed ≥1 node in each HQ's vision; the tutorial keeps its hand-placed layout. Two further sub-phases inserted 2026-05-24 by owner direction: **C.6.6** (sim-side obstacle avoidance so workers stop clipping through the HQ / pods / nodes — accepted as a sim change, goldens regen + version bump) ahead of the economy; and **C.7.5** (a dedicated **Resource Depot** building — a closer offload point that fixes the long-haul collection stall, plus the resource-collection research tree — sequenced after C.7 so it collects Matter too, not just energy).
+> **Last updated:** 2026-05-29 — **Phase D.2 (Resource clustering) landed** (generator + sim): seed-grown organic blobs replace evenly-spaced singletons; four fixed positional slots (Home/Second/Backbone/Center) with seed-drawn sizes (20–40 nodes total), per-archetype tier bias, distance-weighted energy→matter gradient, accretion growth + graceful shrink, standalone-single scatter pass, and a **hybrid pathfinding rule** (a node blocks only if it has no cluster neighbour) so dense blobs stay harvestable — sim change → version bump + goldens. Full spec + a *tweak-X-affects-Y* tuning table in the D.2 section. Earlier 2026-05-29 — **Phase D.1 (Matter + cost split) landed** (second resource live; `{energy?,matter?}` cost shape; pod = 40 E + 30 M; no upkeep; matter feeds the score; scored match 5→15 min; `REPLAY_VERSION` 34, goldens regen). Earlier: 2026-05-27 — **remaining Phase C economy/research work re-clustered into standalone launcher phases.** The old C.7 (Matter + cost split), C.7.5 (Resource Depot), and C.8 (worker/HQ research) were small, individually-unexciting increments; they are now bundled into **Phase D — The Living Economy** (Matter + cost split · a richer *clustered* resource field · the Resource Depot · economy + worker research — shipped together as one economic leap) and **Phase E — First Blood** (HQ defence · the first combat unit · its research evolution — folding the old standalone Phase D). The old **Phase F / Loop-Closure fun-gate is dropped** — this is a long-term project, so there is no terminal "is it fun enough" gate. **Phase C is complete** (the experience work all landed). Earlier (2026-05-27): doc catch-up — C.6.7–C.6.10 marked landed (shipped in #21, status not updated), C.6.11/C.6.12 marked **not required** (behaviour already present). Earlier: 2026-05-24 — Phase C re-sequenced after a gameplay review (opening 5 min not yet fun). Experience work (HUD, audio, motion, onboarding) now precedes the economy/research depth, which is deferred to C.7–C.8. C.4 re-scoped: "world life" is now entity-driven (HQ/pod idle animation) rather than a moving grid; the grid-line pulse is deferred within C.4, attempted only if the scene still reads static after the entity work lands. C.6 spec refined 2026-05-24: tutorial gains explicit completion goals (energy balance / 15 workers / find the enemy HQ) and instructional ghost-cursor bubbles that demonstrate each gesture; the energy goal is a balance read, so no sim-state change. Map work inserted as **C.6.5** ahead of the economy depth by owner direction (2026-05-24): double the grid to 64², ~16 seeded random nodes with low/med/high values + brightness, fully-random (not mirrored), placement barred from HQ / HQ-adjacent / edge tiles and guaranteed ≥1 node in each HQ's vision; the tutorial keeps its hand-placed layout. Two further sub-phases inserted 2026-05-24 by owner direction: **C.6.6** (sim-side obstacle avoidance so workers stop clipping through the HQ / pods / nodes — accepted as a sim change, goldens regen + version bump) ahead of the economy; and **C.7.5** (a dedicated **Resource Depot** building — a closer offload point that fixes the long-haul collection stall, plus the resource-collection research tree — sequenced after C.7 so it collects Matter too, not just energy).
 > **Visual north star:** [`concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png`](concepts/Isometric_3D_real-time_strategy_game_screenshot_Tron-inspired_9f371fa3-921d-4540-84e9-165734ff064b_2.png) — dense glowing Tron city, cyan/red grid lines pulsing through the world, lit vertical structures, purposeful silhouettes.
 > **Mindset:** the game must be fun. A good game loop matters more than feature count. Strip down to the minimum that's already fun, polish until it sings, *then* layer more on.
 
@@ -905,6 +905,42 @@ The second resource and the cost system that uses it.
 
 #### D.2 — Resource clustering (a richer, more desirable field)
 
+> **Landed 2026-05-29 (generator + sim).** `generateEnergyField` rewritten to
+> grow mirrored organic blobs (four slots, seed-drawn sizes, per-archetype tier
+> weights, distance-weighted matter, accretion + graceful shrink, standalone-
+> single scatter); `collectBlockers` gained the hybrid node-blocking rule
+> (standalone singles block, clustered nodes walk-through) via the exported pure
+> `nodeIsStandalone`. Tunables live in `DEFAULT_FIELD_CONFIG` (see the table
+> below). **Playtest fixes (same day):** first cut put 4 slots in a thin diagonal
+> band (empty map, too few nodes). Replaced with **uniform scatter across the whole
+> source triangle** + a single distance-from-HQ `centrality` gradient (size /
+> richness / matter all rise with it), so the map FILLS (back corners included),
+> sparse-lean-energy by home → dense-rich-matter outward. Counts bumped ~5× to
+> **~120–180 nodes/map**. HQ keep-out widened to Chebyshev 2 so no node touches the
+> base; the same keep-out now blocks **work-pod placement** next to an HQ
+> (`isPodTileBlockedByHq`, wired into the build reject + AI pick + render preview).
+> The C.6.10 scout-stall test now runs on a forced-sparse config (the rich live
+> field never stalls). **Playtest passes (match the design sketch):** placement is
+> now a **radial density field** — a fine jittered grid whose keep-probability ramps
+> from the board centre (dense) to the rim (sparse), with **inter-cluster spacing
+> also radial** (tight centre → roomy rim) so the middle packs into a genuinely
+> dense contested mass, minus **HQ clear zones** (home stays open, just the bootstrap
+> patch). Gradually denser toward the contested middle, mixed energy/matter
+> throughout; ~150–180 nodes/map. (Earlier cuts — 4
+> diagonal bands, then distance-from-HQ gradient, then uniform+centre-bump — each
+> missed coverage, HQ-clutter, or the gradual centre density.)
+> `REPLAY_VERSION` → 35. `tsc` + 255 unit tests + 10 e2e green; the
+> determinism goldens were **unchanged** (their hand-specs use well-separated
+> nodes, so the hybrid rule produces identical blockers — no regen needed). The
+> AI-vs-AI scout smoke confirms no harvest deadlock on the clustered field.
+> **Visual pass:** matter recoloured **amber → neon violet** (`#b06bff`) across the
+> node mesh, HUD `RESOURCE_COLOR`, the action-bar cost badge, and the minimap (which
+> now distinguishes matter dots at all); plus a per-kind `NODE_EMISSIVE_BOOST`
+> (matter ×1.7) so violet's lower luminance still crosses the bloom threshold and
+> rich matter nodes glow as hard as energy.
+> **Still open (deferred):** worker/node sprite z-order + alpha when a worker
+> walks over a node — a renderer polish, tracked as the out-of-scope follow-up below.
+
 > **Why.** C.6.5 deliberately *spaced nodes out* (≥3-tile spacing, no clumping) so
 > the early field read evenly. The economy is more interesting if the field
 > instead forms **clusters of varied size and value**, so a big, rich cluster is a
@@ -913,26 +949,163 @@ The second resource and the cost system that uses it.
 > seeded map generator**, not new entities.
 
 Evolve the seeded generator (`src/sim/map-gen.ts` `generateEnergyField`) from
-evenly-spaced singletons to **clusters**:
-- A cluster has a **size** (node count) and an aggregate **value** profile; the
-  draw makes large / high-value clusters **rarer and more desirable** (worth
-  contesting), and small / lean clusters common and nearer to home. Size and value
-  combine so "how good is this cluster" is a real, readable spectrum — a big
-  cluster of high-tier nodes ≫ a lone low-tier node.
-- Tight spacing *within* a cluster, clear gaps *between* clusters (replacing the
-  old uniform ≥3-tile spacing). Tunable knobs: cluster count, size distribution,
-  value weighting, intra- vs inter-cluster spacing.
-- Once Matter (D.1) exists, a cluster can **mix energy + matter** nodes, so *where*
-  you expand decides *which* resource you're chasing.
-- **Determinism + constraints unchanged from C.6.5:** seeded sim RNG only, never
-  `Math.random`; still no node on an HQ / HQ-adjacent / map-edge tile; still
-  **≥1 reachable live node within each HQ's vision** (no bootstrap deadlock); the
-  per-launch seed stays baked into the spec → replay.
-- **Tutorial stays exempt** — `TUTORIAL_SPEC` keeps its hand-placed layout (the
-  coach + harvest steps depend on a known field).
-- Tests: the generator stays a pure seeded function — same seed → same clusters;
-  all constraints hold; the size/value distribution lands in range; the AI-vs-AI
-  smoke still proves no harvest deadlock on the clustered field.
+rejection-sampled, evenly-spaced singletons to **seed-grown organic blobs**. The
+design below was settled in the D.2 design interview (2026-05-29). Every value
+named here is a **tunable default**, not a load-bearing constant — the *Tuning
+reference* table at the end is the contract: change column 1, get effect in
+column 3, without relearning the algorithm.
+
+##### Core model
+
+- **The cluster is the mirrored unit.** Grow each cluster in the source half
+  (`x + y < N`), then emit its 180°-rotated twin — preserving C.6.5's exact-mirror
+  fairness invariant (and its proof) verbatim. "Contested" = a pair of mirrored
+  blobs *flanking* the anti-diagonal, never one blob *on* it (a blob on the
+  diagonal would collide with its own twin).
+- **Seed is the origin of truth.** Same seed → identical field (sizes, positions,
+  tiers, kinds). The generator already runs 100% off the seeded `Rng`
+  (`src/sim/rng.ts`); replay/"punch in a seed" is purely a future UI hook — the
+  generator needs no change to be replayable. House rule unchanged: **every draw
+  (now including size draws) comes off that one seeded stream — never `Math.random`,
+  never wall-clock.**
+
+##### The four slots (fixed set, seed-drawn sizes)
+
+A **fixed roster of four positional slots** per source half; only their *sizes*
+vary per seed (slot *count* is fixed — variety comes from size + placement + tier
+draws, keeping the map's "story" legible and testable every game):
+
+Both HQs sit at the two ends of the anti-diagonal (the shared front); faction-0's
+territory is the source triangle (`x+y < N`). To **fill the whole map** rather than
+a thin diagonal line, clusters are **scattered uniformly across that triangle**
+(rejection sample) and mirrored into faction-1's — together they cover the board.
+
+Placement is a **radial density field** — the field is *gradually* denser toward the
+contested middle and sparser (but never empty) at the edges, matching the design sketch:
+
+1. **Home patch** — a small guaranteed cluster within HQ vision (forced-energy seed,
+   bootstrap); the 180° mirror covers HQ1.
+2. **Radial-density scatter** — small clusters on a fine **jittered grid**
+   (`cellSize` ≈ 8) across the whole territory, but each cell's cluster is *kept*
+   with a probability that ramps from `densityCenter` (1.0, board centre) down to
+   `densityEdge` (≈0.32, rim) over `densityNorm` tiles. So cells near the middle
+   almost always fire and edge cells mostly thin out. **Inter-cluster spacing is
+   *also* radial** (`interSpacingCenter` ≈ 2 at the middle → `interSpacing` ≈ 5 at
+   the rim): centre clusters pack tight and merge into a genuinely dense focal mass,
+   while edge patches stay roomy and distinct — this is what makes the middle *pop*,
+   not just "more clusters at the same spacing". Centre clusters also draw a bit
+   bigger (`+centerSizeBonus`), richer (rich→standard→leanMed by radius), and more matter.
+3. **HQ clear zones** — *no* scattered cluster within `hqClearRadius` (≈12) of either
+   HQ, so the home area stays open (only the Home patch sits there).
+
+\+ a handful of **singles** (4–8), all mirrored → **~140–160 nodes per map** (≈4–5×
+C.6.5's flat 16). Energy + matter mixed throughout (Home forced energy). The contested
+centre is genuinely dense: a cluster is *not* spaced from its own mirror (only from
+other source clusters), so the two factions' fields **meet at the front** instead of
+leaving a hollow band. **No node (or work pod) ever touches an HQ** — both obey a
+Chebyshev-2 keep-out around the 3×3 HQ footprint (`hqExclusion` / `POD_HQ_KEEPOUT_TILES`).
+
+##### Value & kind
+
+- **Value:** per-archetype **tier weights** over the *existing* `ENERGY_TIERS`
+  energies (120/220/360) — one source of truth shared with the renderer's
+  brightness `classifyTier`. Lean leans low, Standard med, Rich high. (Only the
+  weights shift per archetype; the energies are unchanged.)
+- **Kind:** each cluster draws a **dominant kind** off the seed at the
+  slot's `P(matter-dominant)` odds; within a cluster ~**25% of nodes flip** to the
+  off-kind, so a blob reads one-flavoured but mixes. This encodes the intended
+  economic arc — **early-energy (cheap workers near home) → late-matter (structures /
+  complex units toward the contested middle)**. Mirror twins share dominant kind +
+  per-node kinds exactly.
+
+##### Generation algorithm — accretion growth
+
+1. Pick the cluster's **seed tile (centroid)** inside its radial band. (Home reuses
+   the existing near-HQ pick so its seed sits within vision — see bootstrap below.)
+2. **Accrete:** repeatedly pick an already-placed cluster tile and add a random
+   **8-connected neighbour**, until the cluster's seed-drawn size is reached →
+   organic blobby shapes, not circles/lines.
+3. **Occasional 1-tile gap:** with small probability an accretion step places one
+   ring out (distance 2) instead of adjacent → lobed "fused-patches" look rather
+   than one solid mass.
+4. **Standalone singles** (separate scatter pass, after the four blobs): scatter
+   1–3 singles per source half in the inter-cluster gaps. Kind = **location-based**
+   (same distance gradient as the slots), value = **Lean**, mirrored like everything
+   else. Meaningful-but-minor scraps you grab in passing — never worth a detour.
+5. **Graceful shrink, never throw:** grow each blob until target size *or* no valid
+   accretion tile remains, then accept what placed. Seed maps **1:1** to one field;
+   a too-ambitious seed just yields a slightly smaller blob (invisible — a 6 becomes
+   a 5). The Q4 upper bounds were tightened precisely so shrink is rare. The **one**
+   hard-asserted invariant that may *throw* is the Home seed node (bootstrap) — it's
+   tiny and HQ-adjacent so it always fits; a failure there is a real bug, not tuning.
+
+##### Spacing (replaces C.6.5's uniform ≥3)
+
+- **Intra-cluster ≥ 1** — pack edge-to-edge (orthogonal/diagonal adjacency OK, never
+  same tile); the 1-tile gaps come only from the accretion skip.
+- **Inter-cluster ≥ 5** (Chebyshev, any node of A vs any node of B) — clear visual
+  gaps; also enforced **Center-source vs its own mirror** across the diagonal (what
+  keeps the two contested blobs from fusing). The Center band is positioned so even a
+  max-size blob stays its side of the line with this gap intact.
+- **Single-isolation ≥ 2** — a scattered single must sit ≥2 from *every* other node so
+  it never fuses into a cluster (which would flip it to non-blocking — see pathfinding).
+  Singles are exempt from the ≥5 inter-cluster rule (that's blob-vs-blob only).
+
+##### Pathfinding — hybrid blocking (sim change → version bump + goldens)
+
+C.6.5/C.6.6 made every node a 1-tile pathing blocker. That breaks dense blobs: a
+node enclosed on all 8 sides is **unreachable** (A\* can't get in, workers can't walk
+over nodes). New rule:
+
+- **A node blocks pathfinding iff it has zero 8-connected node-neighbours** (a true
+  standalone single → solid, routed around — looks natural, no clipping through a lone
+  node). **Any node with ≥1 cluster neighbour is non-blocking** → blob interiors are
+  always reachable; workers walk straight through.
+- Recomputed from **alive** nodes each tick (blocker list already rebuilt per tick at
+  `step.ts:713`; add the neighbour scan there — O(n²) over 20–40 nodes is trivial,
+  fully deterministic). **Emergent + intended:** a cluster depleted to its last
+  survivor sees that survivor *become solid again* (it lost its neighbours) — reads as
+  "the patch is gone, one rock left," zero special-casing.
+- **Bootstrap discovery guarantee preserved verbatim:** Home seed = the in-vision,
+  **forced-energy** node; the 180° mirror covers the other HQ for free (the existing
+  isometry argument). AI still never deadlocks (it routes only to discovered nodes).
+
+##### Tuning reference — *tweak X → affects Y*
+
+The single point of this section: tuning D.2 is a lookup here, never an algorithm
+re-read. Each knob lives in `map-gen.ts` (constants/options) unless noted.
+
+| Tweak this | Default | …to affect this |
+|------------|---------|-----------------|
+| **`cellSize`** (jittered-grid cell) | 8 | overall map fill — *smaller* = more candidate clusters everywhere |
+| **`densityCenter` / `densityEdge`** | 1.0 / 0.32 | the radial gradient — keep-probability at the centre vs the rim (lower edge = sparser edges, steeper gradient) |
+| **`densityNorm`** (tiles over which it ramps) | 40 | how far the dense centre reaches before thinning to edge density |
+| **`clusterSizeMin/Max`** + **`centerSizeBonus`** | 3 / 5 + 2 | base cluster size; centre clusters get the bonus on top |
+| **`hqClearRadius`** (clear zone around each HQ) | 12 | how open the home area is — only the bootstrap patch inside it |
+| **`matterBase` / `matterCenter`** | 0.4 / 0.55 | matter share at edge / centre (lerped by radius; Home forced energy) |
+| Per-node **off-kind flip rate** (`offKindFlipPct`) | 0.25 | how "pure" vs mixed a blob looks (0 = single-kind blobs) |
+| Per-archetype **tier weights** (Lean/leanMed/Standard/Rich) over `ENERGY_TIERS` | low→high biases | how rich a cluster's nodes are by centrality bucket (+ node brightness via shared `classifyTier`) |
+| **`homeSizeMin/Max`** | 2 / 4 | the guaranteed bootstrap patch size by your base |
+| **Accretion 1-tile-gap probability** (`gapSkipPct`) | 0 (off) | blob shape — contiguous (0) vs lobed/fragmented (higher) |
+| **Singles count** per source half (`singlesMin/Max`) | 4–7 | density of solo blocking scraps orbiting the blobs |
+| **Inter-cluster spacing** (`interSpacing` rim / `interSpacingCenter` middle) | 5 / 2 | gap between distinct source blobs, lerped by radius — *smaller centre value = denser, more-merged contested middle*. (A blob vs its own mirror is never spaced.) |
+| **Single-isolation min spacing** (`singleIsolation`) | 2 | how close a single may sit to a blob before it'd fuse |
+| **`hqExclusion`** (Chebyshev keep-out from each HQ) | 2 | clear ring around the base; no node glued to the HQ footprint |
+| **Block-neighbour radius** (Chebyshev for "is this node clustered?") | 1 | which nodes count as solid singles vs walk-through cluster nodes |
+
+##### Determinism, scope, tests
+
+- **Determinism:** pure seeded function — same seed → same blobs. The pathfinding
+  rule change moves hashed sim state → **bump `REPLAY_VERSION`, regenerate goldens.**
+- **Tutorial stays exempt** — `TUTORIAL_SPEC` keeps its hand-placed layout (coach +
+  harvest steps depend on a known field). Generator path is PvA-randomise only.
+- **Out of scope (logged follow-up):** worker/node **sprite z-order + alpha** when a
+  worker walks over a node — a renderer tweak, not generator/sim work.
+- **Tests:** same-seed determinism; all constraints hold (no node on HQ/HQ-adjacent/
+  edge; spacing rules; ≥1 in-vision forced-energy node per HQ); size draws land in
+  range; graceful-shrink never throws (except the asserted Home seed); the AI-vs-AI
+  smoke still proves no harvest deadlock on the clustered field; a packed-blob
+  reachability test (interior node is harvestable).
 
 #### D.3 — Resource Depot: dedicated collection building
 

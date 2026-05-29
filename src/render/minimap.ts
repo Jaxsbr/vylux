@@ -11,10 +11,10 @@ import type { Sim } from '../sim/sim';
 import { toFloat } from '../sim/fixed';
 import { GRID_CONSTANTS } from '../grid';
 import { tileFloatToWorld } from './scene';
-import { themeForFaction } from './factions/theme';
+import { themeForFaction, RESOURCE_COLOR } from './factions/theme';
 
 const MAP_PX = 150;
-const NODE_COLOR = '#ffd166';
+const NODE_COLOR = '#ffd166'; // energy nodes (gold)
 
 // Anything exposing a `.visible` flag — THREE.Group satisfies this, so the
 // SimRenderer's mesh maps pass straight through.
@@ -93,12 +93,13 @@ export class Minimap {
     ctx.fillStyle = 'rgba(10,16,22,0.92)';
     ctx.fillRect(0, 0, MAP_PX, MAP_PX);
 
-    // Energy nodes — gold dots, only where discovered (mesh visible).
+    // Resource nodes — gold (energy) / violet (matter) dots, only where
+    // discovered (mesh visible).
     for (let i = 0; i < s.nodes.length; i++) {
       const n = s.nodes[i];
       if (!n.alive) continue;
       if (!src.nodeMeshMap.get(n.id)?.visible) continue;
-      this.dot(ctx, toFloat(n.x), toFloat(n.y), 1.8, NODE_COLOR);
+      this.dot(ctx, toFloat(n.x), toFloat(n.y), 1.8, n.kind === 'matter' ? RESOURCE_COLOR.matter : NODE_COLOR);
     }
 
     // Work pods — faction squares.

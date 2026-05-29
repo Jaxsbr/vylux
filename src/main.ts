@@ -79,12 +79,12 @@ import { isValidRoomCode } from './net/signaling-protocol';
 // (anti-diagonal layout: F0/player bottom-left, F1/AI top-right as the camera
 // reads it — world +X is screen-right, +Z is screen-down at this iso angle, so
 // (8, 55) lands bottom-left). The energy nodes are no longer hand-placed: a
-// seeded generator scatters ~16 of them with randomised low/med/high values,
-// off the HQ/edge tiles, with ≥1 node guaranteed in each HQ's vision. See
-// docs/plan.md "Phase C.6.5" + src/sim/map-gen.ts.
+// seeded generator grows them into mirrored organic CLUSTERS (Phase D.2) — four
+// positional slots from a lean home patch to a rich contested centre, plus
+// scattered singles — with ≥1 energy node guaranteed in HQ0's vision (its mirror
+// covers HQ1). See docs/plan.md "Phase D.2" + src/sim/map-gen.ts.
 const HQ_F0 = { x: 8, y: 55 }; // player — bottom-left
 const HQ_F1 = { x: 55, y: 8 }; // AI — top-right
-const NODE_COUNT = 16;
 // HQ vision is 8 tiles (units-config HQ_VISION_RADIUS = fromInt(8)); the
 // generator uses it to guarantee each HQ starts with a discoverable node.
 const HQ_VISION_TILES = 8;
@@ -104,7 +104,6 @@ function buildEnergyField(seed: number): InitialMatchSpec['nodes'] {
     seed,
     gridSize: GRID_CONSTANTS.gridSize,
     hqs: [HQ_F0, HQ_F1],
-    count: NODE_COUNT,
     hqVisionRadiusTiles: HQ_VISION_TILES,
   });
 }

@@ -25,7 +25,8 @@
 import * as THREE from 'three';
 import { CommandKind, type Command } from '../sim/commands';
 import type { Sim } from '../sim/sim';
-import { findNode, findStructure, findUnit, isPodTileBlockedByNode } from '../sim/state';
+import { findNode, findStructure, findUnit, isPodTileBlockedByHq, isPodTileBlockedByNode } from '../sim/state';
+import { toggleDebugReveal } from './debug-reveal';
 import { isInChargeMode } from '../sim/step';
 import { CHARGE_COST_PER_TASK } from '../sim/units-config';
 import type { Faction, UnitKind } from '../sim/types';
@@ -318,7 +319,10 @@ export class InputController {
           // would reject it anyway). Stay in placement mode + keep the red
           // preview so the player can pick a valid tile; right-click / Esc
           // to cancel.
-          if (isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y)) {
+          if (
+            isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y) ||
+            isPodTileBlockedByHq(this.opts.sim.state, tile.x, tile.y)
+          ) {
             return;
           }
           const builder = this.firstActionableWorker();
@@ -450,7 +454,9 @@ export class InputController {
       if (this.pendingPlacement === 'workPod') {
         const tile = this.pickGroundTile(e);
         if (tile !== null) {
-          const valid = !isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y);
+          const valid =
+            !isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y) &&
+            !isPodTileBlockedByHq(this.opts.sim.state, tile.x, tile.y);
           this.opts.feedback?.onPlacementHover?.(tile.x, tile.y, valid);
         } else {
           // Cursor left the playable grid (off-grid / over HUD) — hide the
@@ -603,6 +609,14 @@ export class InputController {
     // (Repurposed from the retired Phase-3.7 energy-dump binding.)
     if (e.key === 'e' || e.key === 'E') {
       this.scoutSelectedWorkers();
+    }
+    // Debug: backtick (`) toggles a full-map reveal (fog + enemy entities +
+    // all resource nodes). Render-only — never touches sim state, so it's
+    // safe to hit mid-match without desyncing. Handy for inspecting the field.
+    if (e.key === '`') {
+      const on = toggleDebugReveal();
+      // eslint-disable-next-line no-console
+      console.log(`[debug] full-map reveal ${on ? 'ON' : 'OFF'}`);
     }
   }
 

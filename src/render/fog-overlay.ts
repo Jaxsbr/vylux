@@ -25,6 +25,7 @@ import * as THREE from 'three';
 import { GRID_CONSTANTS } from '../grid';
 import type { Sim } from '../sim/sim';
 import type { Exploration } from './exploration';
+import { debugReveal } from './debug-reveal';
 
 // Sub-tile resolution multiplier for the canvas. 2× the gridSize (now
 // 128×128 for the 64×64 grid) — enough that LinearFilter smooths cell
@@ -142,6 +143,16 @@ export class FogOverlay {
 
   update(): void {
     if (this.bypassVision) return;
+    // Debug full-reveal: hide the fog layer entirely (restored when toggled off).
+    if (debugReveal.all) {
+      this.group.visible = false;
+      return;
+    }
+    if (!this.group.visible) {
+      this.group.visible = true;
+      this.recompute();
+      return;
+    }
     if (this.sim.state.tick === this.lastComputedTick) return;
     this.recompute();
   }

@@ -141,14 +141,14 @@ describe('Phase D.1 — matter harvest + deposit', () => {
   });
 });
 
-describe('Phase D.1 — map-gen matter seeding', () => {
+describe('Phase D.2 — map-gen matter seeding (clustered)', () => {
   const BASE = {
     seed: 7,
     gridSize: 64,
     hqs: [{ x: 8, y: 55 }, { x: 55, y: 8 }],
-    count: 16,
     hqVisionRadiusTiles: 8,
   };
+  const HQ0 = BASE.hqs[0];
 
   it('seeds matter nodes alongside energy across seeds', () => {
     let sawMatter = false;
@@ -163,7 +163,22 @@ describe('Phase D.1 — map-gen matter seeding', () => {
     expect(sawEnergy).toBe(true);
   });
 
-  it('matter share is roughly the configured fraction (~1/3) over many seeds', () => {
+  it('keeps the home patch (within HQ vision) energy for bootstrap', () => {
+    const visionSq = BASE.hqVisionRadiusTiles * BASE.hqVisionRadiusTiles;
+    for (let s = 0; s < 40; s++) {
+      const nodes = generateEnergyField({ ...BASE, seed: s });
+      // At least one in-vision node, and the closest in-vision node is energy
+      // (the Home seed). We assert there's an in-vision energy node.
+      const inVisionEnergy = nodes.some((n) => {
+        const dx = n.x - HQ0.x;
+        const dy = n.y - HQ0.y;
+        return n.kind === 'energy' && dx * dx + dy * dy <= visionSq;
+      });
+      expect(inVisionEnergy).toBe(true);
+    }
+  });
+
+  it('matter share is a sensible minority of the field over many seeds', () => {
     let matter = 0;
     let total = 0;
     for (let s = 0; s < 60; s++) {
@@ -173,15 +188,7 @@ describe('Phase D.1 — map-gen matter seeding', () => {
       }
     }
     const frac = matter / total;
-    // Loose bounds — the guaranteed near-HQ pair is always energy, which
-    // pulls the realized fraction a touch below the 1/3 draw rate.
-    expect(frac).toBeGreaterThan(0.15);
-    expect(frac).toBeLessThan(0.5);
-  });
-
-  it('suppressing matter (matterOneIn huge) yields an all-energy field', () => {
-    for (const n of generateEnergyField({ ...BASE, matterOneIn: 1_000_000 })) {
-      expect(n.kind).toBe('energy');
-    }
+    expect(frac).toBeGreaterThan(0.1);
+    expect(frac).toBeLessThan(0.6);
   });
 });

@@ -11,13 +11,33 @@
 import { describe, expect, it } from 'vitest';
 import { Sim } from './sim';
 import { tickAi } from './ai';
-import { generateEnergyField } from './map-gen';
+import { DEFAULT_FIELD_CONFIG, generateEnergyField } from './map-gen';
 import type { InitialMatchSpec, } from './state';
 
 // Mirrors src/main.ts's live normal-match SPEC.
 const HQ0 = { x: 8, y: 55 };
 const HQ1 = { x: 55, y: 8 };
 const GRID = 64;
+
+// A deliberately SPARSE field for the scout-stall guard. The live D.2 field is
+// deliberately resource-rich (the AI rarely depletes its patch), which would
+// stop this regression test from ever exercising the deplete→scout path it
+// exists to protect. So we force a thin field of small, spread-out clusters
+// (close to the pre-D.2 ~16-singleton layout) that the AI WILL drain, forcing
+// it to scout out for fresh nodes.
+const SPARSE_FIELD = {
+  ...DEFAULT_FIELD_CONFIG,
+  homeSizeMin: 2,
+  homeSizeMax: 2,
+  cellSize: 24, // few, far-apart cells
+  clusterSizeMin: 1,
+  clusterSizeMax: 2,
+  centerFillCount: 0,
+  centerSizeMin: 1,
+  centerSizeMax: 2,
+  singlesMin: 0,
+  singlesMax: 0,
+};
 
 function realisticSpec(seed: number): InitialMatchSpec {
   return {
@@ -28,8 +48,8 @@ function realisticSpec(seed: number): InitialMatchSpec {
       seed,
       gridSize: GRID,
       hqs: [HQ0, HQ1],
-      count: 16,
       hqVisionRadiusTiles: 8,
+      config: SPARSE_FIELD,
     }),
     initialEnergy: 200,
     hqMaxHp: 250,
