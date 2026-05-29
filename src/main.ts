@@ -482,7 +482,7 @@ async function bootstrap(): Promise<void> {
       onMoveOrder: (x, y, f) => { audio.moveAssign(); feedback.spawnMovePing(x, y, f); tutorial?.notifyMove(); },
       onAssignToNode: (x, y) => { audio.harvestAssign(); feedback.spawnAssignPulse(x, y); tutorial?.notifyAssignHarvest(); },
       onPlacement: (x, y) => feedback.spawnPlacementBurst(x, y),
-      onPlacementHover: (x, y, valid) => feedback.showPlacementPreview(x, y, valid),
+      onPlacementHover: (x, y, valid, sizeTiles) => feedback.showPlacementPreview(x, y, valid, sizeTiles),
       onPlacementHoverEnd: () => feedback.hidePlacementPreview(),
       onSelect: () => audio.select(),
       // Phase C.1: blocked command on a charge-mode worker → trigger
@@ -504,10 +504,14 @@ async function bootstrap(): Promise<void> {
     onDumpSelected: () => { audio.click(); input!.dumpSelectedWorkers(); },
     // Phase C.1: enter placement mode for a work pod (worker-driven build).
     onBuildWorkPodSelected: () => { audio.click(); input!.enterPlaceWorkPodMode(); },
+    // Phase D.3: enter placement mode for a resource depot (2×2 footprint).
+    onBuildResourceDepotSelected: () => { audio.click(); input!.enterPlaceResourceDepotMode(); },
     // Phase C.1 research: queue the StartResearchAtPod command on the
     // currently-selected pod (action-bar disables the button when not
     // applicable, so this fires only when valid).
     onResearchAutoResumeSelected: () => { audio.click(); input!.researchAutoResume(); },
+    // Phase D.3 research: queue resource-trickle research on the selected depot.
+    onResearchResourceTrickleSelected: () => { audio.click(); input!.researchResourceTrickle(); },
     // Phase C.6.9: send the selected worker(s) scouting to reveal fog.
     onScoutSelected: () => { audio.click(); input!.scoutSelectedWorkers(); },
   }, document.body);

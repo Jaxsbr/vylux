@@ -23,6 +23,7 @@ import { HQ_VISION_RADIUS, STRUCTURE_STATS, UNIT_STATS } from '../sim/units-conf
 import {
   buildHqMesh,
   buildNodeMesh,
+  buildResourceDepotMesh,
   buildUnitMesh,
   buildWorkPodMesh,
   type HqVisual,
@@ -181,15 +182,14 @@ export class SimRenderer {
         radiusSq: rangeSq(UNIT_STATS[u.kind].visionRadius),
       });
     }
-    // Phase C.1: operational work pods project vision too.
+    // Phase C.1/D.3: operational structures (pods + depots) project vision too.
     for (const s of this.sim.state.structures) {
       if (!s.alive || s.faction !== this.playerFaction) continue;
-      if (s.kind !== 'workPod') continue;
       if (s.buildTicksRemaining > 0) continue;
       this.visionSources.push({
         x: s.x,
         y: s.y,
-        radiusSq: rangeSq(STRUCTURE_STATS.workPod.visionRadius),
+        radiusSq: rangeSq(STRUCTURE_STATS[s.kind].visionRadius),
       });
     }
   }
@@ -365,13 +365,16 @@ export class SimRenderer {
     for (const s of this.sim.state.structures) {
       let v = this.structureMeshes.get(s.id);
       if (!v && s.alive) {
-        if (s.kind === 'workPod') {
-          v = buildWorkPodMesh(s.faction, toFloat(s.x), toFloat(s.y));
-          v.group.userData.structureId = s.id;
-          this.entitiesGroup.add(v.group);
-          this.structureMeshes.set(s.id, v);
-          this.structureGroupView.set(s.id, v.group);
-        }
+        // Phase D.3: pod or depot — each its own mesh builder. Both s.x/s.y are
+        // the structure's centre (pod = its tile, depot = its 2×2 footprint
+        // centre), so the same float-coord builder call works for both.
+        v = s.kind === 'resourceDepot'
+          ? buildResourceDepotMesh(s.faction, toFloat(s.x), toFloat(s.y))
+          : buildWorkPodMesh(s.faction, toFloat(s.x), toFloat(s.y));
+        v.group.userData.structureId = s.id;
+        this.entitiesGroup.add(v.group);
+        this.structureMeshes.set(s.id, v);
+        this.structureGroupView.set(s.id, v.group);
       }
       if (!v) continue;
       // Friendly structures always visible; enemy structures hidden
@@ -381,15 +384,15 @@ export class SimRenderer {
         && (isOwn || this.bypassVision || this.isPositionExplored(s.x, s.y));
       if (!s.alive) continue;
       // Build progress ratio (0..1) drives the rising silhouette + dim
-      // body / scaffolding fade.
-      const total = STRUCTURE_STATS.workPod.buildTicks;
+      // body / scaffolding fade. Per-kind build-time + max-HP.
+      const total = STRUCTURE_STATS[s.kind].buildTicks;
       const ratio = total === 0 ? 1 : 1 - s.buildTicksRemaining / total;
       v.setBuildProgress(ratio);
-      // Phase C.4 building life — breathe the cap once the pod is built.
+      // Phase C.4 building life — breathe the cap once the structure is built.
       // Runs after setBuildProgress so the swell sits on top of the resting
       // intensity it just set.
       v.tickLife(dt, s.buildTicksRemaining === 0);
-      v.hpBar.update(toFloat(s.hp), toFloat(STRUCTURE_STATS.workPod.maxHp));
+      v.hpBar.update(toFloat(s.hp), toFloat(STRUCTURE_STATS[s.kind].maxHp));
     }
   }
 

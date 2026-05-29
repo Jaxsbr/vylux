@@ -8,6 +8,7 @@ import { Rng } from './rng';
 import type {
   FactionId,
   FactionState,
+  ResourceDepot,
   ResourceKind,
   ResourceNode,
   SimState,
@@ -19,8 +20,9 @@ import type {
   WorkPod,
 } from './types';
 import type { Fixed } from './fixed';
-import { distSq, fromInt, rangeSq, toInt } from './fixed';
+import { add, distSq, fromFloat, fromInt, rangeSq, toInt } from './fixed';
 import {
+  DEPOT_FOOTPRINT_TILES,
   HQ_SUPPLY_CAP_INITIAL,
   HQ_VISION_RADIUS,
   POD_HQ_KEEPOUT_TILES,
@@ -92,6 +94,8 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       researchingKind: null,
       researchTicksRemaining: 0,
       autoResumeResearched: false,
+      trickleResearchTicksRemaining: 0,
+      trickleResearched: false,
       trainQueue: [],
       trainTicksRemaining: 0,
     },
@@ -110,6 +114,8 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       researchingKind: null,
       researchTicksRemaining: 0,
       autoResumeResearched: false,
+      trickleResearchTicksRemaining: 0,
+      trickleResearched: false,
       trainQueue: [],
       trainTicksRemaining: 0,
     },
@@ -308,6 +314,52 @@ export function findNearestFriendlyOperationalWorkPod(
   return best;
 }
 
+// Phase D.3: the nearest friendly OPERATIONAL resource depot for a worker at
+// (x, y). "Operational" = alive AND buildTicksRemaining === 0. Returns null if
+// none exists; callers (pickDepositTarget) fall back to the friendly HQ. Mirrors
+// findNearestFriendlyOperationalWorkPod; lowest-id tiebreak on equal distance.
+export function findNearestFriendlyOperationalDepot(
+  state: SimState,
+  faction: 0 | 1,
+  x: Fixed,
+  y: Fixed,
+): ResourceDepot | null {
+  let best: ResourceDepot | null = null;
+  let bestD: Fixed = 0;
+  for (let i = 0; i < state.structures.length; i++) {
+    const s = state.structures[i];
+    if (!s.alive) continue;
+    if (s.kind !== 'resourceDepot') continue;
+    if (s.faction !== faction) continue;
+    if (s.buildTicksRemaining > 0) continue;
+    const d = distSq(x, y, s.x, s.y);
+    if (best === null || d < bestD || (d === bestD && s.id < best.id)) {
+      best = s;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+// Phase D.3: is the 2×2 depot footprint anchored at min-corner tile (tileX,
+// tileY) blocked for placement? True if ANY of the 4 footprint tiles is out
+// of bounds, inside a node keep-out, or inside an HQ keep-out — the same
+// per-tile rules the pod obeys, applied across the whole footprint. Shared by
+// the authoritative build reject (step.ts), the AI's depot pick (ai.ts), and
+// the render placement preview, so the preview can't disagree with the sim.
+export function isDepotFootprintBlocked(state: SimState, tileX: number, tileY: number): boolean {
+  for (let dy = 0; dy < DEPOT_FOOTPRINT_TILES; dy++) {
+    for (let dx = 0; dx < DEPOT_FOOTPRINT_TILES; dx++) {
+      const tx = tileX + dx;
+      const ty = tileY + dy;
+      if (tx < 0 || ty < 0 || tx >= state.gridSize || ty >= state.gridSize) return true;
+      if (isPodTileBlockedByNode(state, tx, ty)) return true;
+      if (isPodTileBlockedByHq(state, tx, ty)) return true;
+    }
+  }
+  return false;
+}
+
 export function spawnUnit(
   state: SimState,
   kind: UnitKind,
@@ -343,6 +395,7 @@ export function spawnUnit(
     chargeTicksAccrued: 0,
     previousNodeId: 0,
     chargeSlot: 0,
+    depositTargetStructureId: 0,
     path: [],
     pathGoalTile: -1,
     idleTicks: 0,
@@ -369,6 +422,26 @@ export function spawnStructure(
         faction,
         x,
         y,
+        hp: stats.maxHp,
+        buildTicksRemaining: stats.buildTicks,
+      };
+      state.structures.push(s);
+      return s;
+    }
+    case 'resourceDepot': {
+      const stats = STRUCTURE_STATS.resourceDepot;
+      // The caller passes the MIN-corner tile (fromInt(cmd.x/y)); store the
+      // 2×2 footprint's geometric CENTRE (+0.5 each axis) so all downstream
+      // distance math measures from the centre, like the 1×1 pod measures
+      // from its tile.
+      const half = fromFloat(0.5 * (DEPOT_FOOTPRINT_TILES - 1)); // 0.5 for 2×2
+      const s: ResourceDepot = {
+        id,
+        alive: true,
+        kind: 'resourceDepot',
+        faction,
+        x: add(x, half),
+        y: add(y, half),
         hp: stats.maxHp,
         buildTicksRemaining: stats.buildTicks,
       };

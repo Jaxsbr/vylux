@@ -11,7 +11,7 @@
 import type { Faction, UnitKind } from '../sim/types';
 import type { Sim } from '../sim/sim';
 import { toFloat, type Fixed } from '../sim/fixed';
-import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, STRUCTURE_STATS, canAfford, unitStatsFor, type ResourceCost } from '../sim/units-config';
+import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, RESEARCH_TRICKLE_COST, STRUCTURE_STATS, canAfford, unitStatsFor, type ResourceCost } from '../sim/units-config';
 import { findStructure, findUnit, isFullyExplored } from '../sim/state';
 import { isInChargeMode } from '../sim/step';
 import { themeForFaction, RESOURCE_COLOR } from './factions/theme';
@@ -51,10 +51,15 @@ export interface ActionBarDelegate {
   // commits a BuildStructureByWorker command paid for by the first
   // selected actionable worker.
   onBuildWorkPodSelected(): void;
+  // Phase D.3: enter placement mode for a resource depot (2×2 footprint).
+  onBuildResourceDepotSelected(): void;
   // Phase C.1 research: kick off auto-resume research at the currently
   // selected work pod. The input controller turns the selection +
   // delegate call into a StartResearchAtPod command for the sim.
   onResearchAutoResumeSelected(): void;
+  // Phase D.3 research: kick off resource-trickle research at the currently
+  // selected resource depot.
+  onResearchResourceTrickleSelected(): void;
   // Phase C.6.9: send the selected worker(s) scouting — reveal fog toward
   // the nearest frontier. Auto-targets in the sim; no placement step.
   onScoutSelected(): void;
@@ -286,6 +291,46 @@ export class ActionBar {
           : `WORK  POD  ·  +5  CAP  ·  CHARGE  BAY`;
         return { hint, specs, queue: null };
       }
+      // Phase D.3: resource depot selected → resource-trickle research /
+      // status. Independent of the pod's autoResume slot (no "another research
+      // in progress" gate — different building, resource-gated only).
+      if (s && s.faction === this.faction && s.kind === 'resourceDepot') {
+        const op = s.buildTicksRemaining === 0;
+        if (!op) {
+          return { hint: 'RESOURCE  DEPOT  ·  BUILDING', specs: [], queue: null };
+        }
+        const specs: ButtonSpec[] = [];
+        if (fs.trickleResearched) {
+          // Researched — info only (surfaced in the hint).
+        } else if (fs.trickleResearchTicksRemaining > 0) {
+          const secs = Math.ceil(fs.trickleResearchTicksRemaining / 20);
+          specs.push({
+            id: 'research-trickle',
+            label: `RESEARCHING ${secs}s`,
+            icon: 'research',
+            enabled: false,
+            disabledReason: 'in progress',
+            onClick: () => { /* no-op while mid-research */ },
+          });
+        } else {
+          const costOk = canAfford(fs, RESEARCH_TRICKLE_COST);
+          specs.push({
+            id: 'research-trickle',
+            label: 'RESOURCE TRICKLE',
+            icon: 'research',
+            hotkey: 'T',
+            costEnergy: costAmount(RESEARCH_TRICKLE_COST, 'energy'),
+            costMatter: costAmount(RESEARCH_TRICKLE_COST, 'matter'),
+            enabled: costOk,
+            disabledReason: costOk ? undefined : 'no resources',
+            onClick: () => this.delegate.onResearchResourceTrickleSelected(),
+          });
+        }
+        const hint = fs.trickleResearched
+          ? 'RESOURCE  DEPOT  ·  TRICKLE  ACTIVE'
+          : 'RESOURCE  DEPOT  ·  OFFLOAD  POINT';
+        return { hint, specs, queue: null };
+      }
     }
     // Reference the duration constant so the import isn't dead — surfaces
     // when (later) the research bar tooltip wants to read it.
@@ -325,6 +370,28 @@ export class ActionBar {
         enabled: podCostOk && workerActionable,
         disabledReason: podReason,
         onClick: () => this.delegate.onBuildWorkPodSelected(),
+      });
+
+      // Phase D.3: build resource depot (2×2 offload point + trickle research host).
+      const depotStats = STRUCTURE_STATS.resourceDepot;
+      const depotCostOk = canAfford(fs, depotStats.buildCost);
+      const depotEnergyShort = depotStats.buildCost.energy !== undefined && fs.energy < depotStats.buildCost.energy;
+      const depotMatterShort = depotStats.buildCost.matter !== undefined && fs.matter < depotStats.buildCost.matter;
+      let depotReason: string | undefined;
+      if (!workerActionable) depotReason = 'worker needs charge';
+      else if (depotEnergyShort && depotMatterShort) depotReason = 'no energy or matter';
+      else if (depotMatterShort) depotReason = 'no matter';
+      else if (depotEnergyShort) depotReason = 'no energy';
+      specs.push({
+        id: 'build-resource-depot',
+        label: 'BUILD DEPOT',
+        icon: 'depot',
+        hotkey: 'D',
+        costEnergy: costAmount(depotStats.buildCost, 'energy'),
+        costMatter: costAmount(depotStats.buildCost, 'matter'),
+        enabled: depotCostOk && workerActionable,
+        disabledReason: depotReason,
+        onClick: () => this.delegate.onBuildResourceDepotSelected(),
       });
 
       // Phase C.6.9: scout — reveal fog toward the nearest frontier. Costs

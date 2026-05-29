@@ -46,16 +46,17 @@ export type UnitKind = 'worker';
 // mechanic's vocabulary on "charge" to keep the two apart.
 export type ResourceKind = 'energy' | 'matter';
 
-// Phase C.1: only the work pod survives in the structures union. Future
-// sub-phases re-introduce more kinds (HQ research host, combat-unit
-// production buildings) — each as a new union member.
-export type StructureKind = 'workPod';
+// Phase C.1: the work pod. Phase D.3 adds the resource depot — a dedicated
+// collection building (worker offload target + resource-collection research
+// host). Each kind is a new union member; future sub-phases add more.
+export type StructureKind = 'workPod' | 'resourceDepot';
 
-// Phase C.1 expansion: which research the faction is currently spending
-// on. `null` = idle (no research in progress). Adding a new research
-// kind = adding a new string literal here; the at-most-one-active-
-// research rule stays.
-export type ResearchKind = 'autoResume';
+// Which research kinds exist. Phase C.1: auto-resume (single faction slot,
+// hosted at a work pod). Phase D.3: resource-trickle (hosted at a depot).
+// Tracks are INDEPENDENT — see FactionState (autoResume uses researchingKind;
+// trickle has its own progress fields) so they can research in parallel,
+// gated only by resources.
+export type ResearchKind = 'autoResume' | 'resourceTrickle';
 
 // Phase C.2: one entry in a faction's worker production queue. The spawn
 // position is resolved to concrete Fixed coords at enqueue time (HQ
@@ -109,6 +110,14 @@ export interface FactionState {
   // last harvest target after charging. Without this flag, workers
   // park at idle post-charge and need a new player command.
   autoResumeResearched: boolean;
+  // Phase D.3 resource-collection research (hosted at a depot). An
+  // INDEPENDENT track from the autoResume slot above — both can be in
+  // progress at once (different buildings, resource-gated only). In
+  // progress iff trickleResearchTicksRemaining > 0 (and not yet done);
+  // 0 + trickleResearched=false means "not started". On completion every
+  // operational depot passively trickles resource into the faction pool.
+  trickleResearchTicksRemaining: number;
+  trickleResearched: boolean;
   // Phase C.2: worker production queue. FIFO — index 0 is the unit
   // currently being produced. TrainUnit pays energy + reserves supply at
   // enqueue; advanceProduction ticks `trainTicksRemaining` down for the
@@ -220,6 +229,13 @@ export interface Worker extends UnitBase {
   // plan). When the worker's current target tile differs, the path is stale
   // and gets replanned.
   pathGoalTile: number;
+  // Phase D.3: the offload target locked in when the worker enters the
+  // `returning` phase — 0 = the friendly HQ, else the id of the chosen
+  // operational resource depot (the nearest of {HQ, depots}, depot wins
+  // ties; see pickDepositTarget). Locked at returning-entry so the worker
+  // doesn't oscillate mid-haul; re-picked only if the chosen depot dies
+  // before arrival. Cleared to 0 on deposit and on entering charge mode.
+  depositTargetStructureId: number;
   // Phase C.6.10: consecutive ticks this worker has been STALLED — parked at
   // `idle` with no pending move (moveTarget === null). Any active phase or a
   // pending move resets it to 0 (see updateIdleTimers). The AI reads it to
@@ -269,7 +285,31 @@ export interface WorkPod {
   buildTicksRemaining: number;
 }
 
-export type Structure = WorkPod;
+// Phase D.3: resource depot — a dedicated collection building. Concern
+// split from the pod: the pod grants supply cap + charges workers; the
+// depot is a worker OFFLOAD point (shortens the haul — the "long-haul
+// stall" fix) and the host for resource-collection research (passive
+// trickle). It does NOT grant supply and is NOT a charge spot.
+//
+// Footprint: 2×2 tiles. x/y store the GEOMETRIC CENTRE of that footprint
+// (min-corner tile + 0.5 on each axis) as Fixed, so all distance math
+// (deposit reach, vision, pathfinding) measures from the centre uniformly,
+// exactly like the 1×1 pod measures from its tile.
+export interface ResourceDepot {
+  id: number;
+  alive: boolean;
+  faction: Faction;
+  kind: 'resourceDepot';
+  x: Fixed;
+  y: Fixed;
+  hp: Fixed;
+  // Ticks remaining until operational (0 = operational). Decrements only
+  // while a worker is on site in the `building` phase — same convention as
+  // the work pod.
+  buildTicksRemaining: number;
+}
+
+export type Structure = WorkPod | ResourceDepot;
 
 export interface SimState {
   tick: number;

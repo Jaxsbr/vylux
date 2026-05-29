@@ -26,13 +26,14 @@ import type { Faction } from '../sim/types';
 import {
   buildHqMesh,
   buildNodeMesh,
+  buildResourceDepotMesh,
   buildUnitMesh,
   buildWorkPodMesh,
   HQ_SCALE,
 } from './meshes';
 import { workerHover } from './entity-life';
 
-export type PortraitKind = 'hq' | 'worker' | 'workPod' | 'energyNode';
+export type PortraitKind = 'hq' | 'worker' | 'workPod' | 'resourceDepot' | 'energyNode';
 
 export interface PortraitEntity {
   kind: PortraitKind;
@@ -218,6 +219,18 @@ export class PortraitRenderer {
         v.setBuildProgress(1);
         wrapper.add(v.group);
         // In-game operational-pod life: the charge-bay cap breathes.
+        tick = (dt) => v.tickLife(dt, true);
+        break;
+      }
+      case 'resourceDepot': {
+        const v = buildResourceDepotMesh(f, 0, 0);
+        v.group.position.set(0, 0, 0);
+        v.selectionRing.visible = false;
+        v.hpBar.group.visible = false;
+        // Show the depot completed so the portrait reads as the finished hub.
+        v.setBuildProgress(1);
+        wrapper.add(v.group);
+        // Operational-depot life: the intake ring breathes.
         tick = (dt) => v.tickLife(dt, true);
         break;
       }

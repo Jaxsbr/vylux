@@ -31,10 +31,12 @@
 import { Rng } from './rng';
 import { CommandKind, type Command, type InputFrame } from './commands';
 import {
+  findNearestFriendlyOperationalDepot,
   findNearestFriendlyOperationalWorkPod,
   findNode,
   findStructure,
   findUnit,
+  isDepotFootprintBlocked,
   isPodTileBlockedByHq,
   isPodTileBlockedByNode,
   markExploredCircle,
@@ -43,6 +45,8 @@ import {
 } from './state';
 import {
   type Faction,
+  type FactionState,
+  type ResourceKind,
   type SimState,
   type Structure,
   type Unit,
@@ -55,6 +59,10 @@ import {
   CHARGE_TICKS_PER_UNIT_HQ,
   CHARGE_TICKS_PER_UNIT_POD,
   CHARGE_COST_PER_TASK,
+  DEPOT_BUILD_REACH_SQ,
+  DEPOT_DEPOSIT_REACH_SQ,
+  DEPOT_TRICKLE_AMOUNT,
+  DEPOT_TRICKLE_INTERVAL_TICKS,
   HQ_CHARGE_SLOT_COUNT,
   HQ_CHARGE_SLOT_OFFSETS,
   HQ_SUPPLY_CAP_INITIAL,
@@ -64,6 +72,8 @@ import {
   POD_CHARGE_SLOT_OFFSETS,
   RESEARCH_AUTO_RESUME_COST,
   RESEARCH_AUTO_RESUME_TICKS,
+  RESEARCH_TRICKLE_COST,
+  RESEARCH_TRICKLE_TICKS,
   STRUCTURE_STATS,
   UNIT_STATS,
   WORK_POD_BUILD_REACH_SQ,
@@ -164,6 +174,71 @@ function pickChargeTarget(state: SimState, w: Worker): { x: Fixed; y: Fixed; str
   return { x: pod.x, y: pod.y, structureId: pod.id };
 }
 
+// Phase D.1/D.3: credit a deposited resource to the matching faction pool AND
+// its cumulative *Harvested twin (the match-score spine — total resources
+// collected, energy + matter). The spendable pool drops on spend; the
+// harvested totals never decrement. This is the SINGLE place deposits are
+// credited — shared by the HQ arrival, the depot arrival, and the depot
+// passive trickle — so the pool and the score spine can never drift apart.
+function creditDeposit(fs: FactionState, kind: ResourceKind, amount: Fixed): void {
+  if (kind === 'matter') {
+    fs.matter = add(fs.matter, amount);
+    fs.matterHarvested = add(fs.matterHarvested, amount);
+  } else {
+    fs.energy = add(fs.energy, amount);
+    fs.energyHarvested = add(fs.energyHarvested, amount);
+  }
+}
+
+// Phase D.3 (the long-haul stall fix): pick where a returning worker offloads
+// — the nearest of {friendly HQ, friendly operational depots}. Mirrors
+// pickChargeTarget exactly: HQ wins only when STRICTLY closer; a depot wins
+// ties. (Deposit is instant either way, so the tie-break is cosmetic — matching
+// pickChargeTarget keeps the two structurally identical.) structureId 0 = HQ.
+function pickDepositTarget(state: SimState, w: Worker): { x: Fixed; y: Fixed; structureId: number } {
+  const fs = state.factions[w.faction];
+  const depot = findNearestFriendlyOperationalDepot(state, w.faction, w.x, w.y);
+  if (depot === null) {
+    return { x: fs.hqX, y: fs.hqY, structureId: 0 };
+  }
+  const depotDistSq = distSq(w.x, w.y, depot.x, depot.y);
+  const hqDistSq = distSq(w.x, w.y, fs.hqX, fs.hqY);
+  if (hqDistSq < depotDistSq) {
+    return { x: fs.hqX, y: fs.hqY, structureId: 0 };
+  }
+  return { x: depot.x, y: depot.y, structureId: depot.id };
+}
+
+// Phase D.3: transition a worker into the `returning` phase, locking in its
+// offload target NOW (not re-evaluated per tick) so it doesn't oscillate
+// mid-haul if a depot finishes construction along the way. Called wherever the
+// worker starts carrying home.
+function enterReturning(state: SimState, w: Worker): void {
+  w.depositTargetStructureId = pickDepositTarget(state, w).structureId;
+  w.phase = 'returning';
+}
+
+// Phase D.3: resolve a returning worker's current offload point + arrival reach.
+// Honours the locked depot target; if that depot has died / been demoted
+// before arrival, re-pick (so the worker never walks to a corpse) and fall
+// back to the HQ when nothing else qualifies.
+function resolveDeposit(state: SimState, w: Worker): { x: Fixed; y: Fixed; reachSq: Fixed } {
+  const fs = state.factions[w.faction];
+  if (w.depositTargetStructureId !== 0) {
+    const d = findStructure(state, w.depositTargetStructureId);
+    if (d !== null && d.alive && d.kind === 'resourceDepot' && d.buildTicksRemaining === 0) {
+      return { x: d.x, y: d.y, reachSq: DEPOT_DEPOSIT_REACH_SQ };
+    }
+    // Locked depot gone — re-pick the nearest valid target from here.
+    const repick = pickDepositTarget(state, w);
+    w.depositTargetStructureId = repick.structureId;
+    if (repick.structureId !== 0) {
+      return { x: repick.x, y: repick.y, reachSq: DEPOT_DEPOSIT_REACH_SQ };
+    }
+  }
+  return { x: fs.hqX, y: fs.hqY, reachSq: HQ_DEPOSIT_REACH_SQ };
+}
+
 // Phase C.1: pick the lowest-index unused charge slot at the chosen
 // spot. Spot is keyed by (faction, chargeTargetStructureId) — pod ids
 // are globally unique; HQ uses structureId = 0 with the worker's
@@ -244,6 +319,8 @@ function maybeEnterChargeMode(state: SimState, w: Worker): void {
   w.carrying = 0;
   w.carriedKind = 'energy';
   w.targetStructureId = 0;
+  // Phase D.3: drop any locked offload target — charge mode aborts the haul.
+  w.depositTargetStructureId = 0;
   // If the worker is already standing at its slot, skip the walk
   // phase. Reach is against the slot point (WORKER_REACH_SQ) — workers
   // who happen to spawn at their slot don't need a no-op walk frame.
@@ -310,7 +387,14 @@ export function applyCommand(state: SimState, cmd: Command): void {
       // 0, 1, 2 picked in order.
       u.targetNodeSlot = pickHarvestSlot(state, n.id, u.id);
       u.targetNodeId = n.id;
-      u.phase = u.carrying > 0 ? 'returning' : 'movingToNode';
+      // Phase D.3: a worker re-assigned while already carrying heads home
+      // first — lock its offload target now (enterReturning); otherwise it
+      // walks to the node to harvest.
+      if (u.carrying > 0) {
+        enterReturning(state, u);
+      } else {
+        u.phase = 'movingToNode';
+      }
       // Any node-assign command supersedes a manual park.
       u.moveTarget = null;
       // Dropping any pending build assignment if there was one (would
@@ -402,11 +486,15 @@ export function applyCommand(state: SimState, cmd: Command): void {
       if (w.charge < CHARGE_COST_PER_TASK) return;
       // Phase C.6.6: keep work pods out of a node's immediate ring so the
       // node's harvest-slot approach stays clear (the worker's blind final
-      // hop to a slot would otherwise clip a pod glued to the node).
+      // hop to a slot would otherwise clip a pod glued to the node). Phase D.3:
+      // the depot obeys the same keep-out rules across its whole 2×2 footprint.
       if (
         cmd.structureKind === 'workPod' &&
         (isPodTileBlockedByNode(state, cmd.x, cmd.y) || isPodTileBlockedByHq(state, cmd.x, cmd.y))
       ) {
+        return;
+      }
+      if (cmd.structureKind === 'resourceDepot' && isDepotFootprintBlocked(state, cmd.x, cmd.y)) {
         return;
       }
       const fs = state.factions[w.faction];
@@ -454,7 +542,7 @@ export function applyCommand(state: SimState, cmd: Command): void {
       if (w.charge < CHARGE_COST_PER_TASK) return;
       const s = findStructure(state, cmd.structureId);
       if (s === null || !s.alive) return;
-      if (s.kind !== 'workPod') return;
+      // Phase D.3: any worker-built structure (pod or depot) can be finished.
       if (s.faction !== w.faction) return;
       if (s.buildTicksRemaining <= 0) return; // already operational — nothing to finish
       // Pay the worker's charge (same per-task drain as any other order).
@@ -486,27 +574,35 @@ export function applyCommand(state: SimState, cmd: Command): void {
       return;
     }
     case CommandKind.StartResearchAtPod: {
-      // Phase C.1 research command. Faction-level slot — silent reject
-      // if (a) the named structure isn't a friendly operational pod,
-      // (b) the faction is already mid-research, (c) the research kind
-      // is already complete, or (d) the faction can't afford it.
+      // Research command (slot 14, reused across hosts). Routed by researchKind:
+      //   - autoResume     → hosted at an operational WORK POD; single faction
+      //                       slot (researchingKind), energy-only.
+      //   - resourceTrickle→ hosted at an operational RESOURCE DEPOT; its own
+      //                       INDEPENDENT track, so it can run in parallel with
+      //                       autoResume (different building, resource-gated only).
+      // Silent reject if the host is wrong / not operational, the track is
+      // already in progress or complete, or the faction can't afford it.
       const s = findStructure(state, cmd.structureId);
       if (s === null || !s.alive) return;
-      if (s.kind !== 'workPod') return;
       if (s.buildTicksRemaining > 0) return;
       const fs = state.factions[s.faction];
-      if (fs.researchingKind !== null) return;
-      if (cmd.researchKind === 'autoResume' && fs.autoResumeResearched) return;
-      // Cost lookup (one entry for now; switch grows as more research
-      // kinds land).
-      const cost = cmd.researchKind === 'autoResume' ? RESEARCH_AUTO_RESUME_COST : 0;
-      const ticks = cmd.researchKind === 'autoResume' ? RESEARCH_AUTO_RESUME_TICKS : 0;
-      // Research is energy-only; route through the shared cost helpers so
-      // every spend site reads the same way.
-      if (!canAfford(fs, { energy: cost })) return;
-      spendCost(fs, { energy: cost });
-      fs.researchingKind = cmd.researchKind;
-      fs.researchTicksRemaining = ticks;
+      if (cmd.researchKind === 'autoResume') {
+        if (s.kind !== 'workPod') return;
+        if (fs.researchingKind !== null) return;
+        if (fs.autoResumeResearched) return;
+        if (!canAfford(fs, { energy: RESEARCH_AUTO_RESUME_COST })) return;
+        spendCost(fs, { energy: RESEARCH_AUTO_RESUME_COST });
+        fs.researchingKind = 'autoResume';
+        fs.researchTicksRemaining = RESEARCH_AUTO_RESUME_TICKS;
+        return;
+      }
+      // resourceTrickle
+      if (s.kind !== 'resourceDepot') return;
+      if (fs.trickleResearched) return;
+      if (fs.trickleResearchTicksRemaining > 0) return; // already in progress
+      if (!canAfford(fs, RESEARCH_TRICKLE_COST)) return;
+      spendCost(fs, RESEARCH_TRICKLE_COST);
+      fs.trickleResearchTicksRemaining = RESEARCH_TRICKLE_TICKS;
       return;
     }
     case CommandKind.ScoutWorker: {
@@ -576,21 +672,56 @@ function findNearestUnexploredTile(
   return best;
 }
 
-// Phase C.1 — end-of-step: tick down any in-flight research and flip
-// the corresponding faction-level flag on completion. Single-slot per
-// faction so a faction can hold at most one mid-research at a time.
+// Phase C.1/D.3 — end-of-step: tick down each faction's in-flight research and
+// flip the matching completion flag. Two INDEPENDENT tracks advance in parallel:
+//   - the autoResume single slot (researchingKind), hosted at a pod.
+//   - the resourceTrickle track (its own ticks counter), hosted at a depot.
 function advanceResearch(state: SimState): void {
   for (const fs of state.factions) {
-    if (fs.researchingKind === null) continue;
-    fs.researchTicksRemaining -= 1;
-    if (fs.researchTicksRemaining > 0) continue;
-    switch (fs.researchingKind) {
-      case 'autoResume':
-        fs.autoResumeResearched = true;
-        break;
+    // autoResume single slot.
+    if (fs.researchingKind !== null) {
+      fs.researchTicksRemaining -= 1;
+      if (fs.researchTicksRemaining <= 0) {
+        switch (fs.researchingKind) {
+          case 'autoResume':
+            fs.autoResumeResearched = true;
+            break;
+          case 'resourceTrickle':
+            // Not hosted on this slot — defensive no-op.
+            break;
+        }
+        fs.researchingKind = null;
+        fs.researchTicksRemaining = 0;
+      }
     }
-    fs.researchingKind = null;
-    fs.researchTicksRemaining = 0;
+    // resourceTrickle independent track.
+    if (!fs.trickleResearched && fs.trickleResearchTicksRemaining > 0) {
+      fs.trickleResearchTicksRemaining -= 1;
+      if (fs.trickleResearchTicksRemaining <= 0) {
+        fs.trickleResearched = true;
+        fs.trickleResearchTicksRemaining = 0;
+      }
+    }
+  }
+}
+
+// Phase D.3 — passive resource trickle. Once a faction has researched it, every
+// OPERATIONAL depot it owns credits DEPOT_TRICKLE_AMOUNT of both energy and
+// matter into the faction pool every DEPOT_TRICKLE_INTERVAL_TICKS, routed
+// through creditDeposit so the harvested score spine lifts exactly as a worker
+// offload would. Fires on the interval boundary (tick % interval === 0);
+// deterministic (integer tick modulo, fixed-point amounts).
+function advanceTrickle(state: SimState): void {
+  if (state.tick % DEPOT_TRICKLE_INTERVAL_TICKS !== 0) return;
+  for (let i = 0; i < state.structures.length; i++) {
+    const s = state.structures[i];
+    if (!s.alive) continue;
+    if (s.kind !== 'resourceDepot') continue;
+    if (s.buildTicksRemaining > 0) continue;
+    const fs = state.factions[s.faction];
+    if (!fs.trickleResearched) continue;
+    creditDeposit(fs, 'energy', DEPOT_TRICKLE_AMOUNT);
+    creditDeposit(fs, 'matter', DEPOT_TRICKLE_AMOUNT);
   }
 }
 
@@ -694,6 +825,11 @@ function moveTowards(
 const HQ_PATH_BLOCK_SQ: Fixed = rangeSq(fromFloat(1.95));
 const POD_PATH_BLOCK_SQ: Fixed = rangeSq(fromFloat(0.7));
 const NODE_PATH_BLOCK_SQ: Fixed = rangeSq(fromFloat(0.95));
+// Phase D.3: the depot's 2×2 footprint. Measured from the centre (which sits on
+// a tile boundary, +0.5), each of the 4 footprint tile centres is √0.5 ≈ 0.707
+// away and the nearest non-footprint tile centre is ≥ 1.5 away, so a 1.0 radius
+// blocks exactly the 4 footprint tiles and leaves the surrounding tiles passable.
+const DEPOT_PATH_BLOCK_SQ: Fixed = rangeSq(fromFloat(1.0));
 
 // Blocker key for a faction's HQ (HQs aren't entities in any array, so they
 // can't use an entity id). Negative to never collide with positive ids / 0.
@@ -713,8 +849,10 @@ function collectBlockers(state: SimState): PathBlocker[] {
   ];
   for (let i = 0; i < state.structures.length; i++) {
     const s = state.structures[i];
-    if (!s.alive || s.kind !== 'workPod' || s.buildTicksRemaining > 0) continue; // operational pods only
-    blockers.push({ x: s.x, y: s.y, pathRadiusSq: POD_PATH_BLOCK_SQ, key: s.id });
+    if (!s.alive || s.buildTicksRemaining > 0) continue; // operational structures only
+    // Phase D.3: pods occupy 1 tile, depots their 2×2 footprint.
+    const radiusSq = s.kind === 'resourceDepot' ? DEPOT_PATH_BLOCK_SQ : POD_PATH_BLOCK_SQ;
+    blockers.push({ x: s.x, y: s.y, pathRadiusSq: radiusSq, key: s.id });
   }
   for (let i = 0; i < state.nodes.length; i++) {
     const n = state.nodes[i];
@@ -769,7 +907,9 @@ function targetExemptKey(w: Worker): number {
     case 'harvesting':
       return w.targetNodeId;
     case 'returning':
-      return hqKey(w.faction);
+      // Phase D.3: exempt the locked offload target — the depot (its id is a
+      // blocker) or the HQ (key 0 → hqKey) so A* can route right up to it.
+      return w.depositTargetStructureId !== 0 ? w.depositTargetStructureId : hqKey(w.faction);
     case 'movingToBuildSite':
     case 'building':
       return w.targetStructureId;
@@ -964,31 +1104,27 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
           maybeEnterChargeMode(state, w);
           return;
         }
-        w.phase = 'returning';
+        // Phase D.3: lock in the offload target (nearest of HQ / depots) now.
+        enterReturning(state, w);
       }
       return;
     }
 
     case 'returning': {
-      const hq = state.factions[w.faction];
-      const nextRet = navigate(state, w, hq.hqX, hq.hqY, hq.hqX, hq.hqY, speed, blockers);
+      const fs = state.factions[w.faction];
+      // Phase D.3: resolve the locked offload point — a depot (the stall fix)
+      // or the HQ — with the correct arrival reach for whichever it is.
+      const dep = resolveDeposit(state, w);
+      const nextRet = navigate(state, w, dep.x, dep.y, dep.x, dep.y, speed, blockers);
       w.x = nextRet.x;
       w.y = nextRet.y;
-      if (distSq(w.x, w.y, hq.hqX, hq.hqY) <= HQ_DEPOSIT_REACH_SQ) {
-        // Phase D.1: credit the pool that matches what the worker carried,
-        // plus its cumulative harvested twin (the score spine — total
-        // resources, energy + matter). The spendable pool drops on spend;
-        // the *Harvested totals never decrement. This is the only site that
-        // credits energyHarvested / matterHarvested.
-        if (w.carriedKind === 'matter') {
-          hq.matter = add(hq.matter, w.carrying);
-          hq.matterHarvested = add(hq.matterHarvested, w.carrying);
-        } else {
-          hq.energy = add(hq.energy, w.carrying);
-          hq.energyHarvested = add(hq.energyHarvested, w.carrying);
-        }
+      if (distSq(w.x, w.y, dep.x, dep.y) <= dep.reachSq) {
+        // Credit the deposit (pool + harvested score spine) through the shared
+        // helper — identical whether offloaded at the HQ or a depot.
+        creditDeposit(fs, w.carriedKind, w.carrying);
         w.carrying = 0;
         w.carriedKind = 'energy';
+        w.depositTargetStructureId = 0;
         // End of harvest cycle — task complete. Decide what's next:
         // (a) charge depleted? walkingToCharge.
         // (b) charge OK + node still alive? auto-continue cycle (which
@@ -1030,7 +1166,9 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
       const next = navigate(state, w, s.x, s.y, s.x, s.y, speed, blockers);
       w.x = next.x;
       w.y = next.y;
-      if (distSq(w.x, w.y, s.x, s.y) <= WORK_POD_BUILD_REACH_SQ) {
+      // Phase D.3: the 2×2 depot uses a wider on-site reach than the 1×1 pod.
+      const buildReachSq = s.kind === 'resourceDepot' ? DEPOT_BUILD_REACH_SQ : WORK_POD_BUILD_REACH_SQ;
+      if (distSq(w.x, w.y, s.x, s.y) <= buildReachSq) {
         w.phase = 'building';
       }
       return;
@@ -1202,13 +1340,13 @@ function advanceDiscovery(state: SimState): void {
     markFromPoint(u.faction, u.x, u.y, rangeSq(UNIT_STATS[u.kind].visionRadius));
   }
 
-  // Phase C.1: operational work pods project vision the same way HQs do.
+  // Phase C.1/D.3: operational structures (pods + depots) project vision the
+  // same way HQs do, each with its own vision radius.
   for (let i = 0; i < state.structures.length; i++) {
     const s = state.structures[i];
     if (!s.alive) continue;
-    if (s.kind !== 'workPod') continue;
     if (s.buildTicksRemaining > 0) continue;
-    markFromPoint(s.faction, s.x, s.y, rangeSq(STRUCTURE_STATS.workPod.visionRadius));
+    markFromPoint(s.faction, s.x, s.y, rangeSq(STRUCTURE_STATS[s.kind].visionRadius));
   }
 }
 
@@ -1233,9 +1371,8 @@ function advanceExploration(state: SimState): void {
   for (let i = 0; i < state.structures.length; i++) {
     const s = state.structures[i];
     if (!s.alive) continue;
-    if (s.kind !== 'workPod') continue;
     if (s.buildTicksRemaining > 0) continue;
-    markExploredCircle(state.explored[s.faction], g, s.x, s.y, STRUCTURE_STATS.workPod.visionRadius);
+    markExploredCircle(state.explored[s.faction], g, s.x, s.y, STRUCTURE_STATS[s.kind].visionRadius);
   }
 }
 
@@ -1303,6 +1440,7 @@ export function step(state: SimState, rng: Rng, frame: InputFrame): void {
     }
     recomputeSupplyCaps(state);
     advanceResearch(state);
+    advanceTrickle(state);
     advanceDiscovery(state);
     advanceExploration(state);
     if (state.winner === null) {

@@ -104,6 +104,7 @@ describe('scoreBreakdown — formula', () => {
         chargeTicksAccrued: 0,
         previousNodeId: 0,
         chargeSlot: 0,
+        depositTargetStructureId: 0,
         path: [],
         pathGoalTile: -1,
         idleTicks: 0,

@@ -219,22 +219,23 @@ export class SelectionPortrait {
         status: '', statusIcon: null, hp: null, charge: null,
       };
     }
-    // Structure selection — work pods are the only live structure today.
+    // Structure selection — work pod or resource depot.
     if (selectedStructureId !== null) {
       const s = findStructure(sim.state, selectedStructureId);
       if (s) {
-        const total = STRUCTURE_STATS.workPod.buildTicks;
+        const total = STRUCTURE_STATS[s.kind].buildTicks;
         const building = s.buildTicksRemaining > 0;
         const status = building
           ? `BUILDING ${Math.max(0, Math.min(total, total - s.buildTicksRemaining))}/${total}`
           : 'OPERATIONAL';
+        const isDepot = s.kind === 'resourceDepot';
         return {
-          name: 'WORK POD',
-          entity: { kind: 'workPod', faction: s.faction },
+          name: isDepot ? 'RESOURCE DEPOT' : 'WORK POD',
+          entity: { kind: s.kind, faction: s.faction },
           faction: s.faction,
           status,
           statusIcon: building ? 'build' : null,
-          hp: { cur: Math.round(toFloat(s.hp)), max: Math.round(toFloat(STRUCTURE_STATS.workPod.maxHp)) },
+          hp: { cur: Math.round(toFloat(s.hp)), max: Math.round(toFloat(STRUCTURE_STATS[s.kind].maxHp)) },
           charge: null,
         };
       }
@@ -335,8 +336,8 @@ function workerActionText(sim: Sim, w: Worker): string {
     }
     case 'building': {
       const s = findStructure(sim.state, w.targetStructureId);
-      if (s === null || s.kind !== 'workPod') return 'BUILDING';
-      const total = STRUCTURE_STATS.workPod.buildTicks;
+      if (s === null) return 'BUILDING';
+      const total = STRUCTURE_STATS[s.kind].buildTicks;
       const done = Math.max(0, Math.min(total, total - s.buildTicksRemaining));
       return `BUILDING ${done}/${total}`;
     }

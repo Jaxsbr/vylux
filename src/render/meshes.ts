@@ -14,6 +14,7 @@ import { buildEnergyNode as legacyBuildEnergyNode } from './legacy/energy-node';
 import { buildHpBar, type HpBar } from './legacy/hp-bar';
 import type { FactionId } from './legacy/placement';
 import { GRID_CONSTANTS, tileToWorld } from './legacy/grid';
+import { tileFloatToWorld } from './scene';
 import { buildGlowEdges } from './glow-edge';
 import { buildSelectionRing, buildChargeRing, type ChargeRing } from './entity-chrome';
 import { breathe, pulse, intensityForLuma, BUILDING_PULSE_PERIOD_S } from './entity-life';
@@ -517,6 +518,126 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
       // for either faction colour, so the cap pulses smoothly, not on/off.
       if (operational) {
         capMat.emissiveIntensity = intensityForLuma(capHex, CAP_LUMA_MID + pulse(lifeClock, CAP_LUMA_AMP));
+      }
+    },
+  };
+}
+
+// Phase D.3 — resource depot mesh. A broad, low collection hub spanning a 2×2
+// footprint: a wide drum body, two stubby intake silos at the back, and a bright
+// faction-tinted intake ring on top (the bloom anchor) — a silhouette distinct
+// from both the HQ (tall tiered spire) and the work pod (small single-tile box
+// with an antenna cap). Reuses the same selection / scaffolding / build-progress
+// idiom as the pod so the structure-selection feel stays consistent.
+//
+// centerX/centerY are FLOAT tile coords of the footprint's geometric centre
+// (the sim stores the depot's x/y there), so the body sits centred on its 2×2.
+const DEPOT_DIMS = {
+  bodyWidth: 1.7,
+  bodyHeight: 0.5,
+  siloRadius: 0.26,
+  siloHeight: 0.78,
+  siloOffset: 0.5, // back-corner placement from centre
+  ringRadius: 0.5,
+  ringHeight: 0.16,
+} as const;
+
+export function buildResourceDepotMesh(
+  faction: Faction,
+  centerX: number,
+  centerY: number,
+): WorkPodVisual {
+  const fid = factionToId(faction);
+  const emissive = PRODUCTION_FACTION_EMISSIVE[fid];
+
+  const group = new THREE.Group();
+  group.name = `resource-depot-${fid}`;
+
+  // Wide low drum body — reads as "a place to dump resources into".
+  const bodyGeo = new THREE.BoxGeometry(DEPOT_DIMS.bodyWidth, DEPOT_DIMS.bodyHeight, DEPOT_DIMS.bodyWidth);
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: PRODUCTION_BODY_COLOR,
+    emissive,
+    emissiveIntensity: 0.08,
+  });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = DEPOT_DIMS.bodyHeight / 2;
+  body.name = 'resource-depot-body';
+  group.add(body);
+
+  const edges = buildGlowEdges(new THREE.EdgesGeometry(bodyGeo), emissive, 'resource-depot-trim');
+  edges.position.y = DEPOT_DIMS.bodyHeight / 2;
+  group.add(edges);
+
+  // Two intake silos at the back corners — break the boxy silhouette so the
+  // depot reads as a richer industrial structure than the pod.
+  const silos: THREE.Mesh[] = [];
+  for (const sx of [-DEPOT_DIMS.siloOffset, DEPOT_DIMS.siloOffset]) {
+    const siloGeo = new THREE.CylinderGeometry(DEPOT_DIMS.siloRadius, DEPOT_DIMS.siloRadius, DEPOT_DIMS.siloHeight, 12);
+    const siloMat = new THREE.MeshStandardMaterial({
+      color: PRODUCTION_BODY_COLOR,
+      emissive,
+      emissiveIntensity: 0.12,
+    });
+    const silo = new THREE.Mesh(siloGeo, siloMat);
+    silo.position.set(sx, DEPOT_DIMS.bodyHeight + DEPOT_DIMS.siloHeight / 2, -DEPOT_DIMS.siloOffset);
+    silo.name = 'resource-depot-silo';
+    group.add(silo);
+    silos.push(silo);
+  }
+
+  // Glowing intake ring on top centre — the depot's primary bloom anchor.
+  const ringGeo = new THREE.CylinderGeometry(DEPOT_DIMS.ringRadius, DEPOT_DIMS.ringRadius * 0.7, DEPOT_DIMS.ringHeight, 20);
+  const ringMat = new THREE.MeshStandardMaterial({ color: emissive, emissive, emissiveIntensity: 2.0 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.position.y = DEPOT_DIMS.bodyHeight + DEPOT_DIMS.ringHeight / 2;
+  ring.name = 'resource-depot-ring';
+  group.add(ring);
+
+  const hpBar = buildHpBar(fid, DEPOT_DIMS.bodyHeight + DEPOT_DIMS.siloHeight + 0.3);
+  hpBar.group.visible = false;
+  group.add(hpBar.group);
+
+  // Selection + scaffolding rings sized for the 2×2 footprint (wider than pod).
+  const selectionRing = buildStructureRing(faction, 1.0, 1.18);
+  group.add(selectionRing);
+  const scaffoldingRing = buildScaffoldingRing(faction, 1.06, 1.26);
+  group.add(scaffoldingRing);
+
+  const w = tileFloatToWorld(centerX, centerY);
+  group.position.set(w.x, GRID_CONSTANTS.tileY, w.z);
+
+  let lifeClock = Math.random() * BUILDING_PULSE_PERIOD_S;
+  const ringHex = ringMat.emissive.getHex();
+
+  return {
+    group,
+    hpBar,
+    selectionRing,
+    scaffoldingRing,
+    setBuildProgress(ratio: number): void {
+      const clamped = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
+      const yScale = 0.15 + 0.85 * clamped;
+      body.scale.y = yScale;
+      body.position.y = (DEPOT_DIMS.bodyHeight / 2) * yScale;
+      edges.scale.y = yScale;
+      edges.position.y = (DEPOT_DIMS.bodyHeight / 2) * yScale;
+      for (const silo of silos) {
+        silo.scale.y = yScale;
+        silo.position.y = DEPOT_DIMS.bodyHeight * yScale + (DEPOT_DIMS.siloHeight / 2) * yScale;
+        silo.visible = clamped > 0.25;
+      }
+      ring.position.y = DEPOT_DIMS.bodyHeight * yScale + DEPOT_DIMS.ringHeight / 2;
+      ring.visible = clamped > 0.4;
+      bodyMat.opacity = 0.45 + 0.55 * clamped;
+      bodyMat.transparent = clamped < 1;
+      ringMat.emissiveIntensity = 0.2 + 1.8 * clamped;
+      scaffoldingRing.visible = clamped < 1;
+    },
+    tickLife(dt: number, operational: boolean): void {
+      lifeClock += dt;
+      if (operational) {
+        ringMat.emissiveIntensity = intensityForLuma(ringHex, CAP_LUMA_MID + pulse(lifeClock, CAP_LUMA_AMP));
       }
     },
   };

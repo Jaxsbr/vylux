@@ -76,8 +76,11 @@ export class FeedbackOverlay {
     parent.add(this.group);
   }
 
-  // Show / move the build-placement preview at a tile, coloured by validity.
-  showPlacementPreview(tileX: number, tileY: number, valid: boolean): void {
+  // Show / move the build-placement preview, coloured by validity. tileX/tileY
+  // is the MIN-corner anchor; sizeTiles is the footprint extent (1 for the pod,
+  // 2 for the depot's 2×2). The marker is scaled + centred over the whole
+  // footprint so the player sees exactly which tiles the structure will occupy.
+  showPlacementPreview(tileX: number, tileY: number, valid: boolean, sizeTiles = 1): void {
     if (this.placementPreview === null) {
       const geo = new THREE.PlaneGeometry(0.9, 0.9);
       const mat = new THREE.MeshBasicMaterial({
@@ -93,8 +96,11 @@ export class FeedbackOverlay {
       this.placementPreview = { mesh, mat, geo };
     }
     const p = this.placementPreview;
-    const w = tileFloatToWorld(tileX, tileY);
+    // Footprint geometric centre (min-corner + half the extent).
+    const half = (sizeTiles - 1) / 2;
+    const w = tileFloatToWorld(tileX + half, tileY + half);
     p.mesh.position.set(w.x, CUE_Y, w.z);
+    p.mesh.scale.set(sizeTiles, sizeTiles, 1);
     p.mat.color.setHex(valid ? PLACE_OK_COLOR : PLACE_BAD_COLOR);
     p.mesh.visible = true;
   }

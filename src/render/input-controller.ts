@@ -25,7 +25,8 @@
 import * as THREE from 'three';
 import { CommandKind, type Command } from '../sim/commands';
 import type { Sim } from '../sim/sim';
-import { findNode, findStructure, findUnit, isPodTileBlockedByHq, isPodTileBlockedByNode } from '../sim/state';
+import { findNode, findStructure, findUnit, isDepotFootprintBlocked, isPodTileBlockedByHq, isPodTileBlockedByNode } from '../sim/state';
+import { DEPOT_FOOTPRINT_TILES } from '../sim/units-config';
 import { toggleDebugReveal } from './debug-reveal';
 import { isInChargeMode } from '../sim/step';
 import { CHARGE_COST_PER_TASK } from '../sim/units-config';
@@ -68,7 +69,9 @@ export interface InputFeedbackHooks {
   // the hovered tile + whether a pod may be built there (false = too close to
   // a node). Drives the green/red placement preview. onPlacementHoverEnd
   // fires when placement mode exits (commit or cancel) to hide the preview.
-  onPlacementHover?(tileX: number, tileY: number, valid: boolean): void;
+  // Phase D.3: sizeTiles is the footprint extent (1 = pod, 2 = depot's 2×2) so
+  // the preview can scale + centre the marker over all occupied tiles.
+  onPlacementHover?(tileX: number, tileY: number, valid: boolean, sizeTiles?: number): void;
   onPlacementHoverEnd?(): void;
 }
 
@@ -125,7 +128,7 @@ export class InputController {
   // supply structures (Pylons). Phase 3.10.6: also captures the worker
   // IDs that will build it — snapshotted at enterPlace*Mode time so a
   // mid-placement selection change doesn't strand the build.
-  private pendingPlacement: 'production' | 'upgrade' | 'supply' | 'workPod' | null = null;
+  private pendingPlacement: 'production' | 'upgrade' | 'supply' | 'workPod' | 'resourceDepot' | null = null;
   private readonly queue: Command[] = [];
   private readonly raycaster = (() => {
     const r = new THREE.Raycaster();
@@ -217,6 +220,15 @@ export class InputController {
     this.applyCursor('crosshair');
   }
 
+  // Phase D.3: enter placement mode for a resource depot (2×2 footprint). The
+  // next left-click issues a BuildStructureByWorker('resourceDepot') at the
+  // clicked tile (the footprint's min corner), paid for by the first selected
+  // worker. Mirrors the work-pod flow.
+  enterPlaceResourceDepotMode(): void {
+    this.pendingPlacement = 'resourceDepot';
+    this.applyCursor('crosshair');
+  }
+
   // Phase C.1 research: emit a StartResearchAtPod command targeting the
   // currently-selected friendly work pod. Silent no-op if no pod is
   // selected (UI button should be hidden in that case).
@@ -227,6 +239,19 @@ export class InputController {
       kind: CommandKind.StartResearchAtPod,
       structureId: id,
       researchKind: 'autoResume',
+    });
+  }
+
+  // Phase D.3 research: kick off resource-trickle research at the currently
+  // selected friendly depot. Reuses the StartResearchAtPod command (routed by
+  // researchKind on the sim side). Silent no-op if no structure is selected.
+  researchResourceTrickle(): void {
+    const id = this.selectedStructureId;
+    if (id === null) return;
+    this.queue.push({
+      kind: CommandKind.StartResearchAtPod,
+      structureId: id,
+      researchKind: 'resourceTrickle',
     });
   }
 
@@ -337,6 +362,27 @@ export class InputController {
             this.opts.feedback?.onPlacement?.(tile.x, tile.y);
           }
         }
+      } else if (this.pendingPlacement === 'resourceDepot') {
+        // Phase D.3: 2×2 footprint placement. Reject if any footprint tile is
+        // blocked (sim would reject anyway) — stay in placement mode + keep the
+        // red preview so the player can pick a valid spot; Esc / right-click cancels.
+        const tile = this.pickGroundTile(e);
+        if (tile !== null) {
+          if (isDepotFootprintBlocked(this.opts.sim.state, tile.x, tile.y)) {
+            return;
+          }
+          const builder = this.firstActionableWorker();
+          if (builder !== null) {
+            this.queue.push({
+              kind: CommandKind.BuildStructureByWorker,
+              workerId: builder,
+              structureKind: 'resourceDepot',
+              x: tile.x,
+              y: tile.y,
+            });
+            this.opts.feedback?.onPlacement?.(tile.x, tile.y);
+          }
+        }
       }
       this.pendingPlacement = null;
       this.opts.feedback?.onPlacementHoverEnd?.();
@@ -364,9 +410,11 @@ export class InputController {
       const podHitFromDown = this.pickOwnedStructure(e);
       if (podHitFromDown !== null) {
         const s = findStructure(this.opts.sim.state, podHitFromDown);
-        if (s !== null && s.kind === 'workPod' && s.buildTicksRemaining > 0) {
+        // Phase D.3: any worker-built structure (pod or depot) under construction
+        // can be finished by clicking it with workers selected.
+        if (s !== null && s.buildTicksRemaining > 0) {
           this.queueAssignWorkersToBuild(s.id);
-          return; // consumed — don't fall through to selecting the pod
+          return; // consumed — don't fall through to selecting the structure
         }
       }
       const nodeHitFromDown = this.pickLiveNode(e);
@@ -461,6 +509,15 @@ export class InputController {
         } else {
           // Cursor left the playable grid (off-grid / over HUD) — hide the
           // preview instead of leaving a stale marker frozen on-grid.
+          this.opts.feedback?.onPlacementHoverEnd?.();
+        }
+      } else if (this.pendingPlacement === 'resourceDepot') {
+        // Phase D.3: 2×2 footprint preview — validity covers the whole footprint.
+        const tile = this.pickGroundTile(e);
+        if (tile !== null) {
+          const valid = !isDepotFootprintBlocked(this.opts.sim.state, tile.x, tile.y);
+          this.opts.feedback?.onPlacementHover?.(tile.x, tile.y, valid, DEPOT_FOOTPRINT_TILES);
+        } else {
           this.opts.feedback?.onPlacementHoverEnd?.();
         }
       }

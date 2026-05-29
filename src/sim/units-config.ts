@@ -102,7 +102,22 @@ export const STRUCTURE_STATS: Record<StructureKind, StructureStats> = {
     buildTicks: 30, // 1.5 s at 20 Hz
     visionRadius: fromInt(5),
   },
+  // Phase D.3: resource depot — a heavier economy investment than a pod, with
+  // a distinct 2×2 footprint. Costs/build-time/HP scaled up accordingly; the
+  // slightly longer vision sells its "forward outpost" role (planting one
+  // toward a distant cluster reveals that cluster's nodes). Placeholders; retune
+  // in playtest.
+  resourceDepot: {
+    maxHp: fromInt(180),
+    buildCost: { energy: fromInt(60), matter: fromInt(50) },
+    buildTicks: 45, // 2.25 s at 20 Hz
+    visionRadius: fromInt(6),
+  },
 };
+
+// Phase D.3: the depot is a 2×2 footprint (pod = 1×1, HQ = 3×3). The placement
+// anchor is the MIN corner; the footprint covers (x,y)..(x+1,y+1).
+export const DEPOT_FOOTPRINT_TILES = 2;
 
 // Phase C.1: worker charge / supply tuning.
 
@@ -165,6 +180,26 @@ export const HQ_CHARGE_SLOT_OFFSETS: ReadonlyArray<{ dx: Fixed; dy: Fixed }> = [
 // Build reach: how close a worker must be to a pod tile to count as
 // "on site" and contribute construction progress.
 export const WORK_POD_BUILD_REACH_SQ: Fixed = rangeSq(fromFloat(1.2));
+
+// Phase D.3 — resource depot reach radii (squared), measured from the depot's
+// 2×2 footprint CENTRE. Both sit just outside the depot body and between the
+// pod (smaller) and HQ (larger) values:
+//   - DEPOT_BUILD_REACH_SQ:   a worker counts as "on site" to build here.
+//   - DEPOT_DEPOSIT_REACH_SQ: a returning worker counts as "arrived" to offload
+//     here (the long-haul stall fix — see pickDepositTarget in step.ts).
+export const DEPOT_BUILD_REACH_SQ: Fixed = rangeSq(fromFloat(1.6));
+export const DEPOT_DEPOSIT_REACH_SQ: Fixed = rangeSq(fromFloat(1.6));
+
+// Phase D.3 — resource-collection research (hosted at a depot). Passive
+// trickle: once researched, every operational depot credits DEPOT_TRICKLE_AMOUNT
+// of BOTH energy and matter into the faction pool every DEPOT_TRICKLE_INTERVAL_TICKS,
+// routed through the same deposit-credit helper as a worker offload (so it lifts
+// the harvested score spine identically). Pricier than auto-resume since passive
+// income is strong; deliberately low yield so turtling can't beat expanding.
+export const RESEARCH_TRICKLE_COST: ResourceCost = { energy: fromInt(120), matter: fromInt(40) };
+export const RESEARCH_TRICKLE_TICKS = 120; // 6 s at 20 Hz
+export const DEPOT_TRICKLE_INTERVAL_TICKS = 40; // every 2 s at 20 Hz
+export const DEPOT_TRICKLE_AMOUNT: Fixed = fromInt(1);
 
 // Capacity (worker supply) — HQ baseline + per-pod bonus.
 export const HQ_SUPPLY_CAP_INITIAL = 5;
