@@ -33,7 +33,7 @@ import {
 } from './meshes';
 import { workerHover } from './entity-life';
 
-export type PortraitKind = 'hq' | 'worker' | 'workPod' | 'resourceDepot' | 'energyNode';
+export type PortraitKind = 'hq' | 'worker' | 'workPod' | 'resourceDepot' | 'energyNode' | 'matterNode';
 
 export interface PortraitEntity {
   kind: PortraitKind;
@@ -234,8 +234,9 @@ export class PortraitRenderer {
         tick = (dt) => v.tickLife(dt, true);
         break;
       }
-      case 'energyNode': {
-        const v = buildNodeMesh(0, 0, 'energy');
+      case 'energyNode':
+      case 'matterNode': {
+        const v = buildNodeMesh(0, 0, entity.kind === 'matterNode' ? 'matter' : 'energy');
         v.group.position.set(0, 0, 0);
         wrapper.add(v.group);
         // In-game node life: the core slowly spins + breathes. The node's

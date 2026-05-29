@@ -240,16 +240,17 @@ export class SelectionPortrait {
         };
       }
     }
-    // Node selection — neutral palette; status carries remaining energy.
+    // Node selection — neutral palette; status carries remaining reserve.
     if (selectedNodeId !== null) {
       const n = findNode(sim.state, selectedNodeId);
       if (n) {
         const remaining = Math.max(0, Math.round(toFloat(n.remaining)));
+        const isMatter = n.kind === 'matter';
         return {
-          name: 'ENERGY NODE',
-          entity: { kind: 'energyNode', faction: null },
+          name: isMatter ? 'MATTER NODE' : 'ENERGY NODE',
+          entity: { kind: isMatter ? 'matterNode' : 'energyNode', faction: null },
           faction: null,
-          status: `${remaining} ENERGY`,
+          status: `${remaining} ${isMatter ? 'MATTER' : 'ENERGY'}`,
           statusIcon: null, hp: null, charge: null,
         };
       }
