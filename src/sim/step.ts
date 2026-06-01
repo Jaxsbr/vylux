@@ -72,6 +72,8 @@ import {
   POD_CHARGE_SLOT_OFFSETS,
   RESEARCH_AUTO_RESUME_COST,
   RESEARCH_AUTO_RESUME_TICKS,
+  RESEARCH_SMART_WORKERS_COST,
+  RESEARCH_SMART_WORKERS_TICKS,
   RESEARCH_TRICKLE_COST,
   RESEARCH_TRICKLE_TICKS,
   STRUCTURE_STATS,
@@ -336,22 +338,22 @@ function maybeEnterChargeMode(state: SimState, w: Worker): void {
 }
 
 // Phase C.1 auto-resume: called when a worker finishes charging. If the
-// faction has the auto-resume research AND the worker remembers a
-// previous harvest node AND that node is still alive AND the worker
-// has the charge to pay for a new harvest cycle, kick the cycle off.
-// Otherwise the worker drops to idle and clears its previousNodeId.
+// faction has the auto-resume research AND the worker remembers a previous
+// harvest node AND that node is still alive AND the worker has the charge to
+// pay for a new harvest cycle, kick the cycle off.
+//
+// Phase D.4: this no longer CLEARS previousNodeId when it can't resume (research
+// off, node mined out, or no charge) — that memory now persists as the
+// "was harvesting" flag the smart-workers reassign reads. previousNodeId is
+// cleared only by an explicit task-replacing command (move / build / scout).
+// When auto-resume can't fire, the worker is left idle with its memory intact
+// so maybeSmartReassign (gated on the depot research) can pick a fresh node.
 function maybeAutoResumeAfterCharge(state: SimState, w: Worker): void {
   const fs = state.factions[w.faction];
-  if (!fs.autoResumeResearched) {
-    w.previousNodeId = 0;
-    return;
-  }
+  if (!fs.autoResumeResearched) return;
   if (w.previousNodeId === 0) return;
   const node = findNode(state, w.previousNodeId);
-  if (node === null) {
-    w.previousNodeId = 0;
-    return;
-  }
+  if (node === null) return; // old node gone — leave memory for smart reassign
   if (w.charge < CHARGE_COST_PER_TASK) return;
   // Resume — same shape as applyCommand AssignWorkerToNode, minus the
   // command path. We're spending a fresh charge to start the cycle.
@@ -360,6 +362,60 @@ function maybeAutoResumeAfterCharge(state: SimState, w: Worker): void {
   w.targetNodeId = node.id;
   w.phase = 'movingToNode';
   w.moveTarget = null;
+}
+
+// Phase D.4 smart workers: nearest DISCOVERED live node (any resource kind) to
+// (x, y) for `faction`, or null if the faction knows of none. "Discovered"
+// gates it to what the faction has actually scouted — a worker can't beeline to
+// a node hidden in fog. Deterministic: nearest by squared distance, lowest-id
+// tiebreak (matching the AI's nearestLiveNode + the rest of the sim).
+function findNearestDiscoveredLiveNode(
+  state: SimState,
+  faction: Faction,
+  x: Fixed,
+  y: Fixed,
+): SimState['nodes'][number] | null {
+  let best: SimState['nodes'][number] | null = null;
+  let bestD: Fixed = 0;
+  for (let i = 0; i < state.nodes.length; i++) {
+    const n = state.nodes[i];
+    if (!n.alive) continue;
+    if (n.remaining <= 0) continue;
+    if (!n.discoveredBy[faction]) continue;
+    const d = distSq(x, y, n.x, n.y);
+    if (best === null || d < bestD || (d === bestD && n.id < best.id)) {
+      best = n;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+// Phase D.4 smart workers: re-engage an idle worker that WAS harvesting (has
+// previousNodeId memory) but has nothing live to resume. Gated on the depot's
+// smart-workers research. Picks the nearest discovered live node — energy or
+// matter — and starts a fresh harvest cycle (paying one charge, exactly like a
+// player AssignWorkerToNode). No-op when the research is off, the worker has no
+// harvest memory, it can't pay the charge, or the faction knows of no live node
+// (it then stays idle — eligible to charge / be redirected — and retries next
+// tick as fog clears). This is the fix for workers stalling at a pod once their
+// old node is mined out (common now that matter + clustered fields deplete fast).
+function maybeSmartReassign(state: SimState, w: Worker): void {
+  const fs = state.factions[w.faction];
+  if (!fs.smartWorkersResearched) return;
+  if (w.previousNodeId === 0) return; // never harvested / explicitly redirected
+  if (w.charge < CHARGE_COST_PER_TASK) return;
+  const node = findNearestDiscoveredLiveNode(state, w.faction, w.x, w.y);
+  if (node === null) return; // nothing known to harvest — stay idle
+  w.charge -= CHARGE_COST_PER_TASK;
+  w.targetNodeSlot = pickHarvestSlot(state, node.id, w.id);
+  w.targetNodeId = node.id;
+  w.previousNodeId = node.id;
+  w.phase = 'movingToNode';
+  w.moveTarget = null;
+  // Drop the cached A* route — destination changed (mirrors AssignWorkerToNode).
+  w.path.length = 0;
+  w.pathGoalTile = -1;
 }
 
 export function applyCommand(state: SimState, cmd: Command): void {
@@ -596,6 +652,17 @@ export function applyCommand(state: SimState, cmd: Command): void {
         fs.researchTicksRemaining = RESEARCH_AUTO_RESUME_TICKS;
         return;
       }
+      if (cmd.researchKind === 'smartWorkers') {
+        // Phase D.4: smart-workers — hosted at a depot, its OWN independent
+        // track (parallel to trickle + autoResume; resource-gated only).
+        if (s.kind !== 'resourceDepot') return;
+        if (fs.smartWorkersResearched) return;
+        if (fs.smartWorkersResearchTicksRemaining > 0) return; // already in progress
+        if (!canAfford(fs, RESEARCH_SMART_WORKERS_COST)) return;
+        spendCost(fs, RESEARCH_SMART_WORKERS_COST);
+        fs.smartWorkersResearchTicksRemaining = RESEARCH_SMART_WORKERS_TICKS;
+        return;
+      }
       // resourceTrickle
       if (s.kind !== 'resourceDepot') return;
       if (fs.trickleResearched) return;
@@ -700,6 +767,14 @@ function advanceResearch(state: SimState): void {
       if (fs.trickleResearchTicksRemaining <= 0) {
         fs.trickleResearched = true;
         fs.trickleResearchTicksRemaining = 0;
+      }
+    }
+    // Phase D.4: smartWorkers independent track.
+    if (!fs.smartWorkersResearched && fs.smartWorkersResearchTicksRemaining > 0) {
+      fs.smartWorkersResearchTicksRemaining -= 1;
+      if (fs.smartWorkersResearchTicksRemaining <= 0) {
+        fs.smartWorkersResearched = true;
+        fs.smartWorkersResearchTicksRemaining = 0;
       }
     }
   }
@@ -991,6 +1066,20 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
     maybeEnterChargeMode(state, w);
   }
 
+  // Phase D.4 smart workers: an idle worker still holding harvest memory but
+  // with no live node to resume picks the nearest discovered node and heads
+  // out. Gated on the depot research (no-op otherwise) + a live charge, and
+  // skipped for a worker parked on a manual move. Runs AFTER the 0-charge
+  // charge check above so a depleted worker goes to charge, not to harvest.
+  if (
+    w.phase === 'idle'
+    && w.moveTarget === null
+    && w.targetNodeId === 0
+    && w.previousNodeId !== 0
+  ) {
+    maybeSmartReassign(state, w);
+  }
+
   switch (w.phase) {
     case 'idle':
       // Idle workers walk to a manual move target if one is set, then
@@ -1254,6 +1343,11 @@ function advanceWorker(state: SimState, w: Worker, blockers: ReadonlyArray<PathB
           // Phase C.1 auto-resume: re-engage the previous harvest if
           // the faction has the research + the node is still alive.
           maybeAutoResumeAfterCharge(state, w);
+          // Phase D.4: if auto-resume couldn't fire (off, or the old node is
+          // mined out), the smart-workers research picks a fresh discovered
+          // node now — so the worker leaves the pod immediately instead of
+          // stalling a tick at idle first.
+          if (w.phase === 'idle') maybeSmartReassign(state, w);
         }
       }
       return;

@@ -201,6 +201,16 @@ export const RESEARCH_TRICKLE_TICKS = 120; // 6 s at 20 Hz
 export const DEPOT_TRICKLE_INTERVAL_TICKS = 40; // every 2 s at 20 Hz
 export const DEPOT_TRICKLE_AMOUNT: Fixed = fromInt(1);
 
+// Phase D.4 — smart-workers research (hosted at a depot, independent track).
+// Once researched, an idle worker that was harvesting but has no node to
+// auto-resume picks the nearest DISCOVERED live node (energy or matter) and
+// heads there — the complement to auto-resume that keeps workers productive
+// after their old node is mined out. Priced between auto-resume (80 e) and the
+// trickle (120 e + 40 m): it's a strong quality-of-life pick, dual-resource
+// since it lives on the depot, but cheaper than the passive-income trickle.
+export const RESEARCH_SMART_WORKERS_COST: ResourceCost = { energy: fromInt(100), matter: fromInt(30) };
+export const RESEARCH_SMART_WORKERS_TICKS = 100; // 5 s at 20 Hz
+
 // Capacity (worker supply) — HQ baseline + per-pod bonus.
 export const HQ_SUPPLY_CAP_INITIAL = 5;
 export const WORK_POD_CAP_BONUS = 5;

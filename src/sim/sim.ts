@@ -79,6 +79,9 @@ export class Sim {
       // Phase D.3: resource-trickle research (independent parallel track).
       h.writeU32(fs.trickleResearchTicksRemaining);
       h.writeU32(fs.trickleResearched ? 1 : 0);
+      // Phase D.4: smart-workers research (independent parallel track).
+      h.writeU32(fs.smartWorkersResearchTicksRemaining);
+      h.writeU32(fs.smartWorkersResearched ? 1 : 0);
       // Phase C.2: worker production queue. Head timer + length + each
       // item's kind and reserved spawn tile (Fixed, hashed as i32).
       h.writeU32(fs.trainTicksRemaining);

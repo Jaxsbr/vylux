@@ -43,6 +43,7 @@ export class GameEventDetector {
   // Faction-level research watches.
   private prevResearching = false;
   private prevAutoResume = false;
+  private prevSmartWorkers = false;
   private lastTick = -1;
   private primed = false;
 
@@ -137,6 +138,12 @@ export class GameEventDetector {
       this.audio.researchComplete();
       this.onResearchComplete?.();
     }
+    // Phase D.4: smart-workers completion gets the same chime (a depot research,
+    // but a worker-behavior unlock like auto-resume — worth surfacing).
+    if (fs.smartWorkersResearched && !this.prevSmartWorkers) {
+      this.audio.researchComplete();
+      this.onResearchComplete?.();
+    }
 
     this.snapshot();
   }
@@ -167,5 +174,6 @@ export class GameEventDetector {
     const fs = state.factions[this.playerFaction];
     this.prevResearching = fs.researchingKind !== null;
     this.prevAutoResume = fs.autoResumeResearched;
+    this.prevSmartWorkers = fs.smartWorkersResearched;
   }
 }

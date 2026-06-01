@@ -313,7 +313,15 @@ import type { InitialMatchSpec } from './state';
 // own hand-specs with well-separated nodes (no adjacency), so their hashes are
 // unchanged — but the rule + generator change bumps the version so clustered
 // replays are versioned distinctly. No hashed state-shape change.
-export const REPLAY_VERSION = 35;
+//
+// v36 (Phase D.4 — Smart workers): adds two hashed FactionState fields
+// (`smartWorkersResearchTicksRemaining` + `smartWorkersResearched`) for a new
+// depot-hosted research: once researched, an idle worker that was harvesting
+// auto-picks the nearest DISCOVERED live node instead of stalling when its old
+// node is mined out. The auto-resume worker memory (`previousNodeId`) now also
+// persists across charge cycles so this can read it. New hashed fields + the AI
+// now researching auto-resume + smart-workers → every fixture regenerates.
+export const REPLAY_VERSION = 36;
 
 export interface ReplayLog {
   version: number;

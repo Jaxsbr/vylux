@@ -52,11 +52,16 @@ export type ResourceKind = 'energy' | 'matter';
 export type StructureKind = 'workPod' | 'resourceDepot';
 
 // Which research kinds exist. Phase C.1: auto-resume (single faction slot,
-// hosted at a work pod). Phase D.3: resource-trickle (hosted at a depot).
-// Tracks are INDEPENDENT — see FactionState (autoResume uses researchingKind;
-// trickle has its own progress fields) so they can research in parallel,
-// gated only by resources.
-export type ResearchKind = 'autoResume' | 'resourceTrickle';
+// hosted at a work pod). Phase D.3: resource-trickle + smart-workers (both
+// hosted at a depot). Tracks are INDEPENDENT — see FactionState (autoResume
+// uses researchingKind; trickle + smartWorkers each have their own progress
+// fields) so they can research in parallel, gated only by resources.
+//   - autoResume     : after charging, a worker resumes its EXACT previous node.
+//   - smartWorkers   : an idle worker that WAS harvesting but has no node to
+//                      resume auto-picks the nearest DISCOVERED live node (energy
+//                      or matter) — the depot-side complement to auto-resume that
+//                      stops workers stalling once their old node is mined out.
+export type ResearchKind = 'autoResume' | 'resourceTrickle' | 'smartWorkers';
 
 // Phase C.2: one entry in a faction's worker production queue. The spawn
 // position is resolved to concrete Fixed coords at enqueue time (HQ
@@ -118,6 +123,13 @@ export interface FactionState {
   // operational depot passively trickles resource into the faction pool.
   trickleResearchTicksRemaining: number;
   trickleResearched: boolean;
+  // Phase D.4 smart-workers research (hosted at a depot) — its OWN independent
+  // track, same shape as trickle. In progress iff smartWorkersResearchTicksRemaining
+  // > 0 (and not yet done); 0 + smartWorkersResearched=false means "not started".
+  // Once complete, an idle worker that was harvesting auto-picks the nearest
+  // discovered live node instead of stalling (see maybeSmartReassign in step.ts).
+  smartWorkersResearchTicksRemaining: number;
+  smartWorkersResearched: boolean;
   // Phase C.2: worker production queue. FIFO — index 0 is the unit
   // currently being produced. TrainUnit pays energy + reserves supply at
   // enqueue; advanceProduction ticks `trainTicksRemaining` down for the

@@ -18,7 +18,7 @@
 import { CommandKind, type Command } from './commands';
 import { distSq, fromInt, rangeSq, type Fixed } from './fixed';
 import { type Faction, type ResourceNode, type SimState } from './types';
-import { MAX_TRAIN_QUEUE, RESEARCH_TRICKLE_COST, STRUCTURE_STATS, canAfford, unitStatsFor } from './units-config';
+import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_SMART_WORKERS_COST, RESEARCH_TRICKLE_COST, STRUCTURE_STATS, canAfford, unitStatsFor } from './units-config';
 import { isInChargeMode } from './step';
 import { isDepotFootprintBlocked, isFullyExplored, isPodTileBlockedByHq, isPodTileBlockedByNode } from './state';
 
@@ -211,11 +211,53 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
     }
   }
 
-  // 4) Phase D.3: once a depot is operational and we can afford it, research the
-  // passive trickle — free, recurring economy off a building we already own.
-  // One-shot: the gate closes as soon as it starts (ticksRemaining > 0) and
-  // stays closed once researched. Reached only when training didn't fire this
-  // tick (training returns early), so it never competes with worker production.
+  // 4) Research. Reached only when training didn't fire this tick (training
+  // returns early), so research never competes with worker production — the AI
+  // researches with spare economy, exactly as a player does once at cap. The
+  // three tracks are independent (different hosts / progress fields) so the AI
+  // can have all three in flight at once when it can afford them.
+  //
+  // Worker-efficiency research (auto-resume + smart-workers) goes FIRST so the
+  // AI prioritises keeping its workforce productive — parity with the player,
+  // who gets the same two picks. Functionally the AI already micromanages idle
+  // workers via autoAssignIdleWorkers, so these don't change its harvesting;
+  // they're a deliberate, realistic spend that mirrors the player's tech path.
+
+  // 4a) Auto-resume — hosted at a work pod, uses the single research slot.
+  if (
+    !fs.autoResumeResearched
+    && fs.researchingKind === null
+    && canAfford(fs, { energy: RESEARCH_AUTO_RESUME_COST })
+  ) {
+    const podId = findFriendlyOperationalWorkPod(state, faction);
+    if (podId !== 0) {
+      commands.push({
+        kind: CommandKind.StartResearchAtPod,
+        structureId: podId,
+        researchKind: 'autoResume',
+      });
+    }
+  }
+
+  // 4b) Smart-workers — hosted at a depot, its own independent track.
+  if (
+    !fs.smartWorkersResearched
+    && fs.smartWorkersResearchTicksRemaining === 0
+    && canAfford(fs, RESEARCH_SMART_WORKERS_COST)
+  ) {
+    const depotId = findFriendlyOperationalDepot(state, faction);
+    if (depotId !== 0) {
+      commands.push({
+        kind: CommandKind.StartResearchAtPod,
+        structureId: depotId,
+        researchKind: 'smartWorkers',
+      });
+    }
+  }
+
+  // 4c) Phase D.3: passive trickle — hosted at a depot, its own track. Free,
+  // recurring economy off a building we already own. One-shot: the gate closes
+  // as soon as it starts (ticksRemaining > 0) and stays closed once researched.
   if (
     !fs.trickleResearched
     && fs.trickleResearchTicksRemaining === 0
@@ -234,8 +276,8 @@ export function tickAi(state: SimState, faction: Faction): Command[] {
   return commands;
 }
 
-// Lowest-id friendly OPERATIONAL depot (0 = none). Used by the AI's trickle-
-// research decision to pick a host building.
+// Lowest-id friendly OPERATIONAL depot (0 = none). Used by the AI's trickle +
+// smart-workers research decisions to pick a host building.
 function findFriendlyOperationalDepot(state: SimState, faction: Faction): number {
   let best = 0;
   for (let i = 0; i < state.structures.length; i++) {
@@ -243,6 +285,21 @@ function findFriendlyOperationalDepot(state: SimState, faction: Faction): number
     if (!s.alive) continue;
     if (s.faction !== faction) continue;
     if (s.kind !== 'resourceDepot') continue;
+    if (s.buildTicksRemaining > 0) continue;
+    if (best === 0 || s.id < best) best = s.id;
+  }
+  return best;
+}
+
+// Lowest-id friendly OPERATIONAL work pod (0 = none). Host for the AI's
+// auto-resume research decision (mirrors findFriendlyOperationalDepot).
+function findFriendlyOperationalWorkPod(state: SimState, faction: Faction): number {
+  let best = 0;
+  for (let i = 0; i < state.structures.length; i++) {
+    const s = state.structures[i];
+    if (!s.alive) continue;
+    if (s.faction !== faction) continue;
+    if (s.kind !== 'workPod') continue;
     if (s.buildTicksRemaining > 0) continue;
     if (best === 0 || s.id < best) best = s.id;
   }

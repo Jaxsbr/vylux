@@ -512,6 +512,8 @@ async function bootstrap(): Promise<void> {
     onResearchAutoResumeSelected: () => { audio.click(); input!.researchAutoResume(); },
     // Phase D.3 research: queue resource-trickle research on the selected depot.
     onResearchResourceTrickleSelected: () => { audio.click(); input!.researchResourceTrickle(); },
+    // Phase D.4 research: queue smart-workers research on the selected depot.
+    onResearchSmartWorkersSelected: () => { audio.click(); input!.researchSmartWorkers(); },
     // Phase C.6.9: send the selected worker(s) scouting to reveal fog.
     onScoutSelected: () => { audio.click(); input!.scoutSelectedWorkers(); },
   }, document.body);

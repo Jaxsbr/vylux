@@ -13,6 +13,7 @@ import {
   HQ_SUPPLY_CAP_INITIAL,
   RESEARCH_AUTO_RESUME_COST,
   RESEARCH_AUTO_RESUME_TICKS,
+  RESEARCH_SMART_WORKERS_TICKS,
   STRUCTURE_STATS,
   WORK_POD_CAP_BONUS,
   WORKER_DEFAULT_MAX_CHARGE,
@@ -544,6 +545,52 @@ describe('Sim — resume partial work-pod build (AssignWorkerToBuild)', () => {
     expect(b.targetStructureId).toBe(0);
     expect(b.charge).toBe(startCharge); // no charge spent on a no-op
   });
+
+  // Phase D.4 regression: the SAME worker can resume a DEPOT it abandoned
+  // mid-build. AssignWorkerToBuild has always accepted depots; this guards the
+  // cross-kind path (the input layer used to gate resume to pods only, leaving a
+  // redirected depot build stuck — see queueAssignWorkersToBuild).
+  it('the original worker can resume a depot abandoned mid-build', () => {
+    const sim = new Sim(SPEC);
+    trainWorker(sim, 0, 8, 8);
+    const a = sim.state.units[0];
+    if (a.kind !== 'worker') throw new Error('expected worker');
+    // Place a depot (2×2 footprint anchored at 9,9 — clear of the node + HQ).
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.BuildStructureByWorker, workerId: a.id, structureKind: 'resourceDepot', x: 9, y: 9 }],
+    });
+    const depot = sim.state.structures.find((s) => s.kind === 'resourceDepot');
+    if (!depot) throw new Error('expected depot placed');
+    const full = STRUCTURE_STATS.resourceDepot.buildTicks;
+    // Let the builder reach the site + tick some build progress.
+    for (let i = 0; i < 120 && depot.buildTicksRemaining === full; i++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+    }
+    expect(depot.buildTicksRemaining).toBeGreaterThan(0);
+    expect(depot.buildTicksRemaining).toBeLessThan(full); // construction actually started
+    // Redirect the builder — depot is now abandoned mid-build.
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.MoveUnit, unitId: a.id, x: 2, y: 2 }],
+    });
+    expect(a.targetStructureId).toBe(0);
+    expect(depot.buildTicksRemaining).toBeGreaterThan(0);
+    // Re-task the SAME worker back onto the depot — the "continue building
+    // afterwards" path that was stuck.
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.AssignWorkerToBuild, workerId: a.id, structureId: depot.id }],
+    });
+    expect(['movingToBuildSite', 'building']).toContain(a.phase);
+    expect(a.targetStructureId).toBe(depot.id);
+    // Run until the depot is operational.
+    for (let i = 0; i < 800 && depot.buildTicksRemaining > 0; i++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+    }
+    expect(depot.buildTicksRemaining).toBe(0);
+    expect(depot.alive).toBe(true);
+  });
 });
 
 describe('Sim — research + auto-resume', () => {
@@ -645,8 +692,12 @@ describe('Sim — research + auto-resume', () => {
       sim.step({ tick: sim.state.tick, commands: [] });
     }
     expect(w.phase).toBe('idle');
-    // No research → previousNodeId is cleared, no auto-resume.
-    expect(w.previousNodeId).toBe(0);
+    // No research → no auto-resume + no smart reassign, so the worker stays
+    // idle with no live task. Phase D.4: the harvest memory (previousNodeId)
+    // now PERSISTS across the charge cycle (it's the flag the smart-workers
+    // research reads); only an explicit move/build/scout clears it. Without
+    // either research the memory is inert — the worker simply parks.
+    expect(w.previousNodeId).toBe(1);
     expect(w.targetNodeId).toBe(0);
   });
 
@@ -696,8 +747,144 @@ describe('Sim — research + auto-resume', () => {
     }
     expect(w.phase).toBe('idle');
     expect(sim.state.nodes[0].alive).toBe(false);
-    // Previous node depleted → no resume; field cleared.
-    expect(w.previousNodeId).toBe(0);
+    // Previous node depleted → auto-resume can't fire, so the worker parks.
+    // Phase D.4: the memory now persists (no smart-workers research here to act
+    // on it, and the only node is dead, so it stays idle regardless).
+    expect(w.previousNodeId).toBe(1);
+    expect(w.targetNodeId).toBe(0);
+  });
+});
+
+// Phase D.4 — smart-workers research. An idle worker that WAS harvesting but
+// has no node to resume (mined out) auto-picks the nearest DISCOVERED live node
+// — energy or matter. Gated on the depot research; without it the worker parks.
+describe('Sim — smart workers (depot research)', () => {
+  // HQ at (3,3); a small node that mines out in one cycle + a large fallback,
+  // both right next to the base so the discovery sweep reveals them. Generous
+  // resources so nothing gates on cost.
+  const TWO_NODE_SPEC: InitialMatchSpec = {
+    seed: 1,
+    hqs: { faction0: { x: 3, y: 3 }, faction1: { x: 27, y: 27 } },
+    nodes: [
+      { x: 5, y: 5, amount: 5, kind: 'energy' },    // id 1 — depletes in one cycle
+      { x: 5, y: 8, amount: 1000, kind: 'energy' },  // id 2 — fallback
+    ],
+    initialEnergy: 10000,
+    initialMatter: 10000,
+  };
+
+  // Run a few ticks so the HQ vision sweep marks both nodes discovered for
+  // faction 0 (smart reassign only routes to discovered nodes).
+  function settleDiscovery(sim: Sim): void {
+    for (let i = 0; i < 5; i++) sim.step({ tick: sim.state.tick, commands: [] });
+  }
+
+  it('researched: idle worker re-targets a fresh node after its old one mines out', () => {
+    const sim = new Sim(TWO_NODE_SPEC);
+    sim.state.factions[0].smartWorkersResearched = true;
+    trainWorker(sim, 0, 4, 4);
+    settleDiscovery(sim);
+    const w = sim.state.units[0];
+    if (w.kind !== 'worker') throw new Error('expected worker');
+    expect(sim.state.nodes[0].discoveredBy[0]).toBe(true);
+    expect(sim.state.nodes[1].discoveredBy[0]).toBe(true);
+    // Assign to the small node — it mines out in one harvest cycle.
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.AssignWorkerToNode, workerId: w.id, nodeId: 1 }],
+    });
+    // Run until the worker has re-engaged the fallback node (id 2). The old
+    // node (id 1) is gone; without smart-workers the worker would park here.
+    let saw = false;
+    for (let i = 0; i < 3000 && !saw; i++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+      saw = w.targetNodeId === 2
+        && (w.phase === 'movingToNode' || w.phase === 'harvesting' || w.phase === 'returning');
+    }
+    expect(saw).toBe(true);
+    expect(sim.state.nodes[0].alive).toBe(false); // small node mined out
+  });
+
+  it('researched: falls back to a MATTER node when that is the nearest live one', () => {
+    const sim = new Sim({
+      ...TWO_NODE_SPEC,
+      nodes: [
+        { x: 5, y: 5, amount: 5, kind: 'energy' },     // id 1 — depletes fast
+        { x: 5, y: 8, amount: 1000, kind: 'matter' },   // id 2 — matter fallback
+      ],
+    });
+    sim.state.factions[0].smartWorkersResearched = true;
+    trainWorker(sim, 0, 4, 4);
+    settleDiscovery(sim);
+    const w = sim.state.units[0];
+    if (w.kind !== 'worker') throw new Error('expected worker');
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.AssignWorkerToNode, workerId: w.id, nodeId: 1 }],
+    });
+    // The worker should re-target the matter node (id 2) and eventually deposit
+    // matter — proving the fallback is resource-kind-agnostic (the user's matter
+    // case). Run until matter lands in the pool (a full harvest → haul cycle).
+    let retargetedMatter = false;
+    for (let i = 0; i < 3000 && sim.state.factions[0].matterHarvested === fromInt(0); i++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+      if (w.targetNodeId === 2) retargetedMatter = true;
+    }
+    expect(retargetedMatter).toBe(true);
+    expect(sim.state.factions[0].matterHarvested).toBeGreaterThan(0);
+  });
+
+  it('NOT researched: idle worker parks after its node mines out', () => {
+    const sim = new Sim(TWO_NODE_SPEC); // smartWorkersResearched defaults false
+    trainWorker(sim, 0, 4, 4);
+    settleDiscovery(sim);
+    const w = sim.state.units[0];
+    if (w.kind !== 'worker') throw new Error('expected worker');
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.AssignWorkerToNode, workerId: w.id, nodeId: 1 }],
+    });
+    // Run well past a full cycle; the worker deposits, then parks (no reassign).
+    for (let i = 0; i < 400; i++) sim.step({ tick: sim.state.tick, commands: [] });
+    expect(w.phase).toBe('idle');
+    expect(w.targetNodeId).toBe(0);
+    expect(sim.state.nodes[0].alive).toBe(false); // it did mine out the first node
+    expect(sim.state.nodes[1].alive).toBe(true);  // never touched the fallback
+  });
+
+  it('research command flips the flag after the research duration', () => {
+    const sim = new Sim(TWO_NODE_SPEC);
+    // Stand up an operational depot to host the research (built off-node).
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.TrainUnit, faction: 0, unitKind: 'worker', x: 4, y: 4 }],
+    });
+    let builder = 0;
+    for (let i = 0; i < 200 && builder === 0; i++) {
+      const fresh = sim.state.units.find((u) => u.alive && u.kind === 'worker' && u.faction === 0);
+      if (fresh) builder = fresh.id;
+      else sim.step({ tick: sim.state.tick, commands: [] });
+    }
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.BuildStructureByWorker, workerId: builder, structureKind: 'resourceDepot', x: 9, y: 9 }],
+    });
+    let depotId = 0;
+    for (let i = 0; i < 4000; i++) {
+      const d = sim.state.structures.find((s) => s.alive && s.kind === 'resourceDepot' && s.faction === 0);
+      if (d && d.buildTicksRemaining === 0) { depotId = d.id; break; }
+      sim.step({ tick: sim.state.tick, commands: [] });
+    }
+    expect(depotId).toBeGreaterThan(0);
+    sim.step({
+      tick: sim.state.tick,
+      commands: [{ kind: CommandKind.StartResearchAtPod, structureId: depotId, researchKind: 'smartWorkers' }],
+    });
+    expect(sim.state.factions[0].smartWorkersResearchTicksRemaining).toBeGreaterThan(0);
+    for (let i = 0; i < RESEARCH_SMART_WORKERS_TICKS + 5; i++) {
+      sim.step({ tick: sim.state.tick, commands: [] });
+    }
+    expect(sim.state.factions[0].smartWorkersResearched).toBe(true);
   });
 });
 

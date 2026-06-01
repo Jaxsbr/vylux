@@ -255,6 +255,19 @@ export class InputController {
     });
   }
 
+  // Phase D.4 research: kick off smart-workers research at the currently
+  // selected friendly depot. Reuses the StartResearchAtPod command (routed by
+  // researchKind on the sim side). Silent no-op if no structure is selected.
+  researchSmartWorkers(): void {
+    const id = this.selectedStructureId;
+    if (id === null) return;
+    this.queue.push({
+      kind: CommandKind.StartResearchAtPod,
+      structureId: id,
+      researchKind: 'smartWorkers',
+    });
+  }
+
   isPlacing(): boolean {
     return this.pendingPlacement !== null;
   }
@@ -705,14 +718,25 @@ export class InputController {
   }
 
   // Phase D-prep: assign every selected friendly worker to FINISH an existing
-  // partially-built work pod (left-click order — see handlePointerDown). The
-  // build cost was already paid at placement, so this only costs each worker
-  // 1 charge; charge-mode / 0-charge workers flash the lightning cue + skip.
-  // Returns whether any command was queued.
+  // partially-built structure — a work pod OR a resource depot (left-click
+  // order — see handlePointerDown). The build cost was already paid at
+  // placement, so this only costs each worker 1 charge; charge-mode / 0-charge
+  // workers flash the lightning cue + skip. Returns whether any command was
+  // queued.
+  //
+  // Phase D.4 fix: this previously rejected everything but a work pod, so
+  // redirecting a depot's builder mid-construction left the depot stuck — the
+  // click to re-task a worker onto it was swallowed (handlePointerDown consumes
+  // the click for any in-progress structure) but no AssignWorkerToBuild was
+  // queued. The sim's AssignWorkerToBuild has always accepted depots; this gate
+  // just needs to agree. Friendly + faction is enforced per-worker below and
+  // re-checked authoritatively in the sim.
   private queueAssignWorkersToBuild(structureId: number): boolean {
     const state = this.opts.sim.state;
     const s = findStructure(state, structureId);
-    if (s === null || s.kind !== 'workPod' || s.buildTicksRemaining <= 0) return false;
+    if (s === null || s.buildTicksRemaining <= 0) return false;
+    if (s.kind !== 'workPod' && s.kind !== 'resourceDepot') return false;
+    if (s.faction !== this.opts.playerFaction) return false;
     let queued = false;
     for (const id of this.selectedUnitIds) {
       const u = findUnit(state, id);

@@ -11,7 +11,7 @@
 import type { Faction, UnitKind } from '../sim/types';
 import type { Sim } from '../sim/sim';
 import { toFloat, type Fixed } from '../sim/fixed';
-import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, RESEARCH_TRICKLE_COST, STRUCTURE_STATS, canAfford, unitStatsFor, type ResourceCost } from '../sim/units-config';
+import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, RESEARCH_SMART_WORKERS_COST, RESEARCH_TRICKLE_COST, STRUCTURE_STATS, canAfford, unitStatsFor, type ResourceCost } from '../sim/units-config';
 import { findStructure, findUnit, isFullyExplored } from '../sim/state';
 import { isInChargeMode } from '../sim/step';
 import { themeForFaction, RESOURCE_COLOR } from './factions/theme';
@@ -60,6 +60,9 @@ export interface ActionBarDelegate {
   // Phase D.3 research: kick off resource-trickle research at the currently
   // selected resource depot.
   onResearchResourceTrickleSelected(): void;
+  // Phase D.4 research: kick off smart-workers research at the currently
+  // selected resource depot (idle workers auto-pick a fresh discovered node).
+  onResearchSmartWorkersSelected(): void;
   // Phase C.6.9: send the selected worker(s) scouting — reveal fog toward
   // the nearest frontier. Auto-targets in the sim; no placement step.
   onScoutSelected(): void;
@@ -300,6 +303,34 @@ export class ActionBar {
           return { hint: 'RESOURCE  DEPOT  ·  BUILDING', specs: [], queue: null };
         }
         const specs: ButtonSpec[] = [];
+        // Smart-workers research tile (independent track — shown alongside the
+        // trickle; either / both can be in progress at once).
+        if (fs.smartWorkersResearched) {
+          // Researched — info only (surfaced in the hint).
+        } else if (fs.smartWorkersResearchTicksRemaining > 0) {
+          const secs = Math.ceil(fs.smartWorkersResearchTicksRemaining / 20);
+          specs.push({
+            id: 'research-smart-workers',
+            label: `RESEARCHING ${secs}s`,
+            icon: 'research',
+            enabled: false,
+            disabledReason: 'in progress',
+            onClick: () => { /* no-op while mid-research */ },
+          });
+        } else {
+          const costOk = canAfford(fs, RESEARCH_SMART_WORKERS_COST);
+          specs.push({
+            id: 'research-smart-workers',
+            label: 'SMART WORKERS',
+            icon: 'research',
+            hotkey: 'S',
+            costEnergy: costAmount(RESEARCH_SMART_WORKERS_COST, 'energy'),
+            costMatter: costAmount(RESEARCH_SMART_WORKERS_COST, 'matter'),
+            enabled: costOk,
+            disabledReason: costOk ? undefined : 'no resources',
+            onClick: () => this.delegate.onResearchSmartWorkersSelected(),
+          });
+        }
         if (fs.trickleResearched) {
           // Researched — info only (surfaced in the hint).
         } else if (fs.trickleResearchTicksRemaining > 0) {
@@ -326,9 +357,14 @@ export class ActionBar {
             onClick: () => this.delegate.onResearchResourceTrickleSelected(),
           });
         }
-        const hint = fs.trickleResearched
-          ? 'RESOURCE  DEPOT  ·  TRICKLE  ACTIVE'
-          : 'RESOURCE  DEPOT  ·  OFFLOAD  POINT';
+        // Hint reflects whichever depot research has landed (both, one, or none).
+        const hint = fs.trickleResearched && fs.smartWorkersResearched
+          ? 'RESOURCE  DEPOT  ·  TRICKLE  +  SMART  WORKERS'
+          : fs.trickleResearched
+            ? 'RESOURCE  DEPOT  ·  TRICKLE  ACTIVE'
+            : fs.smartWorkersResearched
+              ? 'RESOURCE  DEPOT  ·  SMART  WORKERS  ACTIVE'
+              : 'RESOURCE  DEPOT  ·  OFFLOAD  POINT';
         return { hint, specs, queue: null };
       }
     }
