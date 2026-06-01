@@ -8,6 +8,8 @@ import { Rng } from './rng';
 import type {
   FactionId,
   FactionState,
+  ResourceDepot,
+  ResourceKind,
   ResourceNode,
   SimState,
   Structure,
@@ -18,10 +20,12 @@ import type {
   WorkPod,
 } from './types';
 import type { Fixed } from './fixed';
-import { distSq, fromInt, rangeSq, toInt } from './fixed';
+import { add, distSq, fromFloat, fromInt, rangeSq, toInt } from './fixed';
 import {
+  DEPOT_FOOTPRINT_TILES,
   HQ_SUPPLY_CAP_INITIAL,
   HQ_VISION_RADIUS,
+  POD_HQ_KEEPOUT_TILES,
   POD_NODE_KEEPOUT_TILES,
   STRUCTURE_STATS,
   WORKER_DEFAULT_MAX_CHARGE,
@@ -39,12 +43,21 @@ export interface InitialMatchSpec {
   // Which faction-id each slot plays. Defaults to swarm/siege so legacy
   // callers (tests + headless cli) don't have to spell it out.
   factionIds?: { faction0: FactionId; faction1: FactionId };
-  // Resource nodes. Phase A: only 'energy' nodes are valid; the kind
-  // field is dropped from the input shape since there's no other choice.
-  nodes: Array<{ x: number; y: number; energy: number }>;
+  // Resource nodes. Phase D.1: nodes carry a `kind` (energy | matter) and a
+  // kind-neutral `amount` (the starting reserve). `kind` is optional and
+  // defaults to 'energy' so legacy specs / tests that predate matter stay
+  // valid. (Field renamed from `energy` to `amount` in D.1 — a matter node
+  // carrying `energy: 120` read wrong, and the rename is part of the
+  // stop-overloading-"energy" cleanup.)
+  nodes: Array<{ x: number; y: number; amount: number; kind?: ResourceKind }>;
   // Energy each faction starts with. 0 by default. Used to bootstrap AI
   // build orders that need to train before any worker has harvested.
   initialEnergy?: number;
+  // Phase D.1: Matter each faction starts with. 0 by default — a normal
+  // match earns its matter from tick 0 (the worker is energy-only, so
+  // matter isn't bootstrap-critical). The tutorial sets it so its
+  // build-a-pod step never blocks on matter.
+  initialMatter?: number;
   // Both HQs share the same starting HP, default 500. Lower in tests to
   // produce shorter match-end scenarios.
   hqMaxHp?: number;
@@ -60,6 +73,7 @@ export interface InitialMatchSpec {
 export function createInitialState(spec: InitialMatchSpec): { state: SimState; rng: Rng } {
   const rng = new Rng(spec.seed);
   const initialEnergy = fromInt(spec.initialEnergy ?? 0);
+  const initialMatter = fromInt(spec.initialMatter ?? 0);
 
   const hqMaxHp = fromInt(spec.hqMaxHp ?? 500);
   const factionId0 = spec.factionIds?.faction0 ?? 'swarm';
@@ -70,6 +84,8 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       hqX: fromInt(spec.hqs.faction0.x),
       hqY: fromInt(spec.hqs.faction0.y),
       energy: initialEnergy,
+      matter: initialMatter,
+      matterHarvested: fromInt(0),
       energyHarvested: fromInt(0),
       hqHp: hqMaxHp,
       nextSpawnRotation: 0,
@@ -78,6 +94,10 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       researchingKind: null,
       researchTicksRemaining: 0,
       autoResumeResearched: false,
+      trickleResearchTicksRemaining: 0,
+      trickleResearched: false,
+      smartWorkersResearchTicksRemaining: 0,
+      smartWorkersResearched: false,
       trainQueue: [],
       trainTicksRemaining: 0,
     },
@@ -86,6 +106,8 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       hqX: fromInt(spec.hqs.faction1.x),
       hqY: fromInt(spec.hqs.faction1.y),
       energy: initialEnergy,
+      matter: initialMatter,
+      matterHarvested: fromInt(0),
       energyHarvested: fromInt(0),
       hqHp: hqMaxHp,
       nextSpawnRotation: 0,
@@ -94,6 +116,10 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
       researchingKind: null,
       researchTicksRemaining: 0,
       autoResumeResearched: false,
+      trickleResearchTicksRemaining: 0,
+      trickleResearched: false,
+      smartWorkersResearchTicksRemaining: 0,
+      smartWorkersResearched: false,
       trainQueue: [],
       trainTicksRemaining: 0,
     },
@@ -102,10 +128,10 @@ export function createInitialState(spec: InitialMatchSpec): { state: SimState; r
   const nodes: ResourceNode[] = spec.nodes.map((n, i) => ({
     id: i + 1,
     alive: true,
-    kind: 'energy' as const,
+    kind: (n.kind ?? 'energy') as ResourceKind,
     x: fromInt(n.x),
     y: fromInt(n.y),
-    remaining: fromInt(n.energy),
+    remaining: fromInt(n.amount),
     discoveredBy: [false, false] as [boolean, boolean],
   }));
 
@@ -231,6 +257,21 @@ export function isPodTileBlockedByNode(state: SimState, tileX: number, tileY: nu
   return false;
 }
 
+// True when tile (tileX, tileY) is too close to EITHER HQ to build a work pod —
+// within POD_HQ_KEEPOUT_TILES (Chebyshev), i.e. on the HQ's 3×3 footprint or the
+// clear ring around it. Keeps structures from being glued to a base. Shared by
+// the authoritative build reject (step.ts), the AI tile pick (ai.ts), and the
+// render placement preview, same as isPodTileBlockedByNode.
+export function isPodTileBlockedByHq(state: SimState, tileX: number, tileY: number): boolean {
+  for (let f = 0; f < state.factions.length; f++) {
+    const fs = state.factions[f];
+    const dx = Math.abs(tileX - toInt(fs.hqX));
+    const dy = Math.abs(tileY - toInt(fs.hqY));
+    if (dx <= POD_HQ_KEEPOUT_TILES && dy <= POD_HQ_KEEPOUT_TILES) return true;
+  }
+  return false;
+}
+
 // Phase C.6.8/9: has `faction` explored every tile on the map? Drives the
 // Scout button's enabled state (nothing left to scout once true) and the
 // AI's decision to stop dispatching scouts. Cheap full scan of the bitmap;
@@ -277,6 +318,52 @@ export function findNearestFriendlyOperationalWorkPod(
   return best;
 }
 
+// Phase D.3: the nearest friendly OPERATIONAL resource depot for a worker at
+// (x, y). "Operational" = alive AND buildTicksRemaining === 0. Returns null if
+// none exists; callers (pickDepositTarget) fall back to the friendly HQ. Mirrors
+// findNearestFriendlyOperationalWorkPod; lowest-id tiebreak on equal distance.
+export function findNearestFriendlyOperationalDepot(
+  state: SimState,
+  faction: 0 | 1,
+  x: Fixed,
+  y: Fixed,
+): ResourceDepot | null {
+  let best: ResourceDepot | null = null;
+  let bestD: Fixed = 0;
+  for (let i = 0; i < state.structures.length; i++) {
+    const s = state.structures[i];
+    if (!s.alive) continue;
+    if (s.kind !== 'resourceDepot') continue;
+    if (s.faction !== faction) continue;
+    if (s.buildTicksRemaining > 0) continue;
+    const d = distSq(x, y, s.x, s.y);
+    if (best === null || d < bestD || (d === bestD && s.id < best.id)) {
+      best = s;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+// Phase D.3: is the 2×2 depot footprint anchored at min-corner tile (tileX,
+// tileY) blocked for placement? True if ANY of the 4 footprint tiles is out
+// of bounds, inside a node keep-out, or inside an HQ keep-out — the same
+// per-tile rules the pod obeys, applied across the whole footprint. Shared by
+// the authoritative build reject (step.ts), the AI's depot pick (ai.ts), and
+// the render placement preview, so the preview can't disagree with the sim.
+export function isDepotFootprintBlocked(state: SimState, tileX: number, tileY: number): boolean {
+  for (let dy = 0; dy < DEPOT_FOOTPRINT_TILES; dy++) {
+    for (let dx = 0; dx < DEPOT_FOOTPRINT_TILES; dx++) {
+      const tx = tileX + dx;
+      const ty = tileY + dy;
+      if (tx < 0 || ty < 0 || tx >= state.gridSize || ty >= state.gridSize) return true;
+      if (isPodTileBlockedByNode(state, tx, ty)) return true;
+      if (isPodTileBlockedByHq(state, tx, ty)) return true;
+    }
+  }
+  return false;
+}
+
 export function spawnUnit(
   state: SimState,
   kind: UnitKind,
@@ -312,6 +399,7 @@ export function spawnUnit(
     chargeTicksAccrued: 0,
     previousNodeId: 0,
     chargeSlot: 0,
+    depositTargetStructureId: 0,
     path: [],
     pathGoalTile: -1,
     idleTicks: 0,
@@ -338,6 +426,26 @@ export function spawnStructure(
         faction,
         x,
         y,
+        hp: stats.maxHp,
+        buildTicksRemaining: stats.buildTicks,
+      };
+      state.structures.push(s);
+      return s;
+    }
+    case 'resourceDepot': {
+      const stats = STRUCTURE_STATS.resourceDepot;
+      // The caller passes the MIN-corner tile (fromInt(cmd.x/y)); store the
+      // 2×2 footprint's geometric CENTRE (+0.5 each axis) so all downstream
+      // distance math measures from the centre, like the 1×1 pod measures
+      // from its tile.
+      const half = fromFloat(0.5 * (DEPOT_FOOTPRINT_TILES - 1)); // 0.5 for 2×2
+      const s: ResourceDepot = {
+        id,
+        alive: true,
+        kind: 'resourceDepot',
+        faction,
+        x: add(x, half),
+        y: add(y, half),
         hp: stats.maxHp,
         buildTicksRemaining: stats.buildTicks,
       };

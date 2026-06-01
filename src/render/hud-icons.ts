@@ -14,6 +14,7 @@
 export type HudIconName =
   | 'worker'
   | 'pod'
+  | 'depot'
   | 'research'
   | 'idle'
   | 'move'
@@ -35,6 +36,12 @@ const GLYPHS: Record<HudIconName, string> = {
     '<path d="M4 18.5 L7 9 L17 9 L20 18.5 Z"/>'
     + '<path d="M12 9 L12 5.2"/>'
     + '<circle cx="12" cy="4" r="1.4" fill="currentColor" stroke="none"/>',
+  // Depot — a wide silo block (2×2 footprint read) with a collection
+  // funnel on top + an intake chevron. Distinct from the pod's antenna.
+  depot:
+    '<path d="M3.5 20 L3.5 10 L20.5 10 L20.5 20 Z"/>'
+    + '<path d="M7 10 L9.5 5.5 L14.5 5.5 L17 10"/>'
+    + '<path d="M9 15.5 L12 12.5 L15 15.5"/>',
   // Research — a hex node with an upgrade chevron (reads as "advance").
   research:
     '<path d="M12 2.5 L20 7 L20 17 L12 21.5 L4 17 L4 7 Z"/>'

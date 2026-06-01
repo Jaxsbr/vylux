@@ -4,12 +4,13 @@
 // number the player sees on the scoreboard is exactly the number the
 // sim ranks on at the buzzer.
 //
-// Spine of the score is cumulative `energyHarvested` (the honest "how
-// much have you collected" total — see FactionState). Workers alive and
-// operational structures contribute small flat bonuses so a hoarder who
-// never built doesn't outscore a developed economy; harvest still
-// dominates by design. All-integer + deterministic (toInt floors the
-// Fixed harvest total) — no floats touch the determinism gate.
+// Spine of the score is cumulative resources harvested — `energyHarvested`
+// + `matterHarvested` (the honest "how much have you collected" total — see
+// FactionState; both are monotonic, never decrement on spend). Workers alive
+// and operational structures contribute small flat bonuses so a hoarder who
+// never built doesn't outscore a developed economy; harvest still dominates
+// by design. All-integer + deterministic (toInt floors each Fixed total) —
+// no floats touch the determinism gate.
 
 import { toInt } from './fixed';
 import type { Faction, SimState } from './types';
@@ -22,7 +23,7 @@ export const SCORE_STRUCTURE_BONUS = 30;
 
 export interface ScoreBreakdown {
   faction: Faction;
-  /** Cumulative energy ever deposited at the faction's HQ (floored). */
+  /** Cumulative resources (energy + matter) ever deposited at the HQ (floored). */
   harvested: number;
   /** Alive worker count at this instant. */
   workers: number;
@@ -41,7 +42,8 @@ export function scoreBreakdown(state: SimState, faction: Faction): ScoreBreakdow
   for (const s of state.structures) {
     if (s.alive && s.faction === faction && s.buildTicksRemaining === 0) structures++;
   }
-  const harvested = toInt(state.factions[faction].energyHarvested);
+  const fs = state.factions[faction];
+  const harvested = toInt(fs.energyHarvested) + toInt(fs.matterHarvested);
   const total =
     harvested + workers * SCORE_WORKER_BONUS + structures * SCORE_STRUCTURE_BONUS;
   return { faction, harvested, workers, structures, total };
@@ -62,8 +64,10 @@ export function decideScoreWinner(state: SimState): Faction {
   const s0 = matchScore(state, 0);
   const s1 = matchScore(state, 1);
   if (s0 !== s1) return s0 > s1 ? 0 : 1;
-  const h0 = state.factions[0].energyHarvested;
-  const h1 = state.factions[1].energyHarvested;
+  // Raw Fixed total resources (energy + matter) — catches sub-integer
+  // rounding the floored `total` above can't see.
+  const h0 = state.factions[0].energyHarvested + state.factions[0].matterHarvested;
+  const h1 = state.factions[1].energyHarvested + state.factions[1].matterHarvested;
   if (h0 !== h1) return h0 > h1 ? 0 : 1;
   const hp0 = state.factions[0].hqHp;
   const hp1 = state.factions[1].hqHp;

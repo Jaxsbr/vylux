@@ -14,6 +14,7 @@ import { buildEnergyNode as legacyBuildEnergyNode } from './legacy/energy-node';
 import { buildHpBar, type HpBar } from './legacy/hp-bar';
 import type { FactionId } from './legacy/placement';
 import { GRID_CONSTANTS, tileToWorld } from './legacy/grid';
+import { tileFloatToWorld } from './scene';
 import { buildGlowEdges } from './glow-edge';
 import { buildSelectionRing, buildChargeRing, type ChargeRing } from './entity-chrome';
 import { breathe, pulse, intensityForLuma, BUILDING_PULSE_PERIOD_S } from './entity-life';
@@ -72,7 +73,7 @@ export interface UnitVisual {
   // Phase C.4 — charge ring. The readable charge indicator that replaced the
   // tiny charge bar. Driven by SimRenderer from the worker's charge mode.
   chargeRing: ChargeRing;
-  // Phase C.1 — "needs energy" lightning cue. Floats above the worker
+  // Phase C.1 — "needs charge" lightning cue. Floats above the worker
   // for ~1 s when the renderer detects a blocked command. trigger()
   // resets the fade; tick() advances + auto-hides.
   energyCue: EnergyCue;
@@ -334,7 +335,7 @@ function buildChargeBar(): ChargeBar {
   };
 }
 
-// Phase C.1 — "needs energy" lightning cue. A small bright sprite that
+// Phase C.1 — "needs charge" lightning cue. A small bright sprite that
 // pops above the worker for ~1 s when the renderer detects a blocked
 // command on a charge-mode worker. Uses a canvas-drawn glyph rather
 // than a textured asset so we don't ship a new file. Visibility is
@@ -522,6 +523,126 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
   };
 }
 
+// Phase D.3 — resource depot mesh. A broad, low collection hub spanning a 2×2
+// footprint: a wide drum body, two stubby intake silos at the back, and a bright
+// faction-tinted intake ring on top (the bloom anchor) — a silhouette distinct
+// from both the HQ (tall tiered spire) and the work pod (small single-tile box
+// with an antenna cap). Reuses the same selection / scaffolding / build-progress
+// idiom as the pod so the structure-selection feel stays consistent.
+//
+// centerX/centerY are FLOAT tile coords of the footprint's geometric centre
+// (the sim stores the depot's x/y there), so the body sits centred on its 2×2.
+const DEPOT_DIMS = {
+  bodyWidth: 1.7,
+  bodyHeight: 0.5,
+  siloRadius: 0.26,
+  siloHeight: 0.78,
+  siloOffset: 0.5, // back-corner placement from centre
+  ringRadius: 0.5,
+  ringHeight: 0.16,
+} as const;
+
+export function buildResourceDepotMesh(
+  faction: Faction,
+  centerX: number,
+  centerY: number,
+): WorkPodVisual {
+  const fid = factionToId(faction);
+  const emissive = PRODUCTION_FACTION_EMISSIVE[fid];
+
+  const group = new THREE.Group();
+  group.name = `resource-depot-${fid}`;
+
+  // Wide low drum body — reads as "a place to dump resources into".
+  const bodyGeo = new THREE.BoxGeometry(DEPOT_DIMS.bodyWidth, DEPOT_DIMS.bodyHeight, DEPOT_DIMS.bodyWidth);
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: PRODUCTION_BODY_COLOR,
+    emissive,
+    emissiveIntensity: 0.08,
+  });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = DEPOT_DIMS.bodyHeight / 2;
+  body.name = 'resource-depot-body';
+  group.add(body);
+
+  const edges = buildGlowEdges(new THREE.EdgesGeometry(bodyGeo), emissive, 'resource-depot-trim');
+  edges.position.y = DEPOT_DIMS.bodyHeight / 2;
+  group.add(edges);
+
+  // Two intake silos at the back corners — break the boxy silhouette so the
+  // depot reads as a richer industrial structure than the pod.
+  const silos: THREE.Mesh[] = [];
+  for (const sx of [-DEPOT_DIMS.siloOffset, DEPOT_DIMS.siloOffset]) {
+    const siloGeo = new THREE.CylinderGeometry(DEPOT_DIMS.siloRadius, DEPOT_DIMS.siloRadius, DEPOT_DIMS.siloHeight, 12);
+    const siloMat = new THREE.MeshStandardMaterial({
+      color: PRODUCTION_BODY_COLOR,
+      emissive,
+      emissiveIntensity: 0.12,
+    });
+    const silo = new THREE.Mesh(siloGeo, siloMat);
+    silo.position.set(sx, DEPOT_DIMS.bodyHeight + DEPOT_DIMS.siloHeight / 2, -DEPOT_DIMS.siloOffset);
+    silo.name = 'resource-depot-silo';
+    group.add(silo);
+    silos.push(silo);
+  }
+
+  // Glowing intake ring on top centre — the depot's primary bloom anchor.
+  const ringGeo = new THREE.CylinderGeometry(DEPOT_DIMS.ringRadius, DEPOT_DIMS.ringRadius * 0.7, DEPOT_DIMS.ringHeight, 20);
+  const ringMat = new THREE.MeshStandardMaterial({ color: emissive, emissive, emissiveIntensity: 2.0 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.position.y = DEPOT_DIMS.bodyHeight + DEPOT_DIMS.ringHeight / 2;
+  ring.name = 'resource-depot-ring';
+  group.add(ring);
+
+  const hpBar = buildHpBar(fid, DEPOT_DIMS.bodyHeight + DEPOT_DIMS.siloHeight + 0.3);
+  hpBar.group.visible = false;
+  group.add(hpBar.group);
+
+  // Selection + scaffolding rings sized for the 2×2 footprint (wider than pod).
+  const selectionRing = buildStructureRing(faction, 1.0, 1.18);
+  group.add(selectionRing);
+  const scaffoldingRing = buildScaffoldingRing(faction, 1.06, 1.26);
+  group.add(scaffoldingRing);
+
+  const w = tileFloatToWorld(centerX, centerY);
+  group.position.set(w.x, GRID_CONSTANTS.tileY, w.z);
+
+  let lifeClock = Math.random() * BUILDING_PULSE_PERIOD_S;
+  const ringHex = ringMat.emissive.getHex();
+
+  return {
+    group,
+    hpBar,
+    selectionRing,
+    scaffoldingRing,
+    setBuildProgress(ratio: number): void {
+      const clamped = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
+      const yScale = 0.15 + 0.85 * clamped;
+      body.scale.y = yScale;
+      body.position.y = (DEPOT_DIMS.bodyHeight / 2) * yScale;
+      edges.scale.y = yScale;
+      edges.position.y = (DEPOT_DIMS.bodyHeight / 2) * yScale;
+      for (const silo of silos) {
+        silo.scale.y = yScale;
+        silo.position.y = DEPOT_DIMS.bodyHeight * yScale + (DEPOT_DIMS.siloHeight / 2) * yScale;
+        silo.visible = clamped > 0.25;
+      }
+      ring.position.y = DEPOT_DIMS.bodyHeight * yScale + DEPOT_DIMS.ringHeight / 2;
+      ring.visible = clamped > 0.4;
+      bodyMat.opacity = 0.45 + 0.55 * clamped;
+      bodyMat.transparent = clamped < 1;
+      ringMat.emissiveIntensity = 0.2 + 1.8 * clamped;
+      scaffoldingRing.visible = clamped < 1;
+    },
+    tickLife(dt: number, operational: boolean): void {
+      lifeClock += dt;
+      if (operational) {
+        ringMat.emissiveIntensity = intensityForLuma(ringHex, CAP_LUMA_MID + pulse(lifeClock, CAP_LUMA_AMP));
+      }
+    },
+  };
+}
+
 // Phase 3.10.9 — per-kind node visual identity. Each resource type
 // gets a distinct silhouette + emissive palette layered on top of the
 // shared legacy hex base, so a player can read "what kind of node is
@@ -536,6 +657,17 @@ export function buildWorkPodMesh(faction: Faction, tileX: number, tileY: number)
 //
 const NODE_PALETTE: Record<ResourceKind, number> = {
   energy: 0xffd166, // gold
+  matter: 0xb06bff, // neon violet (Phase D.1) — construction material
+};
+
+// Per-kind emissive boost to equalise BLOOM. The bloom pass keys off pixel
+// luminance (heavily green-weighted), so gold (lum ≈ 0.83) crosses the bloom
+// threshold easily while violet (lum ≈ 0.52, almost no green) barely glows at
+// the same emissive intensity. Boosting violet's emissive intensity lifts it
+// over the threshold so a rich matter node reads as bright as a rich energy one.
+const NODE_EMISSIVE_BOOST: Record<ResourceKind, number> = {
+  energy: 1.0,
+  matter: 1.7,
 };
 
 // Phase C.4 node life. A slow core spin (rad/s) reads as "live energy" at a
@@ -570,7 +702,10 @@ export function buildNodeMesh(
 ): NodeVisual {
   const b = legacyBuildEnergyNode(tileX, tileY);
   const tier = maxEnergy === undefined ? 1 : classifyTier(maxEnergy);
+  // `brightness` scales tier read; `emissiveScale` adds the per-kind bloom
+  // compensation so violet matter glows as hard as gold energy (see boost table).
   const brightness = NODE_TIER_BRIGHTNESS[tier];
+  const emissiveScale = brightness * NODE_EMISSIVE_BOOST[kind];
   const colour = nodeTierColour(NODE_PALETTE[kind], tier);
 
   // Tint the legacy hex-base rim per kind so the disc reads as the
@@ -581,7 +716,7 @@ export function buildNodeMesh(
     if (obj.name === 'node-rim' && obj instanceof THREE.Mesh) {
       const m = obj.material as THREE.MeshStandardMaterial;
       m.emissive.set(colour);
-      m.emissiveIntensity *= brightness;
+      m.emissiveIntensity *= emissiveScale;
     } else if (obj.name === 'node-rim-edge' && obj instanceof LineSegments2) {
       const m = obj.material as LineMaterial;
       m.color.set(colour);
@@ -617,8 +752,8 @@ export function buildNodeMesh(
       // narrow to preserve the outlined-and-shaded look (a full-bright
       // body would compete with the building emissive palette).
       const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
-      // Tier brightness scales the silhouette glow (and the bloom it feeds).
-      const intensity = (0.05 + 0.25 * ratio) * brightness;
+      // Tier brightness (+ per-kind bloom boost) scales the silhouette glow.
+      const intensity = (0.05 + 0.25 * ratio) * emissiveScale;
       silhouette.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           const m = child.material as THREE.MeshStandardMaterial;
@@ -633,7 +768,7 @@ export function buildNodeMesh(
       // Gentle emissive breathe on top of the remaining-driven base (set by
       // setRemaining, which runs first each frame). Scaled by tier so the
       // richer nodes breathe a touch harder too.
-      const add = breathe(lifeClock, NODE_BREATHE_AMP * brightness, NODE_PULSE_PERIOD_S);
+      const add = breathe(lifeClock, NODE_BREATHE_AMP * emissiveScale, NODE_PULSE_PERIOD_S);
       for (const m of silhouetteMats) m.emissiveIntensity += add;
     },
   };
@@ -679,6 +814,18 @@ function buildNodeSilhouette(kind: ResourceKind, colour: number): THREE.Group {
       // shade-filled idiom shared with HQ and work pods.
       const geo = new THREE.OctahedronGeometry(0.18, 0);
       addOutlined(geo, 0.45, new THREE.Vector3(1, 2.2, 1), 'energy-spike');
+      break;
+    }
+    case 'matter': {
+      // Violet material block — a squat cube, wider than tall, sitting low.
+      // Deliberately a DIFFERENT cross-section + proportion from energy's
+      // tall spike so the resource reads by SHAPE as well as colour — the
+      // violet/gold hues plus the silhouette carry the distinction (Phase D.1).
+      // Rotating the whole group 45° gives a crystalline diamond footprint
+      // from the top-down camera (rotates body + edge trim together).
+      const geo = new THREE.BoxGeometry(0.3, 0.22, 0.3);
+      addOutlined(geo, 0.2, null, 'matter-block');
+      group.rotation.y = Math.PI / 4;
       break;
     }
   }

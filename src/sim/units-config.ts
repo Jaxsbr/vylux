@@ -4,16 +4,45 @@
 //
 // All fields in Q16.16 fixed-point or integer ticks. No floats.
 
-import { fromFloat, fromInt, rangeSq, type Fixed } from './fixed';
-import type { FactionId, StructureKind, UnitKind } from './types';
+import { fromFloat, fromInt, rangeSq, sub, type Fixed } from './fixed';
+import type { FactionId, FactionState, StructureKind, UnitKind } from './types';
+
+// Phase D.1: a cost is a bag of optional per-resource amounts. A missing
+// field means "this resource is not required" — so an energy-only cost
+// omits `matter` entirely, a matter-only cost omits `energy`, and a
+// dual cost lists both. The helpers below are the single affordability +
+// spend path; every train / build / research site goes through them so
+// adding a third resource later is one struct field, not a callsite sweep.
+export interface ResourceCost {
+  energy?: Fixed;
+  matter?: Fixed;
+}
+
+// True when the faction can pay every resource the cost names. Reads only
+// the spendable balances (not the cumulative harvested totals).
+export function canAfford(fs: Pick<FactionState, 'energy' | 'matter'>, cost: ResourceCost): boolean {
+  if (cost.energy !== undefined && fs.energy < cost.energy) return false;
+  if (cost.matter !== undefined && fs.matter < cost.matter) return false;
+  return true;
+}
+
+// Debit every resource the cost names. Caller must have checked canAfford
+// first (train/build/research all gate on it), so this never drives a
+// balance negative.
+export function spendCost(fs: FactionState, cost: ResourceCost): void {
+  if (cost.energy !== undefined) fs.energy = sub(fs.energy, cost.energy);
+  if (cost.matter !== undefined) fs.matter = sub(fs.matter, cost.matter);
+}
 
 export interface UnitStats {
   maxHp: Fixed;
   // Chebyshev step-toward-target speed (per-tick tile delta, clamped per
   // axis). Workers are the only live unit kind; combat units return via
-  // the new tech tree starting in Phase D of docs/plan.md.
+  // the new tech tree starting in Phase E of docs/plan.md.
   speed: Fixed; // tiles per tick — 0 means stationary
-  trainCost: Fixed;
+  // Phase D.1: resource cost charged at TrainUnit enqueue. Workers run on
+  // power → energy-only.
+  trainCost: ResourceCost;
   // Line-of-sight radius (tiles, Fixed). Drives the discovery sweep +
   // the renderer's vision filter.
   visionRadius: Fixed;
@@ -36,7 +65,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   worker: {
     maxHp: fromInt(40),
     speed: SPEED_WORKER,
-    trainCost: fromInt(50),
+    trainCost: { energy: fromInt(50) },
     visionRadius: fromInt(4),
     trainTicks: WORKER_TRAIN_TICKS,
   },
@@ -55,7 +84,10 @@ export const HQ_VISION_RADIUS: Fixed = fromInt(8);
 // Phase C.1: per-structure tuning.
 export interface StructureStats {
   maxHp: Fixed;
-  buildCost: Fixed; // Energy cost charged at BuildStructureByWorker apply-time
+  // Phase D.1: resource cost charged at BuildStructureByWorker apply-time.
+  // A pod is a built structure → costs construction material (matter) AND
+  // the power to raise it (energy).
+  buildCost: ResourceCost;
   buildTicks: number; // total construction ticks (decremented only while a worker is on site)
   visionRadius: Fixed;
 }
@@ -63,11 +95,29 @@ export interface StructureStats {
 export const STRUCTURE_STATS: Record<StructureKind, StructureStats> = {
   workPod: {
     maxHp: fromInt(100),
-    buildCost: fromInt(60),
+    // D.1 first cut: 40 E + 30 M (was 60 E energy-only). Rebalanced down on
+    // energy so adding matter doesn't make the pod a strictly harder build —
+    // matter shares the burden. Placeholders; retune in playtest.
+    buildCost: { energy: fromInt(40), matter: fromInt(30) },
     buildTicks: 30, // 1.5 s at 20 Hz
     visionRadius: fromInt(5),
   },
+  // Phase D.3: resource depot — a heavier economy investment than a pod, with
+  // a distinct 2×2 footprint. Costs/build-time/HP scaled up accordingly; the
+  // slightly longer vision sells its "forward outpost" role (planting one
+  // toward a distant cluster reveals that cluster's nodes). Placeholders; retune
+  // in playtest.
+  resourceDepot: {
+    maxHp: fromInt(180),
+    buildCost: { energy: fromInt(60), matter: fromInt(50) },
+    buildTicks: 45, // 2.25 s at 20 Hz
+    visionRadius: fromInt(6),
+  },
 };
+
+// Phase D.3: the depot is a 2×2 footprint (pod = 1×1, HQ = 3×3). The placement
+// anchor is the MIN corner; the footprint covers (x,y)..(x+1,y+1).
+export const DEPOT_FOOTPRINT_TILES = 2;
 
 // Phase C.1: worker charge / supply tuning.
 
@@ -131,6 +181,36 @@ export const HQ_CHARGE_SLOT_OFFSETS: ReadonlyArray<{ dx: Fixed; dy: Fixed }> = [
 // "on site" and contribute construction progress.
 export const WORK_POD_BUILD_REACH_SQ: Fixed = rangeSq(fromFloat(1.2));
 
+// Phase D.3 — resource depot reach radii (squared), measured from the depot's
+// 2×2 footprint CENTRE. Both sit just outside the depot body and between the
+// pod (smaller) and HQ (larger) values:
+//   - DEPOT_BUILD_REACH_SQ:   a worker counts as "on site" to build here.
+//   - DEPOT_DEPOSIT_REACH_SQ: a returning worker counts as "arrived" to offload
+//     here (the long-haul stall fix — see pickDepositTarget in step.ts).
+export const DEPOT_BUILD_REACH_SQ: Fixed = rangeSq(fromFloat(1.6));
+export const DEPOT_DEPOSIT_REACH_SQ: Fixed = rangeSq(fromFloat(1.6));
+
+// Phase D.3 — resource-collection research (hosted at a depot). Passive
+// trickle: once researched, every operational depot credits DEPOT_TRICKLE_AMOUNT
+// of BOTH energy and matter into the faction pool every DEPOT_TRICKLE_INTERVAL_TICKS,
+// routed through the same deposit-credit helper as a worker offload (so it lifts
+// the harvested score spine identically). Pricier than auto-resume since passive
+// income is strong; deliberately low yield so turtling can't beat expanding.
+export const RESEARCH_TRICKLE_COST: ResourceCost = { energy: fromInt(120), matter: fromInt(40) };
+export const RESEARCH_TRICKLE_TICKS = 120; // 6 s at 20 Hz
+export const DEPOT_TRICKLE_INTERVAL_TICKS = 40; // every 2 s at 20 Hz
+export const DEPOT_TRICKLE_AMOUNT: Fixed = fromInt(1);
+
+// Phase D.4 — smart-workers research (hosted at a depot, independent track).
+// Once researched, an idle worker that was harvesting but has no node to
+// auto-resume picks the nearest DISCOVERED live node (energy or matter) and
+// heads there — the complement to auto-resume that keeps workers productive
+// after their old node is mined out. Priced between auto-resume (80 e) and the
+// trickle (120 e + 40 m): it's a strong quality-of-life pick, dual-resource
+// since it lives on the depot, but cheaper than the passive-income trickle.
+export const RESEARCH_SMART_WORKERS_COST: ResourceCost = { energy: fromInt(100), matter: fromInt(30) };
+export const RESEARCH_SMART_WORKERS_TICKS = 100; // 5 s at 20 Hz
+
 // Capacity (worker supply) — HQ baseline + per-pod bonus.
 export const HQ_SUPPLY_CAP_INITIAL = 5;
 export const WORK_POD_CAP_BONUS = 5;
@@ -141,9 +221,18 @@ export const WORK_POD_CAP_BONUS = 5;
 // footprints so a worker's final hop to a slot never crosses a pod.
 export const POD_NODE_KEEPOUT_TILES = 1;
 
-// Energy cost per task. Set to 1 universally — every task is "one unit
-// of work".
-export const ENERGY_COST_PER_TASK = 1;
+// Chebyshev keep-out from an HQ tile for work-pod placement. The HQ mesh is a
+// 3×3 footprint (Chebyshev ≤ 1); 2 leaves a clear ring so a pod can't be glued
+// to the base. Matches the map-gen `hqExclusion` so nodes + pods obey the same
+// "no structure touching the HQ" rule.
+export const POD_HQ_KEEPOUT_TILES = 2;
+
+// Charge drained per worker task. Set to 1 universally — every task is
+// "one unit of work". NOTE: this is the per-worker CHARGE battery (the
+// unit's work fuel), NOT the faction's harvested Energy pool — see the
+// ResourceKind note in types.ts. Renamed from ENERGY_COST_PER_TASK in D.1
+// to stop the two senses of "energy" colliding.
+export const CHARGE_COST_PER_TASK = 1;
 
 // Phase C.1 — research catalogue (single entry for now).
 // auto-resume: workers automatically resume their last harvest target
@@ -161,7 +250,7 @@ const SWARM_UNIT_OVERRIDES: UnitOverrides = {
   // Phase C.1 first-cut asymmetry: cheaper + faster but fragile.
   worker: {
     speed: fromFloat(0.055), // existing move-speed split
-    trainCost: fromInt(40),  // cheaper than baseline
+    trainCost: { energy: fromInt(40) }, // cheaper than baseline
     maxHp: fromInt(30),      // softer
   },
 };

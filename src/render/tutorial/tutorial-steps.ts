@@ -78,7 +78,7 @@ export const GUIDED_STEPS: readonly TutorialStep[] = [
   {
     id: 'buildPod',
     title: 'RAISE YOUR CAP — BUILD A POD',
-    body: "You're capped at 5/5 (flashing, top). With your worker selected, click BUILD WORK POD then click a tile. Pods add +5 cap AND recharge nearby workers.",
+    body: "You're capped at 5/5 (flashing, top). With your worker selected, click BUILD WORK POD then click a tile. Pods cost Energy + Matter (the amber M, top) and add +5 cap AND recharge nearby workers. The amber node nearby is Matter — harvest it like energy to build more.",
     anchor: { kind: 'screen', region: 'commandCard' },
     gesture: 'leftClick',
   },

@@ -286,7 +286,42 @@ import type { InitialMatchSpec } from './state';
 // energy field (map-gen.ts now generates source-half + 180° rotation) only
 // affects callers that go through generateEnergyField — the determinism
 // goldens build their own hand-spec, so node positions don't move there.
-export const REPLAY_VERSION = 32;
+//
+// v33 (Phase D.1 — Matter + cost split): adds `FactionState.matter` (Fixed,
+// hashed) — the second spendable resource. `ResourceKind` gains 'matter', so
+// nodes + carried loads can now hash as kind=1; the worker deposit site
+// credits `matter` (matter is build-time-only, not scored, so there's no
+// cumulative twin). Costs generalised to `{ energy?, matter? }`: the work pod
+// now costs 40 E + 30 M (was 60 E). Spec node shape renamed `energy`→`amount`
+// + optional `kind`; spec gains optional `initialMatter`. The new faction
+// field changes the hash on every tick, so every fixture regenerates; the
+// AI-vs-AI gate also now seeds a matter node + the AI harvests/spends it.
+//
+// v34 (Phase D.1 follow-up): matter now FEEDS THE SCORE — adds cumulative
+// `FactionState.matterHarvested` (Fixed, hashed), the monotonic twin of
+// energyHarvested. The score spine becomes total resources harvested
+// (energy + matter); checkWinner / scoreBreakdown / the tie-break read both.
+// New hashed field → every fixture regenerates. (Match length 5→15 min is a
+// spec value, not hashed — it doesn't move the goldens.)
+//
+// v35 (Phase D.2 — Resource clustering): map-gen now grows mirrored resource
+// CLUSTERS (organic blobs) instead of evenly-spaced singletons, and the
+// pathfinder gains a HYBRID node-blocking rule — a node blocks only if it's a
+// standalone single (no Chebyshev-1 node neighbour); clustered nodes are
+// walk-through so dense blob interiors stay reachable. This is a sim-behaviour
+// change for any field with adjacent nodes. The determinism goldens build their
+// own hand-specs with well-separated nodes (no adjacency), so their hashes are
+// unchanged — but the rule + generator change bumps the version so clustered
+// replays are versioned distinctly. No hashed state-shape change.
+//
+// v36 (Phase D.4 — Smart workers): adds two hashed FactionState fields
+// (`smartWorkersResearchTicksRemaining` + `smartWorkersResearched`) for a new
+// depot-hosted research: once researched, an idle worker that was harvesting
+// auto-picks the nearest DISCOVERED live node instead of stalling when its old
+// node is mined out. The auto-resume worker memory (`previousNodeId`) now also
+// persists across charge cycles so this can read it. New hashed fields + the AI
+// now researching auto-resume + smart-workers → every fixture regenerates.
+export const REPLAY_VERSION = 36;
 
 export interface ReplayLog {
   version: number;

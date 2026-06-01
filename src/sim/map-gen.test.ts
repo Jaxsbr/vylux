@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifyTier,
+  DEFAULT_FIELD_CONFIG,
   ENERGY_TIERS,
   generateEnergyField,
   type EnergyFieldOptions,
@@ -14,7 +15,6 @@ const BASE: EnergyFieldOptions = {
     { x: 8, y: 55 },
     { x: 55, y: 8 },
   ],
-  count: 16,
   hqVisionRadiusTiles: 8,
 };
 
@@ -22,22 +22,30 @@ function chebyshev(ax: number, ay: number, bx: number, by: number): number {
   return Math.max(Math.abs(ax - bx), Math.abs(ay - by));
 }
 
-describe('generateEnergyField', () => {
+// Expected total-node bounds: Home (2–4) + ~13 scattered clusters (sizes ~2–10
+// by centrality) + singles (5–9), each mirrored ×2, with graceful shrink only
+// ever lowering the count. Loose bounds — exact count is a per-seed draw.
+const MIN_TOTAL = 40; // pessimistic (heavy shrink / crowded seeds)
+const MAX_TOTAL = 260; // generous headroom over the typical ~120–180
+
+describe('generateEnergyField (Phase D.2 — clusters)', () => {
   it('is deterministic — same seed → identical field', () => {
-    const a = generateEnergyField(BASE);
-    const b = generateEnergyField(BASE);
-    expect(a).toEqual(b);
+    expect(generateEnergyField(BASE)).toEqual(generateEnergyField(BASE));
   });
 
   it('produces a different field for a different seed', () => {
     const a = generateEnergyField(BASE);
     const b = generateEnergyField({ ...BASE, seed: BASE.seed + 1 });
-    // Layouts should differ somewhere in the first few nodes.
     expect(a).not.toEqual(b);
   });
 
-  it('places exactly `count` nodes', () => {
-    expect(generateEnergyField(BASE)).toHaveLength(BASE.count);
+  it('places an even number of nodes within the expected range', () => {
+    for (let s = 0; s < 30; s++) {
+      const nodes = generateEnergyField({ ...BASE, seed: s });
+      expect(nodes.length % 2).toBe(0); // mirror pairs
+      expect(nodes.length).toBeGreaterThanOrEqual(MIN_TOTAL);
+      expect(nodes.length).toBeLessThanOrEqual(MAX_TOTAL);
+    }
   });
 
   it('keeps every node off the outer edge ring', () => {
@@ -52,98 +60,137 @@ describe('generateEnergyField', () => {
   it('never places a node on an HQ tile or directly adjacent to one', () => {
     for (const n of generateEnergyField(BASE)) {
       for (const hq of BASE.hqs) {
-        expect(chebyshev(n.x, n.y, hq.x, hq.y)).toBeGreaterThanOrEqual(2);
+        expect(chebyshev(n.x, n.y, hq.x, hq.y)).toBeGreaterThanOrEqual(3);
       }
     }
   });
 
-  it('respects the minimum inter-node spacing (no duplicates, no clumping)', () => {
-    const minSpacing = 3;
-    const nodes = generateEnergyField({ ...BASE, minSpacing });
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        expect(chebyshev(nodes[i].x, nodes[i].y, nodes[j].x, nodes[j].y))
-          .toBeGreaterThanOrEqual(minSpacing);
-      }
-    }
-  });
-
-  it('guarantees ≥1 node within HQ vision of EACH HQ (no AI deadlock)', () => {
+  it('forms clusters — at least one pair of adjacent nodes exists', () => {
     const nodes = generateEnergyField(BASE);
+    let adjacent = false;
+    for (let i = 0; i < nodes.length && !adjacent; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        if (chebyshev(nodes[i].x, nodes[i].y, nodes[j].x, nodes[j].y) === 1) {
+          adjacent = true;
+          break;
+        }
+      }
+    }
+    expect(adjacent).toBe(true);
+  });
+
+  it('guarantees an in-vision ENERGY node for EACH HQ (bootstrap, no AI deadlock)', () => {
     const rSq = BASE.hqVisionRadiusTiles * BASE.hqVisionRadiusTiles;
-    for (const hq of BASE.hqs) {
-      const near = nodes.some((n) => {
-        const dx = n.x - hq.x;
-        const dy = n.y - hq.y;
-        return dx * dx + dy * dy <= rSq;
-      });
-      expect(near).toBe(true);
+    for (let s = 0; s < 30; s++) {
+      const nodes = generateEnergyField({ ...BASE, seed: s });
+      for (const hq of BASE.hqs) {
+        const near = nodes.some((n) => {
+          const dx = n.x - hq.x;
+          const dy = n.y - hq.y;
+          return n.kind === 'energy' && dx * dx + dy * dy <= rSq;
+        });
+        expect(near).toBe(true);
+      }
     }
   });
 
   it('assigns only allowed tier energy values', () => {
     const allowed = new Set(ENERGY_TIERS.map((t) => t.energy));
     for (const n of generateEnergyField(BASE)) {
-      expect(allowed.has(n.energy)).toBe(true);
+      expect(allowed.has(n.amount)).toBe(true);
     }
   });
 
-  it('produces a mix of tiers across many seeds (values are randomised)', () => {
+  it('produces a mix of tiers across many seeds', () => {
     const seen = new Set<number>();
     for (let s = 0; s < 40; s++) {
-      for (const n of generateEnergyField({ ...BASE, seed: s })) seen.add(n.energy);
+      for (const n of generateEnergyField({ ...BASE, seed: s })) seen.add(n.amount);
     }
-    // Over 40 seeds × 16 nodes we expect all three tiers to appear.
     expect(seen.size).toBe(ENERGY_TIERS.length);
   });
 
   it('stays robust across a sweep of seeds (all constraints hold)', () => {
-    for (let s = 0; s < 50; s++) {
+    for (let s = 0; s < 60; s++) {
       const nodes = generateEnergyField({ ...BASE, seed: s });
-      expect(nodes).toHaveLength(BASE.count);
+      expect(nodes.length).toBeGreaterThanOrEqual(MIN_TOTAL);
       for (const n of nodes) {
         expect(n.x).toBeGreaterThanOrEqual(1);
         expect(n.x).toBeLessThanOrEqual(BASE.gridSize - 2);
         expect(n.y).toBeGreaterThanOrEqual(1);
         expect(n.y).toBeLessThanOrEqual(BASE.gridSize - 2);
         for (const hq of BASE.hqs) {
-          expect(chebyshev(n.x, n.y, hq.x, hq.y)).toBeGreaterThanOrEqual(2);
+          expect(chebyshev(n.x, n.y, hq.x, hq.y)).toBeGreaterThanOrEqual(3);
         }
       }
     }
   });
 
-  it('throws when count is below the HQ count', () => {
-    expect(() => generateEnergyField({ ...BASE, count: 1 })).toThrow();
-  });
-
-  // Mirror generation (pre-Phase-D fair-starts). Every node has its 180°
-  // twin about the board centre, both carrying the SAME tier energy, so
-  // neither side gets a free-win seed. The 180° rotation also swaps the
-  // two HQs — verified by the construction (R(8,55) = (55,8)).
+  // The cluster is the mirrored unit: every node has its 180° twin about the
+  // centre, same tier energy AND same kind, so neither side gets a free-win seed.
   it('produces a perfectly mirrored field — every node has its 180° twin', () => {
     const N = BASE.gridSize - 1;
     const nodes = generateEnergyField(BASE);
-    // Each node must have a twin at (N-x, N-y) with the same energy value.
     for (const n of nodes) {
       const twin = nodes.find(
-        (m) => m.x === N - n.x && m.y === N - n.y && m.energy === n.energy,
+        (m) => m.x === N - n.x && m.y === N - n.y && m.amount === n.amount && m.kind === n.kind,
       );
       expect(twin).toBeDefined();
     }
   });
 
-  it('throws on an odd count (pairs only)', () => {
-    expect(() => generateEnergyField({ ...BASE, count: 15 })).toThrow();
+  it('mixes energy + matter across seeds, with matter favouring distance from home', () => {
+    const hq0 = BASE.hqs[0];
+    let sawEnergy = false;
+    let sawMatter = false;
+    let nearMatter = 0;
+    let nearTotal = 0;
+    let farMatter = 0;
+    let farTotal = 0;
+    for (let s = 0; s < 60; s++) {
+      for (const n of generateEnergyField({ ...BASE, seed: s })) {
+        if (n.kind === 'energy') sawEnergy = true;
+        else sawMatter = true;
+        // "near" = within the Home band of HQ0; "far" = out toward centre.
+        const d = Math.hypot(n.x - hq0.x, n.y - hq0.y);
+        if (d <= 10) {
+          nearTotal++;
+          if (n.kind === 'matter') nearMatter++;
+        } else if (d >= 25) {
+          farTotal++;
+          if (n.kind === 'matter') farMatter++;
+        }
+      }
+    }
+    expect(sawEnergy).toBe(true);
+    expect(sawMatter).toBe(true);
+    // Home-adjacent nodes are (forced/leaning) energy; far nodes lean matter.
+    const nearMatterFrac = nearTotal > 0 ? nearMatter / nearTotal : 0;
+    const farMatterFrac = farTotal > 0 ? farMatter / farTotal : 0;
+    expect(nearMatterFrac).toBeLessThan(farMatterFrac);
   });
 
   it('throws when the two HQs are not point-symmetric about the centre', () => {
     expect(() =>
-      generateEnergyField({
-        ...BASE,
-        hqs: [{ x: 8, y: 55 }, { x: 50, y: 8 }], // sum 50+8=58 ≠ 63
-      }),
+      generateEnergyField({ ...BASE, hqs: [{ x: 8, y: 55 }, { x: 50, y: 8 }] }),
     ).toThrow();
+  });
+
+  it('throws on anything other than exactly two HQs', () => {
+    expect(() => generateEnergyField({ ...BASE, hqs: [{ x: 8, y: 55 }] })).toThrow();
+  });
+
+  it('respects a config override (suppressing matter yields an all-energy field)', () => {
+    const allEnergy = {
+      ...DEFAULT_FIELD_CONFIG,
+      matterBase: 0,
+      matterCenter: 0,
+      offKindFlipPct: 0,
+      singlesMin: 0,
+      singlesMax: 0,
+    };
+    for (const n of generateEnergyField({ ...BASE, config: allEnergy })) {
+      expect(n.kind).toBe('energy');
+    }
   });
 });
 
@@ -155,7 +202,6 @@ describe('classifyTier', () => {
   });
 
   it('snaps an off-value to the nearest tier', () => {
-    // 130 is closest to low (120); 1000 closest to high (360).
     expect(classifyTier(130)).toBe(0);
     expect(classifyTier(1000)).toBe(ENERGY_TIERS.length - 1);
   });

@@ -11,13 +11,19 @@
 import type { Faction, UnitKind } from '../sim/types';
 import type { Sim } from '../sim/sim';
 import { toFloat, type Fixed } from '../sim/fixed';
-import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, STRUCTURE_STATS, unitStatsFor } from '../sim/units-config';
+import { MAX_TRAIN_QUEUE, RESEARCH_AUTO_RESUME_COST, RESEARCH_AUTO_RESUME_TICKS, RESEARCH_SMART_WORKERS_COST, RESEARCH_TRICKLE_COST, STRUCTURE_STATS, canAfford, unitStatsFor, type ResourceCost } from '../sim/units-config';
 import { findStructure, findUnit, isFullyExplored } from '../sim/state';
 import { isInChargeMode } from '../sim/step';
-import { themeForFaction } from './factions/theme';
+import { themeForFaction, RESOURCE_COLOR } from './factions/theme';
 import { hudIconSvg, type HudIconName } from './hud-icons';
 
 const displayCost = (f: Fixed): number => Math.round(toFloat(f));
+// Phase D.1: pull a single resource amount out of a cost bag for the badge
+// (undefined when that resource isn't part of the cost → no badge drawn).
+const costAmount = (cost: ResourceCost, key: 'energy' | 'matter'): number | undefined => {
+  const f = cost[key];
+  return f === undefined ? undefined : displayCost(f);
+};
 
 // Phase C.2: SC2-style command card — a fixed 3-wide grid of icon tiles so
 // the bar never resizes to fit its text and actions read as buttons, not
@@ -45,10 +51,18 @@ export interface ActionBarDelegate {
   // commits a BuildStructureByWorker command paid for by the first
   // selected actionable worker.
   onBuildWorkPodSelected(): void;
+  // Phase D.3: enter placement mode for a resource depot (2×2 footprint).
+  onBuildResourceDepotSelected(): void;
   // Phase C.1 research: kick off auto-resume research at the currently
   // selected work pod. The input controller turns the selection +
   // delegate call into a StartResearchAtPod command for the sim.
   onResearchAutoResumeSelected(): void;
+  // Phase D.3 research: kick off resource-trickle research at the currently
+  // selected resource depot.
+  onResearchResourceTrickleSelected(): void;
+  // Phase D.4 research: kick off smart-workers research at the currently
+  // selected resource depot (idle workers auto-pick a fresh discovered node).
+  onResearchSmartWorkersSelected(): void;
   // Phase C.6.9: send the selected worker(s) scouting — reveal fog toward
   // the nearest frontier. Auto-targets in the sim; no placement step.
   onScoutSelected(): void;
@@ -60,6 +74,9 @@ interface ButtonSpec {
   icon: HudIconName;
   hotkey?: string;
   costEnergy?: number;
+  // Phase D.1: matter cost badge (violet), shown beneath the energy badge
+  // when the action also costs matter (e.g. the work pod).
+  costMatter?: number;
   enabled: boolean;
   disabledReason?: string;
   onClick: () => void;
@@ -196,7 +213,7 @@ export class ActionBar {
       const factionId = fs.factionId;
       const stats = unitStatsFor(factionId, 'worker');
       const queued = fs.trainQueue.length;
-      const energyOk = fs.energy >= stats.trainCost;
+      const energyOk = canAfford(fs, stats.trainCost);
       // Phase C.2: the cap counts queued units too (matches the sim
       // reservation gate), and the queue itself is bounded.
       const capOk = (fs.supplyUsed + queued) < fs.supplyCap;
@@ -217,7 +234,8 @@ export class ActionBar {
           label: 'TRAIN WORKER',
           icon: 'worker',
           hotkey: 'W',
-          costEnergy: displayCost(stats.trainCost),
+          costEnergy: costAmount(stats.trainCost, 'energy'),
+          costMatter: costAmount(stats.trainCost, 'matter'),
           enabled,
           disabledReason: reason,
           onClick: () => this.delegate.onTrainKindSelected('worker'),
@@ -276,6 +294,79 @@ export class ActionBar {
           : `WORK  POD  ·  +5  CAP  ·  CHARGE  BAY`;
         return { hint, specs, queue: null };
       }
+      // Phase D.3: resource depot selected → resource-trickle research /
+      // status. Independent of the pod's autoResume slot (no "another research
+      // in progress" gate — different building, resource-gated only).
+      if (s && s.faction === this.faction && s.kind === 'resourceDepot') {
+        const op = s.buildTicksRemaining === 0;
+        if (!op) {
+          return { hint: 'RESOURCE  DEPOT  ·  BUILDING', specs: [], queue: null };
+        }
+        const specs: ButtonSpec[] = [];
+        // Smart-workers research tile (independent track — shown alongside the
+        // trickle; either / both can be in progress at once).
+        if (fs.smartWorkersResearched) {
+          // Researched — info only (surfaced in the hint).
+        } else if (fs.smartWorkersResearchTicksRemaining > 0) {
+          const secs = Math.ceil(fs.smartWorkersResearchTicksRemaining / 20);
+          specs.push({
+            id: 'research-smart-workers',
+            label: `RESEARCHING ${secs}s`,
+            icon: 'research',
+            enabled: false,
+            disabledReason: 'in progress',
+            onClick: () => { /* no-op while mid-research */ },
+          });
+        } else {
+          const costOk = canAfford(fs, RESEARCH_SMART_WORKERS_COST);
+          specs.push({
+            id: 'research-smart-workers',
+            label: 'SMART WORKERS',
+            icon: 'research',
+            hotkey: 'S',
+            costEnergy: costAmount(RESEARCH_SMART_WORKERS_COST, 'energy'),
+            costMatter: costAmount(RESEARCH_SMART_WORKERS_COST, 'matter'),
+            enabled: costOk,
+            disabledReason: costOk ? undefined : 'no resources',
+            onClick: () => this.delegate.onResearchSmartWorkersSelected(),
+          });
+        }
+        if (fs.trickleResearched) {
+          // Researched — info only (surfaced in the hint).
+        } else if (fs.trickleResearchTicksRemaining > 0) {
+          const secs = Math.ceil(fs.trickleResearchTicksRemaining / 20);
+          specs.push({
+            id: 'research-trickle',
+            label: `RESEARCHING ${secs}s`,
+            icon: 'research',
+            enabled: false,
+            disabledReason: 'in progress',
+            onClick: () => { /* no-op while mid-research */ },
+          });
+        } else {
+          const costOk = canAfford(fs, RESEARCH_TRICKLE_COST);
+          specs.push({
+            id: 'research-trickle',
+            label: 'RESOURCE TRICKLE',
+            icon: 'research',
+            hotkey: 'T',
+            costEnergy: costAmount(RESEARCH_TRICKLE_COST, 'energy'),
+            costMatter: costAmount(RESEARCH_TRICKLE_COST, 'matter'),
+            enabled: costOk,
+            disabledReason: costOk ? undefined : 'no resources',
+            onClick: () => this.delegate.onResearchResourceTrickleSelected(),
+          });
+        }
+        // Hint reflects whichever depot research has landed (both, one, or none).
+        const hint = fs.trickleResearched && fs.smartWorkersResearched
+          ? 'RESOURCE  DEPOT  ·  TRICKLE  +  SMART  WORKERS'
+          : fs.trickleResearched
+            ? 'RESOURCE  DEPOT  ·  TRICKLE  ACTIVE'
+            : fs.smartWorkersResearched
+              ? 'RESOURCE  DEPOT  ·  SMART  WORKERS  ACTIVE'
+              : 'RESOURCE  DEPOT  ·  OFFLOAD  POINT';
+        return { hint, specs, queue: null };
+      }
     }
     // Reference the duration constant so the import isn't dead — surfaces
     // when (later) the research bar tooltip wants to read it.
@@ -294,21 +385,49 @@ export class ActionBar {
     if (workerSelected) {
       const specs: ButtonSpec[] = [];
 
-      // Build work pod.
+      // Build work pod (Phase D.1: costs energy + matter).
       const podStats = STRUCTURE_STATS.workPod;
-      const podEnergyOk = fs.energy >= podStats.buildCost;
+      const podCostOk = canAfford(fs, podStats.buildCost);
+      // Distinguish which resource is short so the tooltip is actionable.
+      const podEnergyShort = podStats.buildCost.energy !== undefined && fs.energy < podStats.buildCost.energy;
+      const podMatterShort = podStats.buildCost.matter !== undefined && fs.matter < podStats.buildCost.matter;
       let podReason: string | undefined;
       if (!workerActionable) podReason = 'worker needs charge';
-      else if (!podEnergyOk) podReason = 'no energy';
+      else if (podEnergyShort && podMatterShort) podReason = 'no energy or matter';
+      else if (podMatterShort) podReason = 'no matter';
+      else if (podEnergyShort) podReason = 'no energy';
       specs.push({
         id: 'build-work-pod',
         label: 'BUILD WORK POD',
         icon: 'pod',
         hotkey: 'B',
-        costEnergy: displayCost(podStats.buildCost),
-        enabled: podEnergyOk && workerActionable,
+        costEnergy: costAmount(podStats.buildCost, 'energy'),
+        costMatter: costAmount(podStats.buildCost, 'matter'),
+        enabled: podCostOk && workerActionable,
         disabledReason: podReason,
         onClick: () => this.delegate.onBuildWorkPodSelected(),
+      });
+
+      // Phase D.3: build resource depot (2×2 offload point + trickle research host).
+      const depotStats = STRUCTURE_STATS.resourceDepot;
+      const depotCostOk = canAfford(fs, depotStats.buildCost);
+      const depotEnergyShort = depotStats.buildCost.energy !== undefined && fs.energy < depotStats.buildCost.energy;
+      const depotMatterShort = depotStats.buildCost.matter !== undefined && fs.matter < depotStats.buildCost.matter;
+      let depotReason: string | undefined;
+      if (!workerActionable) depotReason = 'worker needs charge';
+      else if (depotEnergyShort && depotMatterShort) depotReason = 'no energy or matter';
+      else if (depotMatterShort) depotReason = 'no matter';
+      else if (depotEnergyShort) depotReason = 'no energy';
+      specs.push({
+        id: 'build-resource-depot',
+        label: 'BUILD DEPOT',
+        icon: 'depot',
+        hotkey: 'D',
+        costEnergy: costAmount(depotStats.buildCost, 'energy'),
+        costMatter: costAmount(depotStats.buildCost, 'matter'),
+        enabled: depotCostOk && workerActionable,
+        disabledReason: depotReason,
+        onClick: () => this.delegate.onBuildResourceDepotSelected(),
       });
 
       // Phase C.6.9: scout — reveal fog toward the nearest frontier. Costs
@@ -420,6 +539,14 @@ export class ActionBar {
       cost.style.cssText = 'position:absolute;top:2px;right:3px;font-size:8px;font-weight:700;color:#ffd166;';
       cost.textContent = `${spec.costEnergy}`;
       btn.appendChild(cost);
+    }
+    // Phase D.1: matter cost badge (matter colour), stacked just under the
+    // energy badge so a dual-cost action (the work pod) shows both at a glance.
+    if (spec.costMatter !== undefined) {
+      const m = document.createElement('div');
+      m.style.cssText = `position:absolute;top:12px;right:3px;font-size:8px;font-weight:700;color:${RESOURCE_COLOR.matter};`;
+      m.textContent = `${spec.costMatter}`;
+      btn.appendChild(m);
     }
     if (!spec.enabled && spec.disabledReason) btn.title = spec.disabledReason;
     btn.addEventListener('click', () => spec.onClick());

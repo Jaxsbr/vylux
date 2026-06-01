@@ -25,9 +25,11 @@
 import * as THREE from 'three';
 import { CommandKind, type Command } from '../sim/commands';
 import type { Sim } from '../sim/sim';
-import { findNode, findStructure, findUnit, isPodTileBlockedByNode } from '../sim/state';
+import { findNode, findStructure, findUnit, isDepotFootprintBlocked, isPodTileBlockedByHq, isPodTileBlockedByNode } from '../sim/state';
+import { DEPOT_FOOTPRINT_TILES } from '../sim/units-config';
+import { toggleDebugReveal } from './debug-reveal';
 import { isInChargeMode } from '../sim/step';
-import { ENERGY_COST_PER_TASK } from '../sim/units-config';
+import { CHARGE_COST_PER_TASK } from '../sim/units-config';
 import type { Faction, UnitKind } from '../sim/types';
 import { GRID_CONSTANTS } from '../grid';
 import { tileFloatToWorld } from './scene';
@@ -67,7 +69,9 @@ export interface InputFeedbackHooks {
   // the hovered tile + whether a pod may be built there (false = too close to
   // a node). Drives the green/red placement preview. onPlacementHoverEnd
   // fires when placement mode exits (commit or cancel) to hide the preview.
-  onPlacementHover?(tileX: number, tileY: number, valid: boolean): void;
+  // Phase D.3: sizeTiles is the footprint extent (1 = pod, 2 = depot's 2×2) so
+  // the preview can scale + centre the marker over all occupied tiles.
+  onPlacementHover?(tileX: number, tileY: number, valid: boolean, sizeTiles?: number): void;
   onPlacementHoverEnd?(): void;
 }
 
@@ -124,7 +128,7 @@ export class InputController {
   // supply structures (Pylons). Phase 3.10.6: also captures the worker
   // IDs that will build it — snapshotted at enterPlace*Mode time so a
   // mid-placement selection change doesn't strand the build.
-  private pendingPlacement: 'production' | 'upgrade' | 'supply' | 'workPod' | null = null;
+  private pendingPlacement: 'production' | 'upgrade' | 'supply' | 'workPod' | 'resourceDepot' | null = null;
   private readonly queue: Command[] = [];
   private readonly raycaster = (() => {
     const r = new THREE.Raycaster();
@@ -216,6 +220,15 @@ export class InputController {
     this.applyCursor('crosshair');
   }
 
+  // Phase D.3: enter placement mode for a resource depot (2×2 footprint). The
+  // next left-click issues a BuildStructureByWorker('resourceDepot') at the
+  // clicked tile (the footprint's min corner), paid for by the first selected
+  // worker. Mirrors the work-pod flow.
+  enterPlaceResourceDepotMode(): void {
+    this.pendingPlacement = 'resourceDepot';
+    this.applyCursor('crosshair');
+  }
+
   // Phase C.1 research: emit a StartResearchAtPod command targeting the
   // currently-selected friendly work pod. Silent no-op if no pod is
   // selected (UI button should be hidden in that case).
@@ -226,6 +239,32 @@ export class InputController {
       kind: CommandKind.StartResearchAtPod,
       structureId: id,
       researchKind: 'autoResume',
+    });
+  }
+
+  // Phase D.3 research: kick off resource-trickle research at the currently
+  // selected friendly depot. Reuses the StartResearchAtPod command (routed by
+  // researchKind on the sim side). Silent no-op if no structure is selected.
+  researchResourceTrickle(): void {
+    const id = this.selectedStructureId;
+    if (id === null) return;
+    this.queue.push({
+      kind: CommandKind.StartResearchAtPod,
+      structureId: id,
+      researchKind: 'resourceTrickle',
+    });
+  }
+
+  // Phase D.4 research: kick off smart-workers research at the currently
+  // selected friendly depot. Reuses the StartResearchAtPod command (routed by
+  // researchKind on the sim side). Silent no-op if no structure is selected.
+  researchSmartWorkers(): void {
+    const id = this.selectedStructureId;
+    if (id === null) return;
+    this.queue.push({
+      kind: CommandKind.StartResearchAtPod,
+      structureId: id,
+      researchKind: 'smartWorkers',
     });
   }
 
@@ -244,7 +283,7 @@ export class InputController {
       if (!u || u.kind !== 'worker') continue;
       if (u.faction !== this.opts.playerFaction) continue;
       if (isInChargeMode(u)) continue;
-      if (u.charge < ENERGY_COST_PER_TASK) continue;
+      if (u.charge < CHARGE_COST_PER_TASK) continue;
       if (best === null || u.id < best) best = u.id;
     }
     return best;
@@ -271,7 +310,7 @@ export class InputController {
       if (!u) continue;
       if (u.faction !== this.opts.playerFaction) continue;
       if (u.kind !== 'worker') continue;
-      if (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK) {
+      if (isInChargeMode(u) || u.charge < CHARGE_COST_PER_TASK) {
         this.opts.feedback?.onEnergyBlocked?.(u.id);
         continue;
       }
@@ -318,7 +357,10 @@ export class InputController {
           // would reject it anyway). Stay in placement mode + keep the red
           // preview so the player can pick a valid tile; right-click / Esc
           // to cancel.
-          if (isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y)) {
+          if (
+            isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y) ||
+            isPodTileBlockedByHq(this.opts.sim.state, tile.x, tile.y)
+          ) {
             return;
           }
           const builder = this.firstActionableWorker();
@@ -327,6 +369,27 @@ export class InputController {
               kind: CommandKind.BuildStructureByWorker,
               workerId: builder,
               structureKind: 'workPod',
+              x: tile.x,
+              y: tile.y,
+            });
+            this.opts.feedback?.onPlacement?.(tile.x, tile.y);
+          }
+        }
+      } else if (this.pendingPlacement === 'resourceDepot') {
+        // Phase D.3: 2×2 footprint placement. Reject if any footprint tile is
+        // blocked (sim would reject anyway) — stay in placement mode + keep the
+        // red preview so the player can pick a valid spot; Esc / right-click cancels.
+        const tile = this.pickGroundTile(e);
+        if (tile !== null) {
+          if (isDepotFootprintBlocked(this.opts.sim.state, tile.x, tile.y)) {
+            return;
+          }
+          const builder = this.firstActionableWorker();
+          if (builder !== null) {
+            this.queue.push({
+              kind: CommandKind.BuildStructureByWorker,
+              workerId: builder,
+              structureKind: 'resourceDepot',
               x: tile.x,
               y: tile.y,
             });
@@ -360,9 +423,11 @@ export class InputController {
       const podHitFromDown = this.pickOwnedStructure(e);
       if (podHitFromDown !== null) {
         const s = findStructure(this.opts.sim.state, podHitFromDown);
-        if (s !== null && s.kind === 'workPod' && s.buildTicksRemaining > 0) {
+        // Phase D.3: any worker-built structure (pod or depot) under construction
+        // can be finished by clicking it with workers selected.
+        if (s !== null && s.buildTicksRemaining > 0) {
           this.queueAssignWorkersToBuild(s.id);
-          return; // consumed — don't fall through to selecting the pod
+          return; // consumed — don't fall through to selecting the structure
         }
       }
       const nodeHitFromDown = this.pickLiveNode(e);
@@ -450,11 +515,22 @@ export class InputController {
       if (this.pendingPlacement === 'workPod') {
         const tile = this.pickGroundTile(e);
         if (tile !== null) {
-          const valid = !isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y);
+          const valid =
+            !isPodTileBlockedByNode(this.opts.sim.state, tile.x, tile.y) &&
+            !isPodTileBlockedByHq(this.opts.sim.state, tile.x, tile.y);
           this.opts.feedback?.onPlacementHover?.(tile.x, tile.y, valid);
         } else {
           // Cursor left the playable grid (off-grid / over HUD) — hide the
           // preview instead of leaving a stale marker frozen on-grid.
+          this.opts.feedback?.onPlacementHoverEnd?.();
+        }
+      } else if (this.pendingPlacement === 'resourceDepot') {
+        // Phase D.3: 2×2 footprint preview — validity covers the whole footprint.
+        const tile = this.pickGroundTile(e);
+        if (tile !== null) {
+          const valid = !isDepotFootprintBlocked(this.opts.sim.state, tile.x, tile.y);
+          this.opts.feedback?.onPlacementHover?.(tile.x, tile.y, valid, DEPOT_FOOTPRINT_TILES);
+        } else {
           this.opts.feedback?.onPlacementHoverEnd?.();
         }
       }
@@ -572,7 +648,7 @@ export class InputController {
     for (const id of this.selectedUnitIds) {
       const u = findUnit(state, id);
       if (!u) continue;
-      if (u.kind === 'worker' && (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK)) {
+      if (u.kind === 'worker' && (isInChargeMode(u) || u.charge < CHARGE_COST_PER_TASK)) {
         this.opts.feedback?.onEnergyBlocked?.(id);
         continue;
       }
@@ -604,6 +680,14 @@ export class InputController {
     if (e.key === 'e' || e.key === 'E') {
       this.scoutSelectedWorkers();
     }
+    // Debug: backtick (`) toggles a full-map reveal (fog + enemy entities +
+    // all resource nodes). Render-only — never touches sim state, so it's
+    // safe to hit mid-match without desyncing. Handy for inspecting the field.
+    if (e.key === '`') {
+      const on = toggleDebugReveal();
+      // eslint-disable-next-line no-console
+      console.log(`[debug] full-map reveal ${on ? 'ON' : 'OFF'}`);
+    }
   }
 
   // Issue an AssignWorkerToNode for every selected unit that's a worker
@@ -619,7 +703,7 @@ export class InputController {
       if (u.kind !== 'worker') continue;
       // Phase C.1: fire the cue + skip the command for charge-mode /
       // 0-charge workers so the player sees why nothing happened.
-      if (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK) {
+      if (isInChargeMode(u) || u.charge < CHARGE_COST_PER_TASK) {
         this.opts.feedback?.onEnergyBlocked?.(u.id);
         continue;
       }
@@ -634,21 +718,32 @@ export class InputController {
   }
 
   // Phase D-prep: assign every selected friendly worker to FINISH an existing
-  // partially-built work pod (left-click order — see handlePointerDown). The
-  // build cost was already paid at placement, so this only costs each worker
-  // 1 charge; charge-mode / 0-charge workers flash the lightning cue + skip.
-  // Returns whether any command was queued.
+  // partially-built structure — a work pod OR a resource depot (left-click
+  // order — see handlePointerDown). The build cost was already paid at
+  // placement, so this only costs each worker 1 charge; charge-mode / 0-charge
+  // workers flash the lightning cue + skip. Returns whether any command was
+  // queued.
+  //
+  // Phase D.4 fix: this previously rejected everything but a work pod, so
+  // redirecting a depot's builder mid-construction left the depot stuck — the
+  // click to re-task a worker onto it was swallowed (handlePointerDown consumes
+  // the click for any in-progress structure) but no AssignWorkerToBuild was
+  // queued. The sim's AssignWorkerToBuild has always accepted depots; this gate
+  // just needs to agree. Friendly + faction is enforced per-worker below and
+  // re-checked authoritatively in the sim.
   private queueAssignWorkersToBuild(structureId: number): boolean {
     const state = this.opts.sim.state;
     const s = findStructure(state, structureId);
-    if (s === null || s.kind !== 'workPod' || s.buildTicksRemaining <= 0) return false;
+    if (s === null || s.buildTicksRemaining <= 0) return false;
+    if (s.kind !== 'workPod' && s.kind !== 'resourceDepot') return false;
+    if (s.faction !== this.opts.playerFaction) return false;
     let queued = false;
     for (const id of this.selectedUnitIds) {
       const u = findUnit(state, id);
       if (!u) continue;
       if (u.faction !== this.opts.playerFaction) continue;
       if (u.kind !== 'worker') continue;
-      if (isInChargeMode(u) || u.charge < ENERGY_COST_PER_TASK) {
+      if (isInChargeMode(u) || u.charge < CHARGE_COST_PER_TASK) {
         this.opts.feedback?.onEnergyBlocked?.(u.id);
         continue;
       }

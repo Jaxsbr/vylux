@@ -123,7 +123,7 @@ describe('Sim — scored match (timed end + field exhaustion)', () => {
     // running the full harvest pipeline). The higher-harvest faction wins.
     const sim = new Sim({
       ...BASIC_SPEC,
-      nodes: [{ x: 10, y: 10, energy: 100 }],
+      nodes: [{ x: 10, y: 10, amount: 100 }],
       matchLengthTicks: 1000, // huge — timer should NOT fire
     });
     sim.state.nodes[0].alive = false;

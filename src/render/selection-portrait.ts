@@ -219,36 +219,38 @@ export class SelectionPortrait {
         status: '', statusIcon: null, hp: null, charge: null,
       };
     }
-    // Structure selection — work pods are the only live structure today.
+    // Structure selection — work pod or resource depot.
     if (selectedStructureId !== null) {
       const s = findStructure(sim.state, selectedStructureId);
       if (s) {
-        const total = STRUCTURE_STATS.workPod.buildTicks;
+        const total = STRUCTURE_STATS[s.kind].buildTicks;
         const building = s.buildTicksRemaining > 0;
         const status = building
           ? `BUILDING ${Math.max(0, Math.min(total, total - s.buildTicksRemaining))}/${total}`
           : 'OPERATIONAL';
+        const isDepot = s.kind === 'resourceDepot';
         return {
-          name: 'WORK POD',
-          entity: { kind: 'workPod', faction: s.faction },
+          name: isDepot ? 'RESOURCE DEPOT' : 'WORK POD',
+          entity: { kind: s.kind, faction: s.faction },
           faction: s.faction,
           status,
           statusIcon: building ? 'build' : null,
-          hp: { cur: Math.round(toFloat(s.hp)), max: Math.round(toFloat(STRUCTURE_STATS.workPod.maxHp)) },
+          hp: { cur: Math.round(toFloat(s.hp)), max: Math.round(toFloat(STRUCTURE_STATS[s.kind].maxHp)) },
           charge: null,
         };
       }
     }
-    // Node selection — neutral palette; status carries remaining energy.
+    // Node selection — neutral palette; status carries remaining reserve.
     if (selectedNodeId !== null) {
       const n = findNode(sim.state, selectedNodeId);
       if (n) {
         const remaining = Math.max(0, Math.round(toFloat(n.remaining)));
+        const isMatter = n.kind === 'matter';
         return {
-          name: 'ENERGY NODE',
-          entity: { kind: 'energyNode', faction: null },
+          name: isMatter ? 'MATTER NODE' : 'ENERGY NODE',
+          entity: { kind: isMatter ? 'matterNode' : 'energyNode', faction: null },
           faction: null,
-          status: `${remaining} ENERGY`,
+          status: `${remaining} ${isMatter ? 'MATTER' : 'ENERGY'}`,
           statusIcon: null, hp: null, charge: null,
         };
       }
@@ -335,8 +337,8 @@ function workerActionText(sim: Sim, w: Worker): string {
     }
     case 'building': {
       const s = findStructure(sim.state, w.targetStructureId);
-      if (s === null || s.kind !== 'workPod') return 'BUILDING';
-      const total = STRUCTURE_STATS.workPod.buildTicks;
+      if (s === null) return 'BUILDING';
+      const total = STRUCTURE_STATS[s.kind].buildTicks;
       const done = Math.max(0, Math.min(total, total - s.buildTicksRemaining));
       return `BUILDING ${done}/${total}`;
     }

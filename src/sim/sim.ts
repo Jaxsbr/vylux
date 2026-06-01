@@ -58,6 +58,11 @@ export class Sim {
       h.writeI32(fs.hqX);
       h.writeI32(fs.hqY);
       h.writeI32(fs.energy);
+      // Phase D.1: spendable Matter balance + its cumulative harvested twin
+      // (both feed the score). Hashed so any divergence in matter income/spend
+      // surfaces at the tick it happens.
+      h.writeI32(fs.matter);
+      h.writeI32(fs.matterHarvested);
       // Cumulative deposited energy (the match-score spine). Hashed so any
       // divergence in collected total surfaces at the tick it happens.
       h.writeI32(fs.energyHarvested);
@@ -71,6 +76,12 @@ export class Sim {
       h.writeU32(fs.researchingKind === null ? 0 : 1);
       h.writeU32(fs.researchTicksRemaining);
       h.writeU32(fs.autoResumeResearched ? 1 : 0);
+      // Phase D.3: resource-trickle research (independent parallel track).
+      h.writeU32(fs.trickleResearchTicksRemaining);
+      h.writeU32(fs.trickleResearched ? 1 : 0);
+      // Phase D.4: smart-workers research (independent parallel track).
+      h.writeU32(fs.smartWorkersResearchTicksRemaining);
+      h.writeU32(fs.smartWorkersResearched ? 1 : 0);
       // Phase C.2: worker production queue. Head timer + length + each
       // item's kind and reserved spawn tile (Fixed, hashed as i32).
       h.writeU32(fs.trainTicksRemaining);
@@ -162,6 +173,8 @@ function hashUnit(h: Hasher, u: Unit): void {
       // Phase C.1 charge-slot allocation: slot index at the chosen
       // charge spot. Cleared (= 0) when not in charge mode.
       h.writeU32(u.chargeSlot);
+      // Phase D.3: locked offload target (0 = HQ, else depot id).
+      h.writeU32(u.depositTargetStructureId);
       // Phase C.6.6: cached A* waypoint path + the tile it was planned for.
       // Both feed future steps, so both are hashed (length-prefixed array
       // makes different-length paths hash distinctly).
@@ -185,18 +198,23 @@ function hashStructure(h: Hasher, s: Structure): void {
     case 'workPod':
       h.writeU32(s.buildTicksRemaining);
       return;
+    case 'resourceDepot':
+      h.writeU32(s.buildTicksRemaining);
+      return;
   }
 }
 
 function structureKindToInt(kind: StructureKind): number {
   switch (kind) {
     case 'workPod': return 0;
+    case 'resourceDepot': return 1;
   }
 }
 
 function resourceKindToInt(kind: ResourceKind): number {
   switch (kind) {
     case 'energy': return 0;
+    case 'matter': return 1;
   }
 }
 
